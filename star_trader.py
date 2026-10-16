@@ -14,7 +14,7 @@ import time
 import threading
 import urllib.request
 
-VERSION = '0.2.1'
+VERSION = '0.2.2'
 CRUISE_SECONDS_PER_LY = 45
 W, H = 1100, 760
 GOODS = ['Food', 'Textiles', 'Ore', 'Machinery', 'Medicine', 'Computers', 'Narcotics', 'Unlicensed Arms']
@@ -244,6 +244,8 @@ class Display:
         self.copy = bind(self.sdl, 'SDL_RenderCopy', i, [ptr, ptr, ptr, ptr])
         self.free = bind(self.sdl, 'SDL_FreeSurface', None, [ptr])
         self.destroy = bind(self.sdl, 'SDL_DestroyTexture', None, [ptr])
+        self.fill_rect = bind(self.sdl,'SDL_RenderFillRect',i,[ptr,ptr])
+        self.logical_point = bind(self.sdl,'SDL_RenderWindowToLogical',None,[ptr,i,i,C.POINTER(C.c_float),C.POINTER(C.c_float)])
         self.query = bind(self.sdl, 'SDL_QueryTexture', i, [ptr, ptr, ptr, C.POINTER(i), C.POINTER(i)])
         bind(self.ttf, 'TTF_Init', i, [])()
         self.openfont = bind(self.ttf, 'TTF_OpenFont', ptr, [C.c_char_p, i])
@@ -273,6 +275,11 @@ class Display:
     def line(self, x1, y1, x2, y2, color=(68, 227, 182)):
         self.color(self.r, *color, 255)
         self.drawline(self.r, int(x1), int(y1), int(x2), int(y2))
+
+    def fill(self,x,y,w,h,color):
+        self.color(self.r,*color,255)
+        rect = (C.c_int*4)(int(x),int(y),int(w),int(h))
+        self.fill_rect(self.r,rect)
 
     def rect(self, x, y, w, h, color=(68, 227, 182)):
         for a,b,c,d in [(x,y,x+w,y), (x+w,y,x+w,y+h), (x+w,y+h,x,y+h), (x,y+h,x,y)]:
@@ -306,6 +313,12 @@ class Display:
                 yield 'quit',0
             elif typ == 512 and raw[12] == 13:
                 yield 'blur', 0
+            elif typ == 1025 and raw[16] == 1:
+                x = int.from_bytes(raw[20:24],sys.byteorder,signed=True)
+                y = int.from_bytes(raw[24:28],sys.byteorder,signed=True)
+                lx,ly = C.c_float(),C.c_float()
+                self.logical_point(self.r,x,y,C.byref(lx),C.byref(ly))
+                yield 'click',(lx.value,ly.value)
             elif typ in (768,769):
                 key = int.from_bytes(raw[20:24], sys.byteorder, signed=True)
                 if typ == 769 or raw[13] == 0:
@@ -378,6 +391,7 @@ class Game:
         self.roll = self.station_angle = 0.
         self.autodock = False
         self.enemy = None
+        self.ship_target = None
         self.asteroids = []
         self.fragments = []
         self.sun = [1200., -500., 3500.]
@@ -394,6 +408,7 @@ class Game:
         self.enemy_kind = 'pirate'
         self.customs_checked = False
         self.cruise = None
+        self.jump_charge = self.jump_warp = self.arrival = None
         self.npc_mine_timer = 25.
         self.spawn = 12
         self.cooldown = self.flash = self.laser_flash = 0.
@@ -421,13 +436,15 @@ class Game:
         self.enemy_kind = 'pirate'
         self.customs_checked = False
         self.cruise = None
+        self.jump_charge = self.jump_warp = self.arrival = None
         self.speed = 30
         self.enemy = None
+        self.ship_target = None
         self.npc_mine_timer = 25.
         self.spawn = 18
         self.roll = self.station_angle = 0.
         self.autodock = False
-        self.nav = 'station'
+        self.nav = 'course' if self.p.waypoint and galactic_distance(self.p.position,self.p.waypoint['position']) > .001 else 'station'
         self.heat = 0
         self.asteroids = [[150.,-70.,1000.,3],[-250.,100.,1700.,3],[320.,180.,2300.,3]]
         self.fragments = []
@@ -477,6 +494,7 @@ class Game:
 
     def destroy_enemy(self):
         self.enemy = None
+        self.ship_target = None
         if self.enemy_kind == 'police': self.p.fine += 150
         else: self.p.credits += 35
         self.p.kills += 1
@@ -484,6 +502,7 @@ class Game:
         self.message = 'Police ship destroyed. Fine increased by 150 cr.' if self.enemy_kind == 'police' else 'Hostile destroyed. Bounty: 35 credits.'
 
     def key(self, k):
+        if self.mode == 'hyperspace' and k not in (27,ord('3')): return
         if self.mode == 'map' and self.map_input:
             self.map_edit(k)
             return
@@ -596,6 +615,13 @@ class Game:
             self.laser_flash = 0
             self.message = ('REAR VIEW - rear pulse laser ready.' if 'rear' in self.p.equipment else 'REAR VIEW - no rear laser fitted. Buy one in outfitting.') if self.rear_view else 'FORWARD VIEW.'
             return
+        if k == ord('5'):
+            self.ship_target = None if self.ship_target is self.enemy else self.enemy
+            self.message = 'Ship target selected.' if self.ship_target else 'No ship selected.'
+            return
+        if k == ord('h'):
+            self.jump()
+            return
         if k == ord('t'): self.begin_cruise()
         if k == ord('b'):
             if self.p.mines:
@@ -669,6 +695,7 @@ class Game:
     def lock_waypoint(self):
         self.p.waypoint = self.selected_waypoint()
         w = self.p.waypoint
+        self.nav = 'course'
         self.message = f'Course locked: {w["name"]} ({w["position"][0]:.2f}, {w["position"][1]:.2f}).'
         if self.mode in ('market','outfit') or (self.mode == 'map' and self.map_return in ('market','outfit')): self.save()
 
@@ -700,18 +727,22 @@ class Game:
             self.map_text += chr(key)
 
     def jump(self):
+        if self.jump_charge: return
         w = self.p.waypoint
         if not w: self.message = 'Lock a course first (G, ENTER).'; return
         dist = galactic_distance(self.p.position,w['position'])
         cost = hyperspace_cost(dist)
-        if dist < .001: self.message = 'Already at that coordinate.'
-        elif self.mode == 'map' and self.map_return not in ('flight','cruise'):
-            self.message = 'Launch before engaging hyperspace.'
+        allowed = self.mode == 'flight' or (self.mode == 'map' and self.map_return == 'flight')
+        if not allowed:
+            self.message = 'Launch, or cancel cruise, before charging hyperspace.'
+        elif dist < .001: self.message = 'Already at that coordinate.'
         elif cost > self.p.fuel: self.message = f'Jump requires {cost:.2f} fuel; aboard {self.p.fuel:.2f}.'
         else:
-            self.p.fuel = round(self.p.fuel-cost,5)
-            self.arrive(w['position'],w['system'])
-            self.message = f'Hyperspace complete. {w["name"]}. Fuel used: {cost:.2f}.'
+            destination = dict(name=w['name'],position=w['position'][:],system=w['system'])
+            self.jump_charge = dict(destination=destination,cost=cost,held=0.)
+            self.mode = 'flight'
+            self.autodock = False
+            self.message = 'Hold H: hyperspace in 3 seconds. Release to cancel.'
 
     def begin_cruise(self):
         if self.mode == 'map' and self.map_return not in ('flight','cruise'):
@@ -755,6 +786,8 @@ class Game:
         if system is not None: self.p.system = system
         self.launch()
         if system is not None: self.station = [random.uniform(-80,80),random.uniform(-50,50),2200.]
+        name = SYSTEMS[system][0] if system is not None else f'Deep space ({position[0]:.2f}, {position[1]:.2f})'
+        self.arrival = dict(name=name,remaining=5.)
 
     def update_planet(self, dt):
         if self.p.deep_space: return
@@ -792,7 +825,7 @@ class Game:
     def draw_map(self):
         d,p = self.d,self.p
         d.text(30,75,'GALAXY / arrows select / TAB free cursor / ENTER lock')
-        d.text(30,105,'/ search  C coordinates  H hyperspace  T cruise  G return')
+        d.text(30,105,'/ search  C coordinates  HOLD H jump  T cruise  G return')
         for n in range(11):
             x,y = 60+n*60,155+n*39
             d.line(x,155,x,545,(20,45,55))
@@ -837,6 +870,142 @@ class Game:
             d.text(30,610,'Selection: '+('free coordinate cursor' if self.cursor_mode else 'planet list'))
             d.text(30,645,'Locked: '+(p.waypoint['name'] if p.waypoint else 'none'))
 
+    def camera_vector(self, obj):
+        x,y,z = obj[:3]
+        roll = self.roll
+        if self.rear_view: x,z,roll = -x,-z,-roll
+        c,s = math.cos(roll),math.sin(roll)
+        return x*c+y*s,-x*s+y*c,z
+
+    def active_navigation(self):
+        if self.nav == 'course' and self.p.waypoint:
+            w = self.p.waypoint
+            delta = [b-a for a,b in zip(self.p.position,w['position'])]
+            if math.hypot(*delta) > .001:
+                # Galactic X/Y map axes are shown as a compass bearing, not metres.
+                return [delta[0]*10000,0.,-delta[1]*10000],w['name']+' / COURSE'
+            if not self.p.deep_space: return self.station,w['name']+' / STATION'
+            return [0.,0.,500.],w['name']+' / ARRIVED'
+        if self.nav == 'asteroid':
+            objects = self.fragments or self.asteroids
+            if objects: return min(objects,key=lambda r: sum(v*v for v in r[:3])),'ORE' if self.fragments else 'ASTEROID'
+        if self.nav == 'sun': return self.sun,'SUN'
+        if self.nav == 'planet' and not self.p.deep_space: return self.planet,SYSTEMS[self.p.system][0].upper()
+        if self.p.deep_space: return None,'DEEP SPACE'
+        return self.station,'STATION'
+
+    def scanner_contacts(self):
+        contacts = []
+        if not self.p.deep_space:
+            contacts += [('station',self.station,'STATION',GREEN),('planet',self.planet,SYSTEMS[self.p.system][0],(100,170,255))]
+        if self.enemy is not None:
+            contacts.append(('ship',self.enemy,self.enemy_kind.upper(),RED if self.enemy_kind == 'pirate' else (120,170,255)))
+        for mine in self.mine_objects:
+            contacts.append(('mine',mine,'MINE',RED))
+        return contacts
+
+    def scanner_position(self, obj):
+        x,z = obj[0],obj[2]
+        # Fixed 2500m radius. Contacts beyond the radius sit at its rim.
+        scale = max(2500,math.hypot(x,z))
+        return 955+x/scale*85,165-z/scale*53
+
+    def click(self, x, y):
+        if self.mode != 'flight' or not (840 <= x <= 1070 and 80 <= y <= 245): return
+        choices = []
+        for kind,obj,label,color in self.scanner_contacts():
+            sx,sy = self.scanner_position(obj)
+            distance = math.hypot(sx-x,sy-y)
+            if distance <= 12: choices.append((distance,kind,obj,label))
+        if not choices: return
+        _,kind,obj,label = min(choices,key=lambda contact:contact[0])
+        if kind == 'ship':
+            self.ship_target = obj
+            self.message = label+' selected. Direction marker tracks this ship; 5 clears selection.'
+        elif kind in ('station','planet'):
+            self.nav = kind
+            self.message = label+' beacon selected.'
+
+    def draw_marker(self, obj, label, color):
+        d = self.d
+        vx,vy,vz = self.camera_vector(obj)
+        projected = self.project(obj)
+        if projected and 55 <= projected[0] <= W-55 and 110 <= projected[1] <= 510:
+            x,y,_ = projected
+            d.fill(x-3,y-3,7,7,color)
+            d.rect(x-10,y-10,20,20,color)
+            d.text(max(35,min(W-330,x+16)),max(105,min(515,y-10)),label[:28],color)
+            return
+        if projected:
+            dx,dy = projected[0]-W/2,projected[1]-330
+        else:
+            dx,dy = vx,vy
+            if abs(dx)+abs(dy) < 1: dx,dy = 0,1
+        length = math.hypot(dx,dy)
+        if length < 1: dx,dy,length = 0,1,1
+        dx,dy = dx/length,dy/length
+        limit = min(490/max(abs(dx),.0001),190/max(abs(dy),.0001))
+        x,y = W/2+dx*limit,330+dy*limit
+        bx,by = x-dx*18,y-dy*18
+        d.line(x,y,bx-dy*8,by+dx*8,color)
+        d.line(x,y,bx+dy*8,by-dx*8,color)
+        d.line(bx-dy*8,by+dx*8,bx+dy*8,by-dx*8,color)
+        text = label+(' / BEHIND: 4' if vz <= 0 else '')
+        d.text(max(35,min(W-350,x-140)),max(102,min(515,y+14)),text[:34],color)
+
+    def draw_scanner(self):
+        d = self.d
+        d.fill(840,80,230,165,(5,16,27))
+        d.rect(840,80,230,165,(45,105,115))
+        d.text(850,85,'SCANNER  2500m',GREEN)
+        d.line(870,165,1040,165,(35,75,85))
+        d.line(955,112,955,218,(35,75,85))
+        d.fill(952,162,6,6,(235,245,250))
+        for kind,obj,label,color in self.scanner_contacts():
+            x,y = self.scanner_position(obj)
+            d.fill(x-3,y-3,6,6,color)
+            if kind == 'ship' and obj is self.ship_target: d.rect(x-7,y-7,14,14,GOLD)
+        d.text(850,220,'Click / 5 target',(135,175,185))
+
+    def update_jump_charge(self, dt):
+        charge = self.jump_charge
+        if not charge: return
+        if self.mode != 'flight' or ord('h') not in self.keys:
+            self.jump_charge = None
+            self.message = 'Hyperspace cancelled. Hold H continuously for 3 seconds.'
+            return
+        charge['held'] = min(3,charge['held']+dt)
+        if charge['held'] < 3: return
+        if self.p.fuel < charge['cost']:
+            self.jump_charge = None
+            self.message = 'Hyperspace cancelled: insufficient fuel at ignition.'
+            return
+        self.p.fuel = round(self.p.fuel-charge['cost'],5)
+        self.jump_warp = dict(destination=charge['destination'],elapsed=0.)
+        self.jump_charge = None
+        self.mode = 'hyperspace'
+        self.keys.clear()
+        self.laser_flash = self.flash = 0
+        self.message = 'Hyperspace transit to '+charge['destination']['name']+'.'
+
+    def draw_hyperspace(self):
+        d = self.d
+        elapsed = self.jump_warp['elapsed']
+        clip = bind(d.sdl,'SDL_RenderSetClipRect',C.c_int,[C.c_void_p,C.c_void_p])
+        viewport = (C.c_int*4)(25,65,W-50,640)
+        clip(d.r,viewport)
+        for i,star in enumerate(self.stars):
+            angle = math.atan2(star[1],star[0])
+            progress = ((i/len(self.stars))+elapsed*1.1)%1
+            radius = 20+progress*progress*850
+            tail = max(10,radius-(30+progress*180))
+            c,s = math.cos(angle),math.sin(angle)
+            d.line(550+c*tail,345+s*tail,550+c*radius,345+s*radius,(100,180+int(progress*65),230))
+        clip(d.r,None)
+        d.fill(240,285,620,88,(4,9,18))
+        d.text(420,300,'H Y P E R S P A C E',GREEN)
+        d.text(300,338,'Destination: '+self.jump_warp['destination']['name'],GOLD)
+
     def scoop(self):
         if 'scoops' not in self.p.equipment:
             self.message = 'Fuel / cargo scoops required.'
@@ -870,6 +1039,19 @@ class Game:
             obj[2] -= dz
 
     def update(self, dt):
+        if self.arrival:
+            self.arrival['remaining'] -= dt
+            if self.arrival['remaining'] <= 0: self.arrival = None
+        if self.jump_charge and (self.mode != 'flight' or ord('h') not in self.keys):
+            self.jump_charge = None
+            self.message = 'Hyperspace cancelled: H released or cockpit focus lost.'
+        if self.mode == 'hyperspace':
+            self.jump_warp['elapsed'] += dt
+            if self.jump_warp['elapsed'] >= 1.6:
+                destination = self.jump_warp['destination']
+                self.arrive(destination['position'],destination['system'])
+                self.message = 'Arrived at '+destination['name']+'.'
+            return
         if self.mode == 'cruise':
             self.update_cruise(dt)
             return
@@ -982,6 +1164,7 @@ class Game:
             self.fire_laser()
         self.shield = min(100,self.shield+dt*(3 if 'energy' in self.p.equipment else 1.5)*(0.3 if self.cloaked else 1))
         if self.p.hull <= 0: self.mode = 'dead'
+        self.update_jump_charge(dt)
 
     def fire_laser(self):
         if self.rear_view and 'rear' not in self.p.equipment:
@@ -1009,10 +1192,12 @@ class Game:
         d.color(d.r,4,9,18,255)
         d.clear(d.r)
         d.text(28,20,'S T A R   T R A D E R',GREEN)
-        location = 'Deep space' if p.deep_space or self.mode == 'cruise' else SYSTEMS[p.system][0]
+        location = 'In transit' if self.mode == 'hyperspace' else 'Deep space' if p.deep_space or self.mode == 'cruise' else SYSTEMS[p.system][0]
         d.text(640,20,f'{location}  CR {p.credits:.0f}  KILLS {p.kills}')
         d.line(25,52,W-25,52)
-        if self.mode == 'help':
+        if self.mode == 'hyperspace':
+            self.draw_hyperspace()
+        elif self.mode == 'help':
             lines = ['FLIGHT MANUAL',
                 'STATION: Arrows select. B buy, S sell, U outfitting, L launch.',
                 'F buys fuel (3 cr/unit), R repairs, P pays fines. * = illegal.',
@@ -1030,8 +1215,8 @@ class Game:
                 'Z bought jammer: 8s active, 20s cooldown, uses .05 fuel.',
                 'K bought cloak: .012 fuel/sec. Firing drops concealment.',
                 'G galaxy map: / search, C coordinates, TAB free cursor.',
-                'ENTER locks. H fast, expensive jump. T slow, efficient cruise.',
-                'T also cancels cruise. Low fuel can strand you: plan reserves.',
+                'ENTER locks. Hold H 3s to jump; release cancels. T cruises.',
+                'Scanner: click ship or 5 selects it. Dot/arrow tracks bearing.',
                 'Dock/trade/purchase to save. In space, quit retains last save.',
                 '1 return. 2 updates. 3 fullscreen. ESC quit.']
             for i,line in enumerate(lines): d.text(30,77+i*30,line)
@@ -1123,19 +1308,22 @@ class Game:
         d.line(530,330,542,330); d.line(558,330,570,330)
         d.line(550,310,550,322); d.line(550,338,550,350)
         clip(d.r,None)
+        target,label = self.active_navigation()
+        if target is not None: self.draw_marker(target,label,GOLD)
+        if self.ship_target is not self.enemy: self.ship_target = None
+        if self.ship_target is not None: self.draw_marker(self.ship_target,'TARGET '+self.enemy_kind.upper(),(255,100,180))
+        self.draw_scanner()
         d.text(35,73,'REAR VIEW' if self.rear_view else 'FORWARD VIEW',GOLD)
         if self.flash: d.rect(26,65,W-52,490,RED)
-        obj,label = self.station,'STATION'
-        if self.nav == 'asteroid':
-            objects = self.fragments or self.asteroids
-            if objects: obj,label = min(objects,key=lambda r: sum(v*v for v in r[:3])),'ORE' if self.fragments else 'ASTEROID'
-        elif self.nav == 'sun': obj,label = self.sun,'SUN'
-        elif self.nav == 'planet' and not p.deep_space: obj,label = self.planet,'PLANET'
-        if p.deep_space and self.nav in ('station','planet'):
-            obj,label = [0.,0.,0.],'DEEP SPACE'
+        obj,label = self.active_navigation()
+        if obj is None: obj = [0.,0.,0.]
         c,s = math.cos(self.roll),math.sin(self.roll)
         x,y,z = obj[:3]
-        d.text(35,563,f'BEACON {label}: X {x*c+y*s:+.0f} Y {-x*s+y*c:+.0f} Z {z:+.0f} RANGE {math.sqrt(x*x+y*y+z*z):.0f}m')
+        if self.nav == 'course' and p.waypoint and galactic_distance(p.position,p.waypoint['position']) > .001:
+            w = p.waypoint
+            d.text(35,563,f'GALACTIC COURSE {w["name"]}: ({w["position"][0]:.2f}, {w["position"][1]:.2f})  {galactic_distance(p.position,w["position"]):.2f} LY')
+        else:
+            d.text(35,563,f'BEACON {label}: X {x*c+y*s:+.0f} Y {-x*s+y*c:+.0f} Z {z:+.0f} RANGE {math.sqrt(x*x+y*y+z*z):.0f}m')
         d.text(35,594,f'SPEED {self.speed:.0f}  FUEL {p.fuel:.2f}  {('REAR PULSE' if 'rear' in p.equipment else 'REAR UNARMED') if self.rear_view else p.laser.upper()} LASER  MISSILES {p.missiles}  HEAT {self.heat:.0f}%')
         d.text(35,625,f'SHIELD {self.shield:.0f}%  HULL {p.hull:.0f}%  HOLD {sum(p.cargo)}/{p.capacity}t')
         error = math.degrees(self.slot_error())
@@ -1150,6 +1338,16 @@ class Game:
             d.text(35,686,f'COURSE {w["name"]} ({w["position"][0]:.2f},{w["position"][1]:.2f})  {math.hypot(*delta):.2f} LY  T cruise',GOLD)
         elif p.fuel < 1.0:
             d.text(35,686,'LOW FUEL - buy a refill or skim the sun with scoops.',RED)
+        if self.jump_charge:
+            count = max(1,math.ceil(3-self.jump_charge['held']))
+            d.fill(240,265,600,90,(4,9,18))
+            d.text(335,280,f'HYPERSPACE IN {count}...',GOLD)
+            d.text(300,320,'Keep holding H. Release to cancel.',GREEN)
+        elif self.arrival:
+            d.fill(225,110,610,82,(4,9,18))
+            d.rect(225,110,610,82,GREEN)
+            d.text(250,125,'ARRIVED AT '+self.arrival['name'].upper(),GOLD)
+            d.text(250,157,f'Galactic coordinates {p.position[0]:.2f}, {p.position[1]:.2f}',GREEN)
 
     def object(self,obj,kind):
         projected = self.project(obj)
@@ -1212,6 +1410,7 @@ def main():
             for kind,key in display.events():
                 if kind == 'quit': game.running = False
                 elif kind == 'blur': game.keys.clear()
+                elif kind == 'click': game.click(*key)
                 elif kind == 'down':
                     game.keys.add(key)
                     game.key(key)

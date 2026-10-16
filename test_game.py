@@ -17,6 +17,13 @@ class GameplayTests(unittest.TestCase):
         self.game = st.Game(None)
         self.game.spawn = 10000
 
+    def finish_jump(self,game):
+        game.speed = 0
+        game.keys = {ord('h')}
+        for _ in range(61): game.update(.05)
+        self.assertEqual(game.mode,'hyperspace')
+        game.update(1.6)
+
     def tearDown(self):
         st.SAVE = self.original_save
         self.tmp.cleanup()
@@ -84,6 +91,7 @@ class GameplayTests(unittest.TestCase):
         g.launch(); g.key(ord('g')); g.target = 1
         fuel = g.p.fuel
         g.key(ord('h'))
+        self.finish_jump(g)
         self.assertEqual(g.p.system,1)
         self.assertAlmostEqual(g.p.fuel,round(fuel-st.hyperspace_cost(st.distance(0,1)),5))
         g.p.fuel = 0
@@ -272,6 +280,7 @@ class GameplayTests(unittest.TestCase):
         self.assertEqual(g.p.position,position)
         g.key(ord('c')); self.assertFalse(g.autodock)
         g.jump()
+        self.finish_jump(g)
         self.assertFalse(g.p.deep_space)
         self.assertEqual(g.p.system,1)
         self.assertEqual(g.p.position,st.coordinates(1))
@@ -280,6 +289,7 @@ class GameplayTests(unittest.TestCase):
         g = self.game
         g.launch(); g.p.waypoint = dict(name='Marker',position=[2,4],system=None)
         g.jump()
+        self.finish_jump(g)
         self.assertTrue(g.p.deep_space)
         g.dock()
         self.assertEqual(g.mode,'flight')
@@ -490,6 +500,99 @@ class GameplayTests(unittest.TestCase):
         self.assertEqual(g.enemy[3],5)
         self.assertEqual(g.p.laser,'military')
         g.launch(); self.assertFalse(g.rear_view)
+
+    def test_hyperspace_requires_continuous_hold_and_cancels_without_jump_fuel(self):
+        g = self.game
+        g.launch(); g.speed = 0
+        g.p.waypoint = dict(name='Zaonce',position=st.coordinates(1),system=1)
+        fuel = g.p.fuel
+        g.keys = {ord('h')}; g.key(ord('h'))
+        g.update(1.5)
+        self.assertEqual(g.p.system,0)
+        self.assertEqual(g.jump_charge['held'],1.5)
+        self.assertEqual(g.p.fuel,fuel)
+        g.keys.clear(); g.update(.01)
+        self.assertIsNone(g.jump_charge)
+        self.assertEqual(g.p.fuel,fuel)
+        self.assertEqual(g.mode,'flight')
+        g.keys = {ord('h')}; g.key(ord('h')); g.update(2.9)
+        self.assertIsNotNone(g.jump_charge)
+        g.update(.11)
+        self.assertEqual(g.mode,'hyperspace')
+        self.assertEqual(g.p.system,0)
+        charged = g.p.fuel
+        g.update(.5)
+        self.assertEqual(g.p.fuel,charged)
+        self.assertEqual(g.mode,'hyperspace')
+        g.update(1.11)
+        self.assertEqual(g.p.system,1)
+        self.assertIsNotNone(g.arrival)
+        self.assertEqual(g.arrival['name'],'Zaonce')
+        g.update(5.1)
+        self.assertIsNone(g.arrival)
+
+    def test_charge_rechecks_fuel_and_cannot_be_started_while_docked(self):
+        g = self.game
+        g.p.waypoint = dict(name='Zaonce',position=st.coordinates(1),system=1)
+        g.jump(); self.assertIsNone(g.jump_charge)
+        g.launch(); g.speed = 0; g.keys = {ord('h')}; g.jump()
+        g.p.fuel = 0
+        g.update(3)
+        self.assertIsNone(g.jump_charge)
+        self.assertEqual(g.mode,'flight')
+        self.assertEqual(g.p.system,0)
+
+    def test_hyperspace_snapshot_and_map_hold_then_warp_input_is_ignored(self):
+        g = self.game
+        g.launch(); g.speed = 0; g.key(ord('g')); g.target = 1
+        g.keys = {ord('h')}; g.key(ord('h'))
+        self.assertEqual(g.mode,'flight')
+        g.p.waypoint = dict(name='Diso',position=st.coordinates(2),system=2)
+        self.finish_jump(g)
+        self.assertEqual(g.p.system,1)
+        self.assertIsNone(g.jump_charge)
+        g.p.fuel = 7; g.speed = 0
+        g.keys = {ord('h')}; g.key(ord('h')); g.update(3.1)
+        self.assertEqual(g.mode,'hyperspace')
+        g.key(ord('g')); g.key(ord('2'))
+        self.assertEqual(g.mode,'hyperspace')
+
+    def test_scanner_click_and_keyboard_select_and_clear_ship(self):
+        g = self.game
+        g.launch(); g.enemy = [350,0,-600,6,0]
+        x,y = g.scanner_position(g.enemy)
+        g.click(x,y)
+        self.assertIs(g.ship_target,g.enemy)
+        g.key(ord('5')); self.assertIsNone(g.ship_target)
+        g.key(ord('5')); self.assertIs(g.ship_target,g.enemy)
+        g.destroy_enemy(); self.assertIsNone(g.ship_target)
+        g.click(0,0); self.assertIsNone(g.ship_target)
+
+    def test_scanner_selects_navigation_and_remains_in_bounds(self):
+        g = self.game
+        g.launch(); g.station = [200,0,500]
+        x,y = g.scanner_position(g.station)
+        g.click(x,y)
+        self.assertEqual(g.nav,'station')
+        for obj in ([1e9,0,0],[0,0,1e9],[-1e9,0,-1e9]):
+            x,y = g.scanner_position(obj)
+            self.assertTrue(840 <= x <= 1070 and 110 <= y <= 220)
+
+    def test_locked_course_and_local_navigation_resolve_correct_targets(self):
+        g = self.game
+        g.target = 1; g.lock_waypoint(); g.launch()
+        obj,label = g.active_navigation()
+        self.assertEqual(g.nav,'course')
+        self.assertIn('Zaonce',label)
+        g.key(ord('d'))
+        self.assertIs(g.active_navigation()[0],g.station)
+        g.arrive(st.coordinates(1),1)
+        g.nav = 'course'
+        self.assertIs(g.active_navigation()[0],g.station)
+        g.rear_view = False
+        self.assertLess(g.camera_vector([0,0,-10])[2],0)
+        g.rear_view = True
+        self.assertGreater(g.camera_vector([0,0,-10])[2],0)
 
 
 if __name__ == '__main__':

@@ -1,6 +1,6 @@
 # Star Trader
 
-An original Elite-inspired Python space game for **Omarchy**. Trade, mine, fight robot pirates, smuggle contraband and navigate a small wireframe universe. Current version: **0.2.1**.
+An original Elite-inspired Python space game for **Omarchy**. Trade, mine, fight robot pirates, smuggle contraband and navigate a small wireframe universe. Current version: **0.2.2**.
 
 The current game is offline single-player. Self-hosted multiplayer is a future project; see [MULTIPLAYER.md](MULTIPLAYER.md). The next offline expansion is outlined in [ROADMAP.md](ROADMAP.md).
 
@@ -59,7 +59,8 @@ You start docked with 150 credits, a full 7-unit fuel tank, a pulse laser, three
 | Local beacons | D station; P planet; A asteroid/ore; J sun; O collects nearby ore |
 | Galaxy map | G open/close; arrows select planet; / searches names; C enters X,Y |
 | Free map cursor | Tab switches between planet selection and coordinate cursor; arrows move cursor |
-| Course/travel | Enter locks course; H hyperspace; T interstellar cruise; T in cruise cancels |
+| Course/travel | Enter locks course; hold H for 3 seconds to enter hyperspace; T interstellar cruise; T in cruise cancels |
+| Scanner | Click a ship contact to select it; 5 selects/clears the current ship target |
 | General | 1 manual; 2 updates; 3 fullscreen; Esc quit |
 
 ### Docking
@@ -82,8 +83,12 @@ Every planet has galactic coordinates and a searchable profile showing economy, 
 
 The map shows both travel choices for your current load:
 
-- **Hyperspace:** immediate arrival, costing `1.2 × distance + 0.2` fuel.
+- **Hyperspace:** hold H continuously for a visible three-second countdown, followed by a 1.6-second star-stream transition and arrival banner. Releasing H or leaving the cockpit before ignition cancels without spending jump fuel. Fuel is rechecked and deducted at ignition. Normal flight and threats continue during charging. Jump cost is `1.2 × distance + 0.2` fuel.
 - **Cruise:** `45 × distance × cargo mass factor` seconds of game time, costing `0.25 × distance × cargo mass factor` fuel. T cancels at your current coordinates.
+
+The cockpit has a top-down scanner: your ship is white at its centre, front is toward the top, pirates are red, police/planets blue, and the station green. Its radius is 2,500 metres, with more distant contacts clamped to the rim. Click a ship dot or press 5 to select it; the selected ship gains a gold scanner ring and a pink cockpit marker. Click the station/planet to select its local navigation beacon.
+
+The active navigation destination has a gold dot/bracket when visible and an edge arrow when outside the view. Rearward targets are labelled “BEHIND: 4”; toggle rear view to see them. A remote locked galaxy waypoint shows a compass course; H/T travels between galactic coordinates. Once there, local beacons guide normal flight toward the station, sun, planet or ore. Steering in local space does not change galactic coordinates.
 
 These are game-scale distances/timings. Local flight also consumes fuel. The 7-unit tank no longer guarantees a seven-light-year jump. Low reserves trigger a warning; fuel can run out. F at a station buys a refill at 3 credits per unit, independently of hull repairs. Scoops can gather fuel near the sun: J selects its beacon, skim within 500 metres at speed 10–60, and retreat before heat reaches 90. Empty-space coordinates have no station or services. If stranded without a viable fuel source, quit and resume from the last station save.
 

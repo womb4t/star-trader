@@ -1,3 +1,11 @@
+# 0.2.2 — cockpit navigation and hyperspace
+
+- Gold navigation dots/brackets and edge arrows track the active destination in front/rear view.
+- Top-down scanner shows ships, planets, stations and mines. Click a ship or press 5 to select it; a pink marker tracks its bearing.
+- Hold H continuously for a three-second countdown. Releasing H or leaving the cockpit cancels before ignition; jump fuel is spent only at ignition.
+- Animated star-stream transit, followed by a five-second arrival banner naming the destination and coordinates.
+- Map-to-cockpit charging, fuel revalidation and destination snapshots keep the transition consistent.
+
 # 0.2.1 — laptop controls and rear weapons
 
 - Number-row controls: 1 manual, 2 updates, 3 fullscreen, 4 front/rear view.

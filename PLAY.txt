@@ -1,4 +1,4 @@
-STAR TRADER 0.2.1 — original space trading game for Omarchy
+STAR TRADER 0.2.2 — original space trading game for Omarchy
 
 Install: bash install.sh
 Play: open your app launcher and search for Star Trader.
@@ -18,9 +18,11 @@ C docking computer, Z jammer, K cloak (equipment must be bought).
 D station, P planet, A asteroid/ore, J sun, O scoop nearby ore.
 
 G galaxy map: / search planets, C coordinates, TAB free cursor,
-arrows select/move, ENTER locks a waypoint. H fast hyperspace
-uses more fuel. T starts slower, more economical cruise; T cancels.
+arrows select/move, ENTER locks a waypoint. Hold H for 3 seconds: countdown, star-stream transit and arrival banner.
+Hyperspace uses more fuel; release H before ignition to cancel. T starts slower, more economical cruise; T cancels.
 Read the planet profile and budget fuel before departure.
+Navigation uses gold dots/arrows. Click a scanner ship dot or press 5
+to select a ship; its direction marker is pink. 4 reveals rearward targets.
 
 Dock through the rotating slot at speed 1-25. Centre within
 14m horizontal / 6m vertical; use Q/E to keep roll error under 9deg.
