@@ -13,8 +13,9 @@ import sys
 import time
 import threading
 import urllib.request
+import uuid
 
-VERSION = '0.2.2'
+VERSION = '0.2.3'
 CRUISE_SECONDS_PER_LY = 45
 W, H = 1100, 760
 GOODS = ['Food', 'Textiles', 'Ore', 'Machinery', 'Medicine', 'Computers', 'Narcotics', 'Unlicensed Arms']
@@ -109,6 +110,11 @@ class Pilot:
         self.position = coordinates(0)
         self.deep_space = False
         self.waypoint = None
+        self.commander_id = uuid.uuid4().hex
+        self.maintenance = 0.
+        self.flights_since_service = 0
+        self.engineering_level = self.engineering_failures = 0
+        self.engineering_ready_at = 0.
 
     @property
     def capacity(self):
@@ -160,11 +166,13 @@ class Pilot:
         return f'Fuel purchased: {cost} cr. Tank full.'
 
     def repair(self):
-        cost = math.ceil((100 - self.hull) * 0.5)
+        cost = math.ceil((100 - self.hull) * 0.5 + self.maintenance*.5)
         if self.credits < cost: return f'Repairs cost {cost} cr.'
         self.credits -= cost
         self.hull = 100
-        return f'Hull repaired: {cost} cr. Fuel sold separately (F).'
+        self.maintenance = 0.
+        self.flights_since_service = 0
+        return f'Hull and maintenance serviced: {cost} cr. Fuel sold separately (F).'
 
     def save(self):
         SAVE.parent.mkdir(parents=True, exist_ok=True)
@@ -189,6 +197,9 @@ class Pilot:
                         row.extend(initial_stock()[i][6:])
             candidate.validate()
             self.__dict__.update(vars(candidate))
+            if 'commander_id' not in data:
+                try: self.save()
+                except OSError: pass
             return True
         except (OSError, ValueError, KeyError, TypeError, AttributeError):
             return False
@@ -201,6 +212,12 @@ class Pilot:
         if len(set(self.equipment)) != len(self.equipment) or not set(self.equipment) <= allowed: raise ValueError('equipment')
         if not isinstance(self.cargo, list) or len(self.cargo) != len(GOODS) or not all(integer(n) for n in self.cargo): raise ValueError('cargo')
         if sum(self.cargo) > self.capacity: raise ValueError('capacity')
+        if type(self.commander_id) is not str or len(self.commander_id) != 32 or any(c not in '0123456789abcdef' for c in self.commander_id): raise ValueError('commander')
+        for key in ('maintenance','engineering_ready_at'):
+            value = getattr(self,key)
+            if type(value) not in (int,float) or not math.isfinite(value) or value < 0: raise ValueError(key)
+        if self.maintenance > 100 or not integer(self.flights_since_service): raise ValueError('maintenance')
+        if not integer(self.engineering_level) or self.engineering_level > 5 or not integer(self.engineering_failures) or self.engineering_failures > 20: raise ValueError('engineering')
         if not integer(self.mines) or self.mines > 4 or not integer(self.fine): raise ValueError('mines/fine')
         if type(self.deep_space) is not bool: raise ValueError('location')
         if not valid_coordinates(self.position): raise ValueError('position')
@@ -313,12 +330,12 @@ class Display:
                 yield 'quit',0
             elif typ == 512 and raw[12] == 13:
                 yield 'blur', 0
-            elif typ == 1025 and raw[16] == 1:
+            elif typ in (1025,1026) and raw[16] == 1:
                 x = int.from_bytes(raw[20:24],sys.byteorder,signed=True)
                 y = int.from_bytes(raw[24:28],sys.byteorder,signed=True)
                 lx,ly = C.c_float(),C.c_float()
                 self.logical_point(self.r,x,y,C.byref(lx),C.byref(ly))
-                yield 'click',(lx.value,ly.value)
+                yield 'click' if typ == 1025 else 'mouse_up',(lx.value,ly.value)
             elif typ in (768,769):
                 key = int.from_bytes(raw[20:24], sys.byteorder, signed=True)
                 if typ == 769 or raw[13] == 0:
@@ -375,6 +392,7 @@ class Game:
         self.d = display
         self.p = Pilot()
         loaded = self.p.load()
+        self.read_engineering_ledger()
         self.mode = 'market'
         self.updates = UpdateNotice()
         self.updates.start()
@@ -397,6 +415,7 @@ class Game:
         self.sun = [1200., -500., 3500.]
         self.heat = 0.
         self.nav = 'station'
+        self.nav_target = None
         self.rear_view = False
         self.planet = [-600.,240.,2400.]
         self.planet_radius = 70 + PROFILES[self.p.system][2]/100
@@ -414,6 +433,16 @@ class Game:
         self.cooldown = self.flash = self.laser_flash = 0.
         self.message = 'Welcome back, Commander.' if loaded else 'Welcome, Commander. 1 manual; U ship outfitting.'
         self.stars = [[random.uniform(-1000,1000),random.uniform(-650,650),random.uniform(-1800,1800)] for _ in range(180)]
+        self.broken_down = False
+        self.breakdown_in = None
+        self.disabled_ship = None
+        self.assist_spawn_timer = 35.
+        self.dock_clearance = self.docking_pending = 0.
+        self.rescue = None
+        self.rescue_cooldown = 0.
+        self.mouse_controls = False
+        self.mouse_held = set()
+        self.buttons = []
         self.running = True
 
     def save(self):
@@ -422,8 +451,18 @@ class Game:
         except OSError as e:
             self.message = 'Could not save: ' + str(e)
 
-    def launch(self):
+    def launch(self, departure=True):
+        if departure:
+            self.p.flights_since_service += 1
+            self.p.maintenance = min(100,self.p.maintenance+2+sum(self.p.cargo)*.05)
+        self.breakdown_in = random.uniform(8,25) if departure and random.random() < self.breakdown_risk() else None
+        self.broken_down = False
+        self.disabled_ship = None
+        self.assist_spawn_timer = 35.
+        self.dock_clearance = self.docking_pending = 0.
         self.mode = 'flight'
+        self.release_mouse()
+        self.mouse_controls = False
         self.rear_view = False
         self.station = [0.,0.,1500.] if not self.p.deep_space else [0.,0.,1e9]
         self.planet = [-600.,240.,2400.]
@@ -444,12 +483,264 @@ class Game:
         self.spawn = 18
         self.roll = self.station_angle = 0.
         self.autodock = False
+        self.nav_target = None
         self.nav = 'course' if self.p.waypoint and galactic_distance(self.p.position,self.p.waypoint['position']) > .001 else 'station'
         self.heat = 0
         self.asteroids = [[150.,-70.,1000.,3],[-250.,100.,1700.,3],[320.,180.,2300.,3]]
         self.fragments = []
         self.sun = [1200.,-500.,3500.]
         self.message = 'Approach slowly. Q/E roll to match the rotating slot. 1 manual.'
+
+    def request_launch(self):
+        distance = galactic_distance(self.p.position,self.p.waypoint['position']) if self.p.waypoint else 0
+        required = hyperspace_cost(distance)+(.4*self.p.mass_factor if distance > .001 else 0) if self.p.waypoint else None
+        if self.p.fuel < 1 or (required is not None and required > self.p.fuel):
+            self.launch_return = self.mode
+            self.mode = 'launch_warning'
+            self.keys.clear()
+            self.message = 'Low fuel warning. F buys fuel, L launches anyway, ESC stays docked.'
+        else: self.request_departure()
+
+    def salvage_terms(self, percent):
+        """A percentage of cash AND cargo units; round up, never take more aboard."""
+        rate = percent/100
+        cash = min(self.p.credits,math.ceil(self.p.credits*rate))
+        total = min(sum(self.p.cargo),math.ceil(sum(self.p.cargo)*rate))
+        amounts = [math.floor(n*rate) for n in self.p.cargo]
+        left = total-sum(amounts)
+        order = sorted(range(len(GOODS)),key=lambda i:(-(self.p.cargo[i]*rate-amounts[i]),i))
+        for i in order:
+            if left and amounts[i] < self.p.cargo[i]:
+                amounts[i] += 1
+                left -= 1
+        return dict(credits=cash,cargo=amounts,tonnes=total)
+
+    def open_distress(self):
+        if self.mode not in ('flight','cruise'): return
+        if self.rescue_cooldown > 0:
+            self.message = f'Rescue channel cooling down: {math.ceil(self.rescue_cooldown)}s. Try 6 again shortly.'
+            return
+        if self.mode == 'cruise':
+            self.arrive(self.p.position,None)
+            self.message = 'Cruise stopped for distress transmission.'
+        covered = not self.p.deep_space and self.station_allows() and math.sqrt(sum(v*v for v in self.station)) <= 5000
+        destination = self.p.system if covered else min((i for i in range(8) if self.station_allows(i)),key=lambda i:galactic_distance(self.p.position,coordinates(i)))
+        if covered:
+            offers = [dict(name='Galactic Recovery Accord',percent=25,counters=0)]
+        else:
+            offers = [dict(name=name,percent=random.randint(low,high),counters=0) for name,low,high in
+                      [('Hullbridge Haulage',45,60),('Drift Crow Salvage',50,65),('Freewake Guild',35,55)]]
+        self.rescue = dict(covered=covered,destination=destination,offers=offers,selected=0)
+        self.rescue_cooldown = 60
+        self.cloaked = False
+        self.autodock = False
+        self.jump_charge = None
+        self.keys.clear()
+        self.mode = 'distress'
+        self.message = 'Distress call answered. Review the salvage claim before accepting.'
+
+    def negotiate_rescue(self):
+        if not self.rescue or self.rescue['covered']:
+            self.message = 'The Recovery Accord rate is fixed at 25%.'
+            return
+        offer = self.rescue['offers'][self.rescue['selected']]
+        if offer['counters'] >= 2:
+            self.message = offer['name']+': these are our final terms.'
+            return
+        offer['counters'] += 1
+        offer['percent'] = max(25,offer['percent']-random.randint(4,10))
+        self.message = f'{offer["name"]} revised claim: {offer["percent"]}%. A accepts; N counters; R refuses.'
+
+    def accept_rescue(self):
+        if self.mode != 'distress' or not self.rescue: return
+        contract = self.rescue
+        offer = contract['offers'][contract['selected']]
+        fee = self.salvage_terms(offer['percent'])
+        # One settlement, before changing location; further keypresses cannot pay twice.
+        self.rescue = None
+        self.p.credits -= fee['credits']
+        self.p.cargo = [n-fee_n for n,fee_n in zip(self.p.cargo,fee['cargo'])]
+        self.arrive(coordinates(contract['destination']),contract['destination'])
+        self.p.fuel = 7.
+        self.p.hull = max(25,self.p.hull)
+        self.dock_clearance = 120
+        self.dock()
+        self.message = f'Rescued to {SYSTEMS[self.p.system][0]}. Salvage: {fee["credits"]:.2f} cr + {fee["tonnes"]}t. Fuel full; saved.'
+
+    def draw_launch_warning(self):
+        d,p = self.d,self.p
+        lines = ['FUEL WARNING',
+                 'NO FUEL ABOARD' if p.fuel <= 0 else f'Fuel aboard: {p.fuel:.2f} / 7 units',
+                 f'Full refill costs {p.fuel_cost()} cr; you have {p.credits:.2f} cr.',
+                 'Normal flight and hyperspace both consume fuel.']
+        if p.waypoint:
+            cost = hyperspace_cost(galactic_distance(p.position,p.waypoint['position']))
+            lines += [f'Locked course: {p.waypoint["name"]}; jump requires {cost:.2f} fuel.',
+                      f'Allow another {.4*p.mass_factor:.2f} for local approach / reserve.']
+        lines += ['', 'F buys a refill. L launches despite this warning.',
+                  'ESC cancels departure. Sell cargo first if you need fuel money.',
+                  '', 'If stranded, 6 sends a distress call. Salvage fees may apply.']
+        for i,line in enumerate(lines): d.text(70,135+i*42,line,RED if i < 2 else GREEN)
+
+    def draw_distress(self):
+        d,p = self.d,self.p
+        contract = self.rescue
+        d.text(40,85,'DISTRESS / RECOVERY OFFERS',GOLD)
+        d.text(40,125,'Station coverage: '+('YES / regulated 25% claim' if contract['covered'] else 'NO / independent salvagers'))
+        for i,offer in enumerate(contract['offers']):
+            d.text(40,175+i*38,f'{">" if i == contract["selected"] else " "} {offer["name"]}: {offer["percent"]}% of credits AND cargo',GOLD if i == contract['selected'] else GREEN)
+        offer = contract['offers'][contract['selected']]
+        fee = self.salvage_terms(offer['percent'])
+        d.text(40,315,f'Exact claim: {fee["credits"]:.2f} credits + {fee["tonnes"]} tonnes (rounded up).',GOLD)
+        goods = ', '.join(f'{n}t {GOODS[i]}' for i,n in enumerate(fee['cargo']) if n)
+        if goods:
+            for i in range(0,len(goods),86): d.text(40,355+(i//86)*27,goods[i:i+86])
+        else: d.text(40,355,'No cargo to claim. Zero assets do not prevent rescue.')
+        d.text(40,440,'Tow destination: '+SYSTEMS[contract['destination']][0])
+        d.text(40,478,'Includes full fuel refill and emergency hull stabilisation to 25%.')
+        d.text(40,516,'Equipment is preserved. Customs still apply on station arrival.')
+        d.text(40,570,'UP/DOWN choose rescuer. A accepts the displayed claim.')
+        d.text(40,608,'N counters (twice per private offer). R / ESC refuses with no payment.')
+        d.text(40,650,'Settlement and docking save progress. Calls have a 60s cooldown.')
+
+    def station_allows(self, system=None):
+        system = self.p.system if system is None else system
+        return self.p.fine < 100 or PROFILES[system][0] in ('Anarchy','Feudal')
+
+    def request_departure(self):
+        self.departure_remaining = 2.
+        self.mode = 'departure'
+        self.keys.clear()
+        self.message = 'Requesting departure clearance. Please wait for station control.'
+
+    def request_docking(self):
+        if self.p.deep_space or math.sqrt(sum(v*v for v in self.station)) > 10000:
+            self.message = 'No station traffic control in radio range (10,000m).'
+        elif not self.station_allows():
+            self.dock_clearance = 0
+            self.docking_pending = 0
+            self.message = 'Docking refused: wanted status. Seek an anarchy/feudal port.'
+        elif self.dock_clearance > 0:
+            self.message = f'Docking clearance remains valid for {math.ceil(self.dock_clearance)}s.'
+        else:
+            self.docking_pending = 2.
+            self.message = 'Docking clearance requested. Await station response.'
+
+    def breakdown_risk(self, next_flight=False):
+        flights = self.p.flights_since_service + int(next_flight)
+        wear = self.p.maintenance + (2+sum(self.p.cargo)*.05 if next_flight else 0)
+        if flights < 3 and self.p.hull >= 80: return 0.
+        return min(.65,flights*.005+wear*.003+(100-self.p.hull)*.003)
+
+    def read_engineering_ledger(self):
+        path = SAVE.parent/f'engineering-{self.p.commander_id}.json'
+        try:
+            data = json.loads(path.read_text())
+            failures,ready = data['failures'],data['ready_at']
+            if type(failures) is not int or not 0 <= failures <= 20: return
+            if type(ready) not in (int,float) or not math.isfinite(ready) or ready < 0: return
+            self.p.engineering_failures,self.p.engineering_ready_at = failures,ready
+        except (OSError,ValueError,KeyError,TypeError): pass
+
+    def write_engineering_ledger(self):
+        path = SAVE.parent/f'engineering-{self.p.commander_id}.json'
+        try:
+            path.parent.mkdir(parents=True,exist_ok=True)
+            temp = path.with_suffix('.tmp')
+            temp.write_text(json.dumps(dict(failures=self.p.engineering_failures,ready_at=self.p.engineering_ready_at)))
+            temp.replace(path)
+            return True
+        except OSError as error:
+            self.message = 'Could not persist repair cooldown: '+str(error)
+            return False
+
+    def engineering_chance(self, other=False):
+        condition = self.disabled_ship['hull'] if other and self.disabled_ship else self.p.hull
+        return max(.05,min(.85,.2+self.p.engineering_level*.12-(100-condition)*.001))
+
+    def train_engineering(self):
+        if self.engineering_return not in ('market','outfit'):
+            self.message = 'Engineering training is available while docked.'
+            return
+        if self.p.engineering_level >= 5:
+            self.message = 'Engineering level 5: training complete.'
+            return
+        cost = [200,400,800,1600,3200][self.p.engineering_level]
+        if self.p.credits < cost:
+            self.message = f'Next engineering course costs {cost} cr.'
+            return
+        self.p.credits -= cost
+        self.p.engineering_level += 1
+        self.message = f'Engineering trained to level {self.p.engineering_level}.'
+        self.save()
+
+    def attempt_engineering(self, other=False):
+        if self.engineering_return != 'flight':
+            self.message = 'Use station repairs while docked; field repairs are for flight.'
+            return
+        if self.p.engineering_ready_at > time.time():
+            self.message = f'Repair cooldown: {math.ceil((self.p.engineering_ready_at-time.time())/60)} minutes remaining.'
+            return
+        if self.enemy:
+            self.message = 'Cannot send a repair party while a hostile is present.'
+            return
+        if other:
+            if not self.disabled_ship or self.ship_target is not self.disabled_ship['object']:
+                self.message = 'Select a disabled ship on the scanner first.'
+                return
+            if math.sqrt(sum(v*v for v in self.disabled_ship['object'])) > 350 or abs(self.speed) > 30:
+                self.message = 'Helping another ship requires range <=350m and speed <=30.'
+                return
+        elif not self.broken_down and self.p.hull >= 100 and self.p.maintenance <= 0:
+            self.message = 'Your ship needs no field repair.'
+            return
+        if self.p.credits < 15:
+            self.message = 'A repair attempt needs 15 credits of parts. Distress rescue remains available.'
+            return
+        self.p.credits -= 15
+        if random.random() < self.engineering_chance(other):
+            self.p.engineering_failures = 0
+            self.p.engineering_ready_at = 0
+            if other:
+                reward = 60+self.p.engineering_level*15
+                self.p.credits += reward
+                self.disabled_ship = None
+                self.ship_target = None
+                self.assist_spawn_timer = 90
+                self.message = f'Repair successful. The rescued crew paid {reward} credits.'
+            else:
+                self.broken_down = False
+                self.breakdown_in = None
+                self.p.hull = min(100,self.p.hull+20+self.p.engineering_level*8)
+                self.p.maintenance = max(0,self.p.maintenance-15-self.p.engineering_level*5)
+                self.message = 'Field repair successful. Station service is still recommended.'
+            self.write_engineering_ledger()
+        else:
+            self.p.engineering_failures = min(20,self.p.engineering_failures+1)
+            minutes = 30*2**(self.p.engineering_failures-1)
+            self.p.engineering_ready_at = time.time()+minutes*60
+            if self.write_engineering_ledger():
+                self.message = f'Repair failed. Next attempt in {minutes} real minutes. Distress: 6.'
+
+    def draw_engineering(self):
+        d,p = self.d,self.p
+        cost = [200,400,800,1600,3200][p.engineering_level] if p.engineering_level < 5 else None
+        cooldown = max(0,math.ceil((p.engineering_ready_at-time.time())/60))
+        lines = ['ENGINEERING / LEVEL '+str(p.engineering_level),
+                 f'Credits {p.credits:.2f}. Next course: {str(cost)+" cr" if cost is not None else "maximum level"}.',
+                 f'Hull {p.hull:.0f}%. Maintenance wear {p.maintenance:.1f}/100.',
+                 f'Flights since service: {p.flights_since_service}. Next departure risk: {self.breakdown_risk(True)*100:.1f}%.',
+                 'Engine state: '+('BROKEN DOWN' if self.broken_down else 'operational'),
+                 f'Own-ship field repair chance: {self.engineering_chance()*100:.0f}%. Parts: 15 cr.',
+                 f'Failed-attempt cooldown: {cooldown} real minutes remaining.',
+                 'Failures wait 30, 60, 120... real minutes; cooldown survives restart.',
+                 (f'Selected disabled ship: {self.engineering_chance(True)*100:.0f}% repair chance.' if self.disabled_ship and self.ship_target is self.disabled_ship['object'] else 'Select a disabled ship on the scanner to assess assistance.'), 'T buys training while docked. R attempts a field repair in flight.',
+                 'H helps the selected disabled ship: range <=350m, speed <=30.',
+                 'Successful assistance earns credits; failures share your cooldown.',
+                 'Station R repairs hull AND resets maintenance and flight count.',
+                 'Field repair progress saves at your next station; cooldown saves now.',
+                 '', '8 / ESC returns. Distress 6 is available from the cockpit.']
+        for i,line in enumerate(lines): d.text(35,85+i*34,line,GOLD if i==0 else GREEN)
 
     def inspect_cargo(self):
         self.customs_checked = True
@@ -463,6 +754,9 @@ class Game:
 
     def dock(self):
         if self.p.deep_space: return
+        if not self.station_allows():
+            self.message = 'Docking refused: wanted status.'
+            return
         inspection = self.inspect_cargo() if not self.customs_checked else ''
         self.mode = 'market'
         self.shield = 100
@@ -481,7 +775,7 @@ class Game:
         x,y,_ = self.station
         c,s = math.cos(self.station_angle),math.sin(self.station_angle)
         x,y = x*c+y*s,-x*s+y*c
-        return abs(x) <= 14 and abs(y) <= 6 and 0 < self.speed <= 25 and abs(self.slot_error()) <= 0.16 and not self.enemy
+        return abs(x) <= 14 and abs(y) <= 6 and 0 < self.speed <= 25 and abs(self.slot_error()) <= 0.16 and not self.enemy and self.dock_clearance > 0 and self.station_allows()
 
     def damage(self, amount):
         absorbed = min(self.shield, amount)
@@ -502,6 +796,43 @@ class Game:
         self.message = 'Police ship destroyed. Fine increased by 150 cr.' if self.enemy_kind == 'police' else 'Hostile destroyed. Bounty: 35 credits.'
 
     def key(self, k):
+        if self.mode == 'departure':
+            if k == 27: self.mode = 'market'
+            elif k == ord('l') and self.departure_remaining <= 0: self.launch()
+            return
+        if self.mode == 'engineering':
+            if k in (ord('8'),27): self.mode = self.engineering_return
+            elif k == ord('t'): self.train_engineering()
+            elif k == ord('r'): self.attempt_engineering()
+            elif k == ord('h'): self.attempt_engineering(True)
+            return
+        if k == ord('8') and self.mode in ('flight','market','outfit'):
+            self.engineering_return = self.mode
+            self.mode = 'engineering'
+            self.keys.clear()
+            return
+        if self.mode == 'launch_warning':
+            if k == ord('l'): self.request_departure()
+            elif k == ord('f'):
+                self.message = self.p.refuel()
+                self.save()
+                if self.p.fuel >= 1: self.mode = self.launch_return
+            elif k == 27: self.mode = self.launch_return
+            return
+        if self.mode == 'distress':
+            if k in (UP,DOWN):
+                self.rescue['selected'] = (self.rescue['selected']+(-1 if k == UP else 1))%len(self.rescue['offers'])
+            elif k == ord('n'): self.negotiate_rescue()
+            elif k == ord('a'): self.accept_rescue()
+            elif k in (ord('r'),27):
+                self.rescue = None
+                self.mode = 'flight'
+                self.keys.clear()
+                self.message = 'Recovery offers declined. No salvage payment made.'
+            return
+        if k == ord('6') and self.mode in ('flight','cruise'):
+            self.open_distress()
+            return
         if self.mode == 'hyperspace' and k not in (27,ord('3')): return
         if self.mode == 'map' and self.map_input:
             self.map_edit(k)
@@ -577,7 +908,7 @@ class Game:
             if k == ord('u'):
                 self.mode = 'market' if self.mode == 'outfit' else 'outfit'
                 return
-            if k == ord('l'): self.launch(); return
+            if k == ord('l'): self.request_launch(); return
             if k == ord('f'):
                 self.message = self.p.refuel()
                 self.save()
@@ -610,13 +941,18 @@ class Game:
                 self.message = 'Cruise cancelled. Lock a new course or continue from the map.'
             return
         if self.mode != 'flight': return
+        if k == ord('7'):
+            self.request_docking()
+            return
         if k == ord('4'):
             self.rear_view = not self.rear_view
             self.laser_flash = 0
             self.message = ('REAR VIEW - rear pulse laser ready.' if 'rear' in self.p.equipment else 'REAR VIEW - no rear laser fitted. Buy one in outfitting.') if self.rear_view else 'FORWARD VIEW.'
             return
         if k == ord('5'):
-            self.ship_target = None if self.ship_target is self.enemy else self.enemy
+            targets = ([self.enemy] if self.enemy is not None else [])+([self.disabled_ship['object']] if self.disabled_ship else [])
+            current = next((i for i,target in enumerate(targets) if target is self.ship_target),-1)
+            self.ship_target = targets[current+1] if current+1 < len(targets) else None
             self.message = 'Ship target selected.' if self.ship_target else 'No ship selected.'
             return
         if k == ord('h'):
@@ -659,8 +995,10 @@ class Game:
             elif 'docking' not in self.p.equipment: self.message = 'Buy a docking computer in outfitting (U).'
             elif self.enemy: self.message = 'Clear hostile contact before auto-docking.'
             elif not 65 < self.station[2] <= 2500: self.message = 'Docking computer range: 2500 m.'
+            elif not self.station_allows(): self.message = 'Docking refused: wanted status.'
             else:
                 self.autodock = not self.autodock
+                if self.autodock and not self.dock_clearance: self.request_docking()
                 self.nav = 'station'
                 self.message = 'Docking computer engaged. C or manual controls cancel.' if self.autodock else 'Manual control.'
         if k == ord('v'):
@@ -727,6 +1065,9 @@ class Game:
             self.map_text += chr(key)
 
     def jump(self):
+        if self.broken_down:
+            self.message = 'Drive disabled. Engineering 8 or distress 6.'
+            return
         if self.jump_charge: return
         w = self.p.waypoint
         if not w: self.message = 'Lock a course first (G, ENTER).'; return
@@ -745,6 +1086,9 @@ class Game:
             self.message = 'Hold H: hyperspace in 3 seconds. Release to cancel.'
 
     def begin_cruise(self):
+        if self.broken_down:
+            self.message = 'Drive disabled. Engineering 8 or distress 6.'
+            return
         if self.mode == 'map' and self.map_return not in ('flight','cruise'):
             self.message = 'Launch before beginning interstellar cruise.'
             return
@@ -784,7 +1128,7 @@ class Game:
         self.p.position = list(position)
         self.p.deep_space = system is None
         if system is not None: self.p.system = system
-        self.launch()
+        self.launch(departure=False)
         if system is not None: self.station = [random.uniform(-80,80),random.uniform(-50,50),2200.]
         name = SYSTEMS[system][0] if system is not None else f'Deep space ({position[0]:.2f}, {position[1]:.2f})'
         self.arrival = dict(name=name,remaining=5.)
@@ -857,7 +1201,8 @@ class Game:
             i = w['system']; govt,pop,size = PROFILES[i]
             info += [SYSTEMS[i][1],f'Technology {TECH[i]}',govt,f'Population {pop:.1f} billion',f'Diameter {size:,} km',
                      'Exports: food / ore' if SYSTEMS[i][1] == 'Agricultural' else 'Exports: technology' if SYSTEMS[i][1] == 'Industrial' else 'Exports: mixed goods',
-                     'Customs: minimal' if govt in ('Anarchy','Feudal') else 'Customs: regulated']
+                     'Customs: minimal' if govt in ('Anarchy','Feudal') else 'Customs: regulated',
+                     'Docking: allowed' if self.station_allows(i) else 'Docking: REFUSED (wanted)']
         else: info += ['Uninhabited coordinates','No station or services']
         for i,line in enumerate(info): d.text(720,155+i*31,line,GOLD if i==0 else GREEN)
         if self.map_input:
@@ -878,6 +1223,9 @@ class Game:
         return x*c+y*s,-x*s+y*c,z
 
     def active_navigation(self):
+        if self.nav == 'object' and self.nav_target:
+            obj,label = self.nav_target
+            if any(obj is item for item in self.asteroids+self.fragments+self.mine_objects+[self.sun]): return obj,label
         if self.nav == 'course' and self.p.waypoint:
             w = self.p.waypoint
             delta = [b-a for a,b in zip(self.p.position,w['position'])]
@@ -898,10 +1246,15 @@ class Game:
         contacts = []
         if not self.p.deep_space:
             contacts += [('station',self.station,'STATION',GREEN),('planet',self.planet,SYSTEMS[self.p.system][0],(100,170,255))]
+        if self.disabled_ship:
+            contacts.append(('disabled',self.disabled_ship['object'],'DISABLED SHIP',GOLD))
         if self.enemy is not None:
             contacts.append(('ship',self.enemy,self.enemy_kind.upper(),RED if self.enemy_kind == 'pirate' else (120,170,255)))
         for mine in self.mine_objects:
-            contacts.append(('mine',mine,'MINE',RED))
+            contacts.append(('object',mine,'MINE',RED))
+        for rock in self.asteroids: contacts.append(('object',rock,'ASTEROID',GOLD))
+        for ore in self.fragments: contacts.append(('object',ore,'ORE',(150,190,255)))
+        contacts.append(('object',self.sun,'SUN',GOLD))
         return contacts
 
     def scanner_position(self, obj):
@@ -911,6 +1264,21 @@ class Game:
         return 955+x/scale*85,165-z/scale*53
 
     def click(self, x, y):
+        for bx,by,w,h,action in reversed(self.buttons):
+            if bx <= x <= bx+w and by <= y <= by+h:
+                action()
+                return
+        if self.mode == 'map' and not self.map_input and 60 <= x <= 660 and 155 <= y <= 545:
+            position = [(x-60)/60,(y-155)/39]
+            nearest = min(range(8),key=lambda i:galactic_distance(position,coordinates(i)))
+            if galactic_distance(position,coordinates(nearest)) < .25:
+                self.target,self.cursor_mode = nearest,False
+                self.map_cursor = coordinates(nearest)
+            else:
+                self.map_cursor = [round(n,2) for n in position]
+                self.cursor_mode = True
+            self.lock_waypoint()
+            return
         if self.mode != 'flight' or not (840 <= x <= 1070 and 80 <= y <= 245): return
         choices = []
         for kind,obj,label,color in self.scanner_contacts():
@@ -919,9 +1287,13 @@ class Game:
             if distance <= 12: choices.append((distance,kind,obj,label))
         if not choices: return
         _,kind,obj,label = min(choices,key=lambda contact:contact[0])
-        if kind == 'ship':
+        if kind in ('ship','disabled'):
             self.ship_target = obj
             self.message = label+' selected. Direction marker tracks this ship; 5 clears selection.'
+        elif kind == 'object':
+            self.nav = 'object'
+            self.nav_target = (obj,label)
+            self.message = label+' beacon selected.'
         elif kind in ('station','planet'):
             self.nav = kind
             self.message = label+' beacon selected.'
@@ -964,7 +1336,7 @@ class Game:
         for kind,obj,label,color in self.scanner_contacts():
             x,y = self.scanner_position(obj)
             d.fill(x-3,y-3,6,6,color)
-            if kind == 'ship' and obj is self.ship_target: d.rect(x-7,y-7,14,14,GOLD)
+            if kind in ('ship','disabled') and obj is self.ship_target: d.rect(x-7,y-7,14,14,GOLD)
         d.text(850,220,'Click / 5 target',(135,175,185))
 
     def update_jump_charge(self, dt):
@@ -1033,12 +1405,17 @@ class Game:
         return projected is not None and abs(projected[0]-W/2) < radius and abs(projected[1]-330) < radius
 
     def move_world(self, dx, dy, dz):
-        for obj in [self.station,self.sun,self.planet] + self.asteroids + self.fragments + self.mine_objects:
+        for obj in [self.station,self.sun,self.planet] + ([self.disabled_ship['object']] if self.disabled_ship else []) + self.asteroids + self.fragments + self.mine_objects:
             obj[0] -= dx
             obj[1] -= dy
             obj[2] -= dz
 
     def update(self, dt):
+        if self.mode == 'departure':
+            self.departure_remaining = max(0,self.departure_remaining-dt)
+            if self.departure_remaining == 0: self.message = 'Departure clearance granted. L launches; ESC stays docked.'
+            return
+        if self.mode in ('flight','cruise'): self.rescue_cooldown = max(0,self.rescue_cooldown-dt)
         if self.arrival:
             self.arrival['remaining'] -= dt
             if self.arrival['remaining'] <= 0: self.arrival = None
@@ -1056,6 +1433,27 @@ class Game:
             self.update_cruise(dt)
             return
         if self.mode != 'flight': return
+        self.dock_clearance = max(0,self.dock_clearance-dt)
+        if self.docking_pending > 0:
+            self.docking_pending = max(0,self.docking_pending-dt)
+            if self.docking_pending == 0:
+                if self.station_allows():
+                    self.dock_clearance = 120
+                    self.message = 'Docking clearance granted for 120 seconds.'
+                else: self.message = 'Docking clearance refused: wanted status.'
+        if self.breakdown_in is not None:
+            self.breakdown_in -= dt
+            if self.breakdown_in <= 0:
+                self.breakdown_in = None
+                self.broken_down = True
+                self.autodock = False
+                self.jump_charge = None
+                self.speed = 0
+                self.message = 'DRIVE BREAKDOWN. Engineering 8 for repairs, or 6 for rescue.'
+        self.assist_spawn_timer -= dt
+        if self.assist_spawn_timer <= 0 and self.disabled_ship is None and self.enemy is None and math.sqrt(sum(v*v for v in self.station)) > 1000:
+            self.disabled_ship = dict(object=[-160.,70.,850.],hull=40)
+            self.message = 'Disabled ship detected. Select its gold scanner contact; engineering 8.'
         self.cooldown = max(0,self.cooldown-dt)
         self.flash = max(0,self.flash-dt)
         self.laser_flash = max(0,self.laser_flash-dt)
@@ -1080,6 +1478,7 @@ class Game:
             self.roll += max(-dt/mass,min(dt/mass,self.slot_error()))
             desired = min(70/mass,max(12,(z-60)*0.22))
             if z < 150: desired = 12
+            if self.dock_clearance <= 0: desired = 0
             if z < 130 and (abs(x)>12 or abs(y)>5 or abs(self.slot_error())>0.12): desired = 0
             self.speed += max(-70*dt/mass,min(70*dt/mass,desired-self.speed))
         else:
@@ -1090,6 +1489,7 @@ class Game:
             vertical = ((DOWN in self.keys)-(UP in self.keys))*85*dt/mass
             c,s = math.cos(self.roll),math.sin(self.roll)
             dx,dy = horizontal*c-vertical*s,horizontal*s+vertical*c
+        if self.broken_down: self.speed,dx,dy = 0,0,0
         dz = self.speed*dt
         required = math.sqrt(dx*dx+dy*dy+dz*dz)*.00012*mass
         if required > self.p.fuel and required:
@@ -1097,9 +1497,9 @@ class Game:
             dx,dy,dz = dx*factor,dy*factor,dz*factor
             self.speed *= factor
         self.p.fuel = max(0,self.p.fuel-required)
-        if self.p.fuel == 0:
+        if self.p.fuel == 0 and not self.broken_down:
             self.autodock = False
-            self.message = 'Fuel exhausted. Scoop the sun if nearby, or reload your last station save.'
+            self.message = 'Fuel exhausted. Press 6 for a distress call and recovery offers.'
         self.move_world(dx,dy,dz)
         if self.enemy:
             self.enemy[0] -= dx
@@ -1187,6 +1587,100 @@ class Game:
                     self.fragments += [[rock[0]+offset,rock[1]+10,rock[2]] for offset in (-18,0,18)]
                     self.message = 'Asteroid fragmented! Approach slowly; O collects ore within 260m.'
 
+    def release_mouse(self):
+        for key in self.mouse_held: self.keys.discard(key)
+        self.mouse_held.clear()
+
+    def mouse_key(self, key, hold=False):
+        if hold:
+            self.keys.add(key)
+            self.mouse_held.add(key)
+        if key == ord('h') and hold: self.mouse_controls = False
+        self.key(key)
+
+    def mouse_button(self, x,y,w,label,key=None,action=None,hold=False):
+        d = self.d
+        d.fill(x,y,w,28,(13,35,46))
+        d.rect(x,y,w,28,(55,125,135))
+        d.text(x+5,y+3,label,GREEN)
+        callback = action if action is not None else lambda:self.mouse_key(key,hold)
+        self.buttons.append((x,y,w,28,callback))
+
+    def mouse_row(self,x,y,w,h,action):
+        self.buttons.append((x,y,w,h,action))
+
+    def draw_mouse_ui(self):
+        self.buttons = []
+        d = self.d
+        modal = self.mode in ('distress','departure','launch_warning','engineering','hyperspace')
+        if self.mode == 'flight':
+            self.mouse_button(310,18,92,'Actions',action=lambda:setattr(self,'mouse_controls',not self.mouse_controls))
+        if not modal:
+            self.mouse_button(408,18,50,'Help',ord('1'))
+            self.mouse_button(462,18,70,'Update',ord('2'))
+        self.mouse_button(536,18,45,'FS',action=self.mouse_fullscreen)
+        self.mouse_button(585,18,45,'<' if modal or self.mode in ('help','updates') else 'X',action=self.mouse_back)
+        row_y = 674
+        if self.mode in ('market','outfit'):
+            if self.mode == 'market':
+                for i in range(len(GOODS)):
+                    self.mouse_row(35,165+i*35,610,35,lambda i=i:setattr(self,'selected',i))
+                labels = [('Buy',ord('b')),('Sell',ord('s')),('Fuel',ord('f')),('Service',ord('r')),('Outfit',ord('u')),('Launch',ord('l')),('Map',ord('g')),('Skills',ord('8'))]
+            else:
+                start = max(0,min(self.shop_selected-4,len(EQUIPMENT)-8))
+                for i in range(start,min(start+8,len(EQUIPMENT))):
+                    self.mouse_row(35,130+(i-start)*37,720,37,lambda i=i:setattr(self,'shop_selected',i))
+                self.mouse_button(690,90,45,'Up',UP)
+                self.mouse_button(740,90,60,'Down',DOWN)
+                labels = [('Fit',ord('b')),('Fuel',ord('f')),('Service',ord('r')),('Market',ord('u')),('Launch',ord('l')),('Map',ord('g')),('Skills',ord('8')),('Fines',ord('p'))]
+            for i,(label,key) in enumerate(labels): self.mouse_button(35+i*128,row_y,120,label,key)
+        elif self.mode == 'map':
+            labels = [('Search',ord('/'),False),('Coords',ord('c'),False),('Lock',13,False),('Hold Jump',ord('h'),True),('Cruise',ord('t'),False),('Return',ord('g'),False)]
+            if self.map_input:
+                labels = [('Confirm',13,False),('Erase',8,False),('Cancel',27,False)]
+            for i,(label,key,hold) in enumerate(labels): self.mouse_button(35+i*166,row_y,155,label,key,hold=hold)
+        elif self.mode == 'launch_warning':
+            for i,(label,key) in enumerate([('Buy fuel',ord('f')),('Request launch',ord('l')),('Cancel',27)]): self.mouse_button(50+i*300,row_y,280,label,key)
+        elif self.mode == 'departure':
+            self.mouse_button(50,row_y,300,'Launch when cleared',ord('l'))
+            self.mouse_button(370,row_y,250,'Cancel',27)
+        elif self.mode == 'distress':
+            for i in range(len(self.rescue['offers'])):
+                self.mouse_row(35,169+i*38,1000,38,lambda i=i:self.rescue.update(selected=i))
+            for i,(label,key) in enumerate([('Accept claim',ord('a')),('Negotiate',ord('n')),('Refuse',ord('r'))]): self.mouse_button(50+i*300,row_y,280,label,key)
+        elif self.mode == 'engineering':
+            for i,(label,key) in enumerate([('Train',ord('t')),('Repair self',ord('r')),('Help target',ord('h')),('Return',ord('8'))]): self.mouse_button(35+i*255,row_y,240,label,key)
+        elif self.mode in ('help','updates'):
+            self.mouse_button(40,row_y,160,'Return',ord('1') if self.mode == 'help' else ord('2'))
+        elif self.mode == 'cruise':
+            for i,(label,key) in enumerate([('Cancel cruise',ord('t')),('Map',ord('g')),('Distress',ord('6'))]): self.mouse_button(50+i*300,row_y,280,label,key)
+        elif self.mode == 'dead':
+            self.mouse_button(50,row_y,260,'New pilot',ord('n'))
+        if self.mode == 'flight' and self.mouse_controls:
+            d.fill(30,105,350,487,(5,16,27))
+            d.rect(30,105,350,487,GREEN)
+            d.text(40,112,'COCKPIT / HOLD TO MOVE',GOLD)
+            items = [('Throttle',ord('w'),True),('Brake/rev',ord('s'),True),('Fire',32,True),
+                ('Left',LEFT,True),('Up',UP,True),('Right',RIGHT,True),
+                ('Roll L',ord('q'),True),('Down',DOWN,True),('Roll R',ord('e'),True),
+                ('View 4',ord('4'),False),('Laser',ord('v'),False),('Missile',ord('m'),False),
+                ('Mine',ord('b'),False),('Jammer',ord('z'),False),('Cloak',ord('k'),False),
+                ('Station',ord('d'),False),('Planet',ord('p'),False),('Rocks',ord('a'),False),
+                ('Sun',ord('j'),False),('Scoop',ord('o'),False),('Target',ord('5'),False),
+                ('Radio 7',ord('7'),False),('Autodock',ord('c'),False),('Skills',ord('8'),False),
+                ('Map',ord('g'),False),('Hold jump',ord('h'),True),('Cruise',ord('t'),False),
+                ('Distress',ord('6'),False)]
+            for i,(label,key,hold) in enumerate(items): self.mouse_button(40+(i%3)*110,150+(i//3)*38,105,label,key,hold=hold)
+
+    def mouse_fullscreen(self):
+        self.d.is_fullscreen = not self.d.is_fullscreen
+        self.d.fullscreen(self.d.win,0x1001 if self.d.is_fullscreen else 0)
+
+    def mouse_back(self):
+        if self.mode == 'help': self.key(ord('1'))
+        elif self.mode == 'updates': self.key(ord('2'))
+        else: self.key(27)
+
     def draw(self):
         d,p = self.d,self.p
         d.color(d.r,4,9,18,255)
@@ -1195,14 +1689,25 @@ class Game:
         location = 'In transit' if self.mode == 'hyperspace' else 'Deep space' if p.deep_space or self.mode == 'cruise' else SYSTEMS[p.system][0]
         d.text(640,20,f'{location}  CR {p.credits:.0f}  KILLS {p.kills}')
         d.line(25,52,W-25,52)
-        if self.mode == 'hyperspace':
+        if self.mode == 'engineering':
+            self.draw_engineering()
+        elif self.mode == 'departure':
+            d.text(80,150,'STATION TRAFFIC CONTROL',GOLD)
+            d.text(80,220,f'Requesting departure: {self.departure_remaining:.1f}s' if self.departure_remaining else 'Departure clearance GRANTED.')
+            d.text(80,290,'L launches when cleared. ESC cancels and stays docked.')
+            d.text(80,345,f'Next flight breakdown risk: {self.breakdown_risk(True)*100:.1f}%. Station R services your ship.')
+        elif self.mode == 'launch_warning':
+            self.draw_launch_warning()
+        elif self.mode == 'distress':
+            self.draw_distress()
+        elif self.mode == 'hyperspace':
             self.draw_hyperspace()
         elif self.mode == 'help':
             lines = ['FLIGHT MANUAL',
                 'STATION: Arrows select. B buy, S sell, U outfitting, L launch.',
                 'F buys fuel (3 cr/unit), R repairs, P pays fines. * = illegal.',
                 'FLIGHT: Arrows steer. W/S speed/reverse. Q/E roll. SPACE laser.',
-                'Cargo adds inertia, slows turning/braking and uses more fuel.',
+                '6 distress call: station rescue or negotiated deep-space salvage.',
                 'V cycles front lasers. M missile. B deploys mine; keep clear.',
                 '4 toggles rear view. SPACE uses rear laser, if bought/fitted.',
                 'D station beacon. Fly into slot: speed 1-25, Q/E match roll.',
@@ -1219,7 +1724,8 @@ class Game:
                 'Scanner: click ship or 5 selects it. Dot/arrow tracks bearing.',
                 'Dock/trade/purchase to save. In space, quit retains last save.',
                 '1 return. 2 updates. 3 fullscreen. ESC quit.']
-            for i,line in enumerate(lines): d.text(30,77+i*30,line)
+            lines.insert(-1,'6 distress/rescue. 7 docking radio. 8 engineering / training.')
+            for i,line in enumerate(lines): d.text(30,77+i*26,line)
         elif self.mode == 'updates':
             latest = self.updates.latest
             lines = ['STAR TRADER / UPDATES',f'Installed version: {VERSION}',
@@ -1256,7 +1762,7 @@ class Game:
                     d.text(35,135+(i-start)*37,f'{">" if i==self.shop_selected else " "} {label:<23} {cost:>4} cr  {state}',GOLD if i==self.shop_selected else GREEN)
                 d.text(35,455,EQUIPMENT[self.shop_selected][4],GOLD)
                 d.text(35,490,'UP/DOWN select; B or ENTER purchases and fits equipment.')
-            for i,t in enumerate(['COMMANDER STATUS',f'Cargo {sum(p.cargo)}/{p.capacity} t',f'Fuel  {p.fuel:.2f}/7',f'Hull  {p.hull:.0f}%',f'Refill {p.fuel_cost()} cr',f'Repair {math.ceil((100-p.hull)*0.5)} cr',f'Mines {p.mines}/4',f'Fine {p.fine} cr']): d.text(790,135+i*40,t)
+            for i,t in enumerate(['COMMANDER STATUS',f'Cargo {sum(p.cargo)}/{p.capacity} t',f'Fuel  {p.fuel:.2f}/7',f'Hull  {p.hull:.0f}%',f'Refill {p.fuel_cost()} cr',f'Service {math.ceil((100-p.hull)*0.5+p.maintenance*.5)} cr',f'Mines {p.mines}/4',f'Fine {p.fine} cr',f'Wear {p.maintenance:.0f}%',f'Eng. {p.engineering_level}/5']): d.text(790,135+i*40,t)
             d.text(35,550,'F fuel   R repair   P pay fines   U outfitting/market   L launch')
             d.text(35,590,'G galaxy chart   1 manual   ESC quit')
         elif self.mode == 'map':
@@ -1277,6 +1783,7 @@ class Game:
             d.text(220,300,'N starts a new pilot. ESC preserves your last station save.')
         else:
             self.draw_flight()
+        self.draw_mouse_ui()
         d.line(25,710,W-25,710)
         notice = 'Update '+self.updates.latest+' available - 2' if self.updates.latest else self.message
         d.text(28,725,notice[:94],GOLD)
@@ -1301,6 +1808,7 @@ class Game:
         for rock in self.asteroids: self.object(rock,'asteroid')
         for fragment in self.fragments: self.object(fragment,'ore')
         if self.enemy: self.object(self.enemy,self.enemy_kind)
+        if self.disabled_ship: self.object(self.disabled_ship['object'],'disabled')
         if self.laser_flash:
             color = GOLD if p.laser == 'mining' and not self.rear_view else RED
             d.line(160,550,550,330,color)
@@ -1310,8 +1818,8 @@ class Game:
         clip(d.r,None)
         target,label = self.active_navigation()
         if target is not None: self.draw_marker(target,label,GOLD)
-        if self.ship_target is not self.enemy: self.ship_target = None
-        if self.ship_target is not None: self.draw_marker(self.ship_target,'TARGET '+self.enemy_kind.upper(),(255,100,180))
+        if self.ship_target is not self.enemy and (not self.disabled_ship or self.ship_target is not self.disabled_ship['object']): self.ship_target = None
+        if self.ship_target is not None: self.draw_marker(self.ship_target,'DISABLED SHIP' if self.disabled_ship and self.ship_target is self.disabled_ship['object'] else 'TARGET '+self.enemy_kind.upper(),(255,100,180))
         self.draw_scanner()
         d.text(35,73,'REAR VIEW' if self.rear_view else 'FORWARD VIEW',GOLD)
         if self.flash: d.rect(26,65,W-52,490,RED)
@@ -1327,9 +1835,9 @@ class Game:
         d.text(35,594,f'SPEED {self.speed:.0f}  FUEL {p.fuel:.2f}  {('REAR PULSE' if 'rear' in p.equipment else 'REAR UNARMED') if self.rear_view else p.laser.upper()} LASER  MISSILES {p.missiles}  HEAT {self.heat:.0f}%')
         d.text(35,625,f'SHIELD {self.shield:.0f}%  HULL {p.hull:.0f}%  HOLD {sum(p.cargo)}/{p.capacity}t')
         error = math.degrees(self.slot_error())
-        d.text(650,625,'AUTODOCK' if self.autodock else f'SLOT ROLL {error:+.0f} deg',GOLD)
+        d.text(650,625,'DRIVE DISABLED' if self.broken_down else 'AUTODOCK' if self.autodock else f'DOCK CLEAR {self.dock_clearance:.0f}s' if self.dock_clearance else f'SLOT {error:+.0f}deg / 7 radio',GOLD)
         status = 'CLOAKED' if self.cloaked else 'JAMMING' if self.jamming else ''
-        d.text(35,657,f'MINES {p.mines}  {status}  1 controls  2 updates',GOLD)
+        d.text(35,657,f'MINES {p.mines}  {status}  1 controls  2 updates  6 distress',GOLD)
         if p.fuel < 1.0:
             d.text(810,657,'LOW FUEL',RED)
         if p.waypoint:
@@ -1337,7 +1845,7 @@ class Game:
             delta = [b-a for a,b in zip(p.position,w['position'])]
             d.text(35,686,f'COURSE {w["name"]} ({w["position"][0]:.2f},{w["position"][1]:.2f})  {math.hypot(*delta):.2f} LY  T cruise',GOLD)
         elif p.fuel < 1.0:
-            d.text(35,686,'LOW FUEL - buy a refill or skim the sun with scoops.',RED)
+            d.text(35,686,'LOW FUEL - buy fuel / skim the sun. Press 6 for distress.',RED)
         if self.jump_charge:
             count = max(1,math.ceil(3-self.jump_charge['held']))
             d.fill(240,265,600,90,(4,9,18))
@@ -1356,10 +1864,10 @@ class Game:
         if sx < -800 or sx > W+800 or sy < -800 or sy > H+800: return
         color = GREEN
         angle = self.roll if self.rear_view else -self.roll
-        if kind in ('pirate','police'):
+        if kind in ('pirate','police','disabled'):
             points = [(-65,10),(-20,-15),(0,-5),(20,-15),(65,10),(0,28)]
             edges = [(0,1),(1,2),(2,3),(3,4),(4,5),(5,0),(0,4),(2,5)]
-            color = RED if kind == 'pirate' else (120,170,255)
+            color = GOLD if kind == 'disabled' else RED if kind == 'pirate' else (120,170,255)
         elif kind == 'station':
             angle += -self.station_angle if self.rear_view else self.station_angle
             points = [(math.cos(i*math.pi/4)*100,math.sin(i*math.pi/4)*100) for i in range(8)]
@@ -1409,8 +1917,11 @@ def main():
             dt,last = min(0.05,now-last),now
             for kind,key in display.events():
                 if kind == 'quit': game.running = False
-                elif kind == 'blur': game.keys.clear()
+                elif kind == 'blur':
+                    game.keys.clear()
+                    game.release_mouse()
                 elif kind == 'click': game.click(*key)
+                elif kind == 'mouse_up': game.release_mouse()
                 elif kind == 'down':
                     game.keys.add(key)
                     game.key(key)

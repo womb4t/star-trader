@@ -1,6 +1,6 @@
 # Star Trader
 
-An original Elite-inspired Python space game for **Omarchy**. Trade, mine, fight robot pirates, smuggle contraband and navigate a small wireframe universe. Current version: **0.2.2**.
+An original Elite-inspired Python space game for **Omarchy**. Trade, mine, fight robot pirates, smuggle contraband and navigate a small wireframe universe. Current version: **0.2.3**.
 
 The current game is offline single-player. Self-hosted multiplayer is a future project; see [MULTIPLAYER.md](MULTIPLAYER.md). The next offline expansion is outlined in [ROADMAP.md](ROADMAP.md).
 
@@ -49,13 +49,14 @@ You start docked with 150 credits, a full 7-unit fuel tank, a pulse laser, three
 
 | Screen | Controls |
 | --- | --- |
-| Station | Up/Down select; B buy; S sell; U outfitting; L launch |
+| Station | Up/Down select; B buy; S sell; U outfitting; L requests departure clearance, then L launches once granted |
 | Station services | F buys a full fuel refill; R repairs hull; P pays fines |
 | Outfitting | Up/Down browse; B or Enter buy and fit; U returns to market |
 | Flight | Arrows steer; W accelerate; S brake, then reverse; Q/E roll |
 | View | 4 toggles front/rear view; Space fires the current view’s fitted laser |
 | Weapons | Space fires selected laser; V cycles installed lasers; M fires a missile; B deploys a mine |
 | Equipment | C docking computer; Z signal jammer; K phase cloak |
+| Safety and radio | 6 distress/recovery; 7 requests docking clearance; 8 engineering and training |
 | Local beacons | D station; P planet; A asteroid/ore; J sun; O collects nearby ore |
 | Galaxy map | G open/close; arrows select planet; / searches names; C enters X,Y |
 | Free map cursor | Tab switches between planet selection and coordinate cursor; arrows move cursor |
@@ -63,11 +64,23 @@ You start docked with 150 credits, a full 7-unit fuel tank, a pulse laser, three
 | Scanner | Click a ship contact to select it; 5 selects/clears the current ship target |
 | General | 1 manual; 2 updates; 3 fullscreen; Esc quit |
 
-### Docking
+### Mouse controls
+
+Mouse selection is available throughout the game: click commodity/equipment rows, then the buy/sell/fit buttons; click planets or empty coordinates on the map; click scanner contacts; select rescue offers and use the accept/negotiate/refuse buttons. Screen buttons cover departure, docking, station services, training, repair, travel and returning from menus. Search and coordinate fields still support normal keyboard text entry; clicking the map selects a destination without typing.
+
+In flight, click **Actions** in the top bar for a cockpit control panel. Hold a movement, roll or fire button to keep it active; releasing the mouse stops that input. Hold **Hold jump** for the same three-second hyperspace countdown as H. A click can also use weapons, jamming, cloaking, beacons, the radio and engineering. **FS** toggles fullscreen; **X** quits or **<** goes back from a modal screen. Losing window focus releases held inputs.
+
+### Docking and departure clearance
+
+L first checks fuel and the locked destination's jump requirement, including a conservative local-approach reserve. An empty/low tank or insufficient destination fuel opens a warning: refill, cancel, or explicitly proceed. The warning can be overridden; it is not a mandatory refuelling purchase.
+
+After requesting departure, wait two seconds for clearance, then press L (or click Launch) to leave. Cancelling keeps you docked.
+
+Before docking, press **7** or use **Radio 7** in Actions. Station control responds after two seconds if within 10,000 metres. Clearance lasts 120 seconds. A docking computer requests clearance automatically. Regulated stations refuse pilots with outstanding fines of 100 credits or more; anarchy and feudal ports still accept them. Profiles show the current docking policy for your pilot. Departure from a station where you are already docked remains permitted.
 
 Fly through the rotating entrance at speed **1–25**. Centre within **14 metres horizontally and 6 metres vertically**, measured in the slot's frame, and use Q/E to keep the slot horizontal within about nine degrees. The cockpit reports roll error. Begin braking early, especially with a loaded hold. A station collision damages shields and hull.
 
-A purchased docking computer handles the approach when the station is ahead, within 2,500 metres, and no hostile ship is present. C or manual steering cancels it.
+Without valid clearance, even a geometrically correct entry will be rejected as a collision. A purchased docking computer handles the approach when the station is ahead, within 2,500 metres, and no hostile ship is present. C or manual steering cancels it.
 
 ### Trading, equipment and mining
 
@@ -90,7 +103,27 @@ The cockpit has a top-down scanner: your ship is white at its centre, front is t
 
 The active navigation destination has a gold dot/bracket when visible and an edge arrow when outside the view. Rearward targets are labelled “BEHIND: 4”; toggle rear view to see them. A remote locked galaxy waypoint shows a compass course; H/T travels between galactic coordinates. Once there, local beacons guide normal flight toward the station, sun, planet or ore. Steering in local space does not change galactic coordinates.
 
-These are game-scale distances/timings. Local flight also consumes fuel. The 7-unit tank no longer guarantees a seven-light-year jump. Low reserves trigger a warning; fuel can run out. F at a station buys a refill at 3 credits per unit, independently of hull repairs. Scoops can gather fuel near the sun: J selects its beacon, skim within 500 metres at speed 10–60, and retreat before heat reaches 90. Empty-space coordinates have no station or services. If stranded without a viable fuel source, quit and resume from the last station save.
+These are game-scale distances/timings. Local flight also consumes fuel. The 7-unit tank no longer guarantees a seven-light-year jump. Low reserves trigger a warning; fuel can run out. F at a station buys a refill at 3 credits per unit, independently of hull repairs. Scoops can gather fuel near the sun: J selects its beacon, skim within 500 metres at speed 10–60, and retreat before heat reaches 90. Empty-space coordinates have no station or services. If stranded without a viable fuel source, press 6 to request rescue and review salvage terms.
+
+### Distress calls, salvage and rescue
+
+Press **6** in flight or cruise, or click Distress. A call stops cruise and opens recovery offers. Broadcasting reveals a cloaked ship. Calls have a 60-second in-flight cooldown; declining an offer takes no payment.
+
+Within **5,000 metres** of a station that accepts your pilot, the **Galactic Recovery Accord** charges a fixed **25% of credits AND cargo tonnes**, rounded up and capped at what you hold. The screen lists the exact cash amount and each cargo item claimed before you accept. Equipment is not part of the salvage claim.
+
+Beyond coverage, or where local authorities refuse a wanted pilot, three robot salvagers quote independent percentages. Select an offer, press N or click Negotiate to counter up to twice per rescuer, and accept or refuse the resulting terms. Private quotes can be reduced but never below 25%. No payment occurs without acceptance.
+
+Accepting applies the claim once, tows you to an accepting station, fills the fuel tank, stabilises hull to at least 25%, and docks/saves. Existing equipment is preserved; remaining damage still needs repair. Station customs may confiscate illegal cargo separately. A pilot with no credits/cargo is still rescued, with a zero salvage claim. Wanted pilots are routed to a port that will admit them.
+
+### Maintenance and engineering
+
+Each actual station departure adds maintenance wear and increments flights since service. Once the ship is neglected (at least three departures, or hull below 80%), each departure rolls a breakdown chance that increases with wear, flight count and existing hull damage. The engineering screen and departure screen show the next-flight risk. A breakdown stops the drive and disables cruise/hyperspace; weapons and the distress radio remain usable. Station **R / Service** repairs hull and resets wear and the flight counter, charging for both damage and wear. Travelling or being towed between systems does not count as an extra departure.
+
+Press **8 / Skills** for engineering. Buy levels 1–5 at a station for 200, 400, 800, 1,600 and 3,200 credits. Higher skill improves field-repair probability, hull restoration and wear reduction. Parts cost **15 credits per attempt**. Field repairs can clear a breakdown and repair your own ship; station servicing remains more thorough.
+
+Disabled robot ships sometimes appear in local space. Select their gold scanner contact (or cycle targets with 5), get within **350 metres** and slow to **30 or less**. In engineering, choose Help target / H to attempt assistance. Success earns a crew payment; failure uses the same repair cooldown as working on your own ship. Repair parties cannot work with an active hostile present.
+
+A failed attempt imposes a **real-time** wait: **30 minutes, then 60, 120, 240…** for consecutive failures. A successful attempt resets the failure sequence. Cooldowns are tied to the commander and stored immediately in an engineering ledger, so restarting or reloading the previous station save does not skip the wait. A new pilot has a separate identity. Normal field-repair outcomes, cargo and crew rewards still save at the next station. There is no need to wait out a cooldown to call for distress rescue.
 
 ### Combat, stealth and smuggling
 
@@ -104,7 +137,7 @@ Narcotics and unlicensed arms are marked `*` in the market. Regulated stations m
 
 Game files install under `${XDG_DATA_HOME:-~/.local/share}/star-trader/`. The launcher is in the same data directory under `applications/star-trader.desktop`.
 
-The save is `star-trader/save.json`. Docking, trades and station purchases save automatically. Original saves are migrated, preserving cash, cargo, equipment and location. Quitting or dying in space retains your last station save. N on the death screen starts a new pilot and replaces the save. Back up `save.json` before experimenting with it.
+The save is `star-trader/save.json`. Per-commander repair cooldowns are stored alongside it as `engineering-<commander-id>.json`; back these up with the save. Docking, trades and station purchases save automatically. Original saves are migrated, preserving cash, cargo, equipment and location. Quitting or dying in space retains your last station save. N on the death screen starts a new pilot and replaces the save. Back up `save.json` before experimenting with it.
 
 Remove installed code and launcher while keeping your save:
 

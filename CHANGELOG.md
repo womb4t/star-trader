@@ -1,3 +1,14 @@
+# 0.2.3 — recovery, engineering, station traffic and mouse controls
+
+- Low/empty-fuel and destination-fuel warning before departure, including local approach reserve.
+- Station departure requests and time-limited docking clearance; regulated ports can refuse wanted pilots.
+- Distress calls: fixed 25% cash/cargo salvage within 5,000m of accepting stations, negotiated robot offers elsewhere.
+- Explicit fee review, single settlement, equipment preservation and rescue even with zero cash/cargo.
+- Maintenance wear and successive-flight breakdown risk; station service resets wear and flight count.
+- Purchased engineering skill, probabilistic own-ship/disabled-ship repairs, crew rewards and commander-specific persistent failure cooldowns (30, 60, 120... real minutes).
+- Clickable trade/equipment/map/scanner/offer selection, screen actions and a held-input cockpit panel for mouse flight, weapons and hyperspace.
+- Original save migration, regression checks and rendered screen verification.
+
 # 0.2.2 — cockpit navigation and hyperspace
 
 - Gold navigation dots/brackets and edge arrows track the active destination in front/rear view.

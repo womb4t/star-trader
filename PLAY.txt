@@ -1,4 +1,4 @@
-STAR TRADER 0.2.2 — original space trading game for Omarchy
+STAR TRADER 0.2.3 — original space trading game for Omarchy
 
 Install: bash install.sh
 Play: open your app launcher and search for Star Trader.
@@ -8,7 +8,9 @@ Or run: python3 star_trader.py
 3: fullscreen. ESC: quit. Update from a clean checkout: python3 update.py
 
 Station: arrows select, B buy, S sell, U outfitting, F buy fuel,
-R repair, P pay fines, L launch. Buy and sell prices differ.
+R service hull/maintenance, P pay fines. L requests departure;
+wait for clearance, then L launches. A low/insufficient-fuel warning
+lets you buy fuel, cancel, or explicitly proceed. Buy and sell prices differ.
 Cargo affects speed, turning, braking, fuel use and cruise time.
 
 Flight: arrows steer, W accelerate, S brake/reverse, Q/E roll.
@@ -16,6 +18,14 @@ SPACE laser, V switch front laser, M missile, B deploy mine.
 4 toggles front/rear view. Rear fire needs a purchased rear pulse laser.
 C docking computer, Z jammer, K cloak (equipment must be bought).
 D station, P planet, A asteroid/ore, J sun, O scoop nearby ore.
+7 requests docking clearance. Regulated ports may refuse wanted pilots.
+6 distress: nearby station rescue claims 25% cash AND cargo; outside
+coverage, select/negotiate robot salvage offers before accepting.
+8 engineering: train while docked; repair self/help disabled ships in flight.
+Failure cooldowns start at 30 real minutes, doubling on consecutive failures.
+Station service resets maintenance; neglect raises breakdown risk each flight.
+Mouse: click rows, map locations, scanner contacts and action buttons.
+Actions opens held movement/fire/hyperspace controls in the cockpit.
 
 G galaxy map: / search planets, C coordinates, TAB free cursor,
 arrows select/move, ENTER locks a waypoint. Hold H for 3 seconds: countdown, star-stream transit and arrival banner.

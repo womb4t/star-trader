@@ -100,7 +100,7 @@ class GameplayTests(unittest.TestCase):
 
     def test_manual_docking_requires_slot_alignment_and_slow_speed(self):
         g = self.game
-        g.launch(); g.station = [0,0,66]; g.speed = 15
+        g.launch(); g.station = [0,0,66]; g.speed = 15; g.dock_clearance = 120
         g.update(.1)
         self.assertEqual(g.mode,'market')
         self.assertTrue(st.SAVE.exists())
@@ -593,6 +593,207 @@ class GameplayTests(unittest.TestCase):
         self.assertLess(g.camera_vector([0,0,-10])[2],0)
         g.rear_view = True
         self.assertGreater(g.camera_vector([0,0,-10])[2],0)
+
+    def test_departure_fuel_warning_checks_locked_destination(self):
+        g = self.game
+        g.p.fuel = 0; g.key(ord('l'))
+        self.assertEqual(g.mode,'launch_warning')
+        g.key(27); self.assertEqual(g.mode,'market')
+        g.p.fuel = 2
+        g.p.waypoint = dict(name='Zaonce',position=st.coordinates(1),system=1)
+        g.key(ord('l')); self.assertEqual(g.mode,'launch_warning')
+        g.key(ord('f')); self.assertEqual(g.p.fuel,7)
+        self.assertEqual(g.mode,'market')
+        g.key(ord('l')); self.assertEqual(g.mode,'departure')
+        g.key(ord('l')); self.assertEqual(g.mode,'departure')
+        g.update(2); g.key(ord('l')); self.assertEqual(g.mode,'flight')
+
+    def test_docking_requires_requested_clearance_and_wanted_pilots_can_be_refused(self):
+        g = self.game
+        g.launch(); g.station = [0,0,200]; g.speed = 15
+        self.assertFalse(g.docking_safe())
+        g.key(ord('7')); self.assertEqual(g.docking_pending,2)
+        g.speed = 0; g.update(2)
+        self.assertGreater(g.dock_clearance,0)
+        g.speed = 15; g.roll = g.station_angle
+        self.assertTrue(g.docking_safe())
+        g.p.fine = 200; self.assertFalse(g.docking_safe())
+        g.request_docking(); self.assertEqual(g.dock_clearance,0)
+        self.assertIn('refused',g.message)
+        g.p.system = 4; g.request_docking(); self.assertEqual(g.docking_pending,2)
+
+    def test_regulated_rescue_salvage_and_single_settlement(self):
+        g = self.game
+        g.p.cargo[0] = 20; g.p.credits = 200
+        g.launch(); g.p.fuel = 0; g.open_distress()
+        self.assertEqual(g.mode,'distress')
+        self.assertTrue(g.rescue['covered'])
+        terms = g.salvage_terms(25)
+        self.assertEqual((terms['credits'],terms['tonnes']),(50,5))
+        g.key(ord('a'))
+        self.assertEqual(g.mode,'market')
+        self.assertEqual((g.p.credits,g.p.cargo[0],g.p.fuel),(150,15,7))
+        g.accept_rescue(); self.assertEqual(g.p.credits,150)
+        p = st.Pilot(); self.assertTrue(p.load()); self.assertEqual(p.cargo[0],15)
+
+    def test_deep_space_rescue_negotiation_and_refusal(self):
+        g = self.game
+        g.arrive([5,5],None); g.p.credits = 500
+        g.open_distress(); self.assertFalse(g.rescue['covered'])
+        self.assertEqual(len(g.rescue['offers']),3)
+        offer = g.rescue['offers'][0]; initial = offer['percent']
+        g.key(ord('n')); self.assertLess(offer['percent'],initial)
+        g.key(ord('n')); final = offer['percent']; g.key(ord('n'))
+        self.assertEqual(offer['percent'],final)
+        self.assertEqual(offer['counters'],2)
+        g.key(ord('r')); self.assertEqual(g.p.credits,500)
+        self.assertEqual(g.mode,'flight')
+        g.key(ord('6')); self.assertEqual(g.mode,'flight')
+        g.rescue_cooldown = 0; g.key(ord('6'))
+        self.assertEqual(g.mode,'distress')
+
+    def test_rescue_zero_assets_and_criminal_destination(self):
+        g = self.game
+        g.arrive([4.1,2],None); g.p.credits = 0; g.p.fuel = 0; g.p.fine = 500
+        g.open_distress(); target = g.rescue['destination']
+        self.assertIn(st.PROFILES[target][0],('Anarchy','Feudal'))
+        self.assertEqual(g.salvage_terms(65)['tonnes'],0)
+        g.accept_rescue()
+        self.assertEqual(g.mode,'market')
+        self.assertEqual((g.p.fuel,g.p.credits),(7,0))
+        self.assertEqual(g.p.system,target)
+
+    def test_salvage_rounding_does_not_destroy_extra_cargo(self):
+        g = self.game
+        g.p.cargo = [1,1,1,0,0,0,0,0]
+        for rate in (25,35,65):
+            terms = g.salvage_terms(rate)
+            self.assertEqual(sum(terms['cargo']),terms['tonnes'])
+            self.assertEqual(terms['tonnes'],st.math.ceil(3*rate/100))
+            self.assertTrue(all(a<=b for a,b in zip(terms['cargo'],g.p.cargo)))
+
+    def test_maintenance_risk_increases_and_service_resets_it(self):
+        g = self.game
+        g.p.flights_since_service = 3; g.p.maintenance = 15; g.p.hull = 70
+        first = g.breakdown_risk()
+        g.p.flights_since_service += 1; g.p.maintenance += 2
+        self.assertGreater(g.breakdown_risk(),first)
+        g.p.credits = 1000; g.p.repair()
+        self.assertEqual((g.p.hull,g.p.maintenance,g.p.flights_since_service),(100,0,0))
+        self.assertEqual(g.breakdown_risk(),0)
+        g.launch(); count = g.p.flights_since_service
+        g.arrive(st.coordinates(1),1)
+        self.assertEqual(g.p.flights_since_service,count)
+
+    def test_breakdown_stops_drive_and_engineering_success_repairs(self):
+        g = self.game
+        g.launch(); g.breakdown_in = .1; g.keys = {ord('w')}
+        g.update(.1)
+        self.assertTrue(g.broken_down)
+        self.assertEqual(g.speed,0)
+        g.p.waypoint = dict(name='Zaonce',position=st.coordinates(1),system=1)
+        g.jump(); self.assertIsNone(g.jump_charge)
+        g.key(ord('8')); g.p.credits = 500
+        with patch.object(st.random,'random',return_value=0): g.key(ord('r'))
+        self.assertFalse(g.broken_down)
+        self.assertEqual(g.p.credits,485)
+
+    def test_engineering_failure_cooldown_persists_without_saving_flight_progress(self):
+        g = self.game
+        g.p.save(); g.launch(); g.p.hull = 50; g.p.credits = 500
+        g.key(ord('8'))
+        with patch.object(st.time,'time',return_value=10000),patch.object(st.random,'random',return_value=1):
+            g.key(ord('r'))
+            self.assertEqual(g.p.engineering_ready_at,11800)
+            credits = g.p.credits; g.key(ord('r')); self.assertEqual(g.p.credits,credits)
+        reloaded = st.Game(None)
+        self.assertEqual(reloaded.p.engineering_ready_at,11800)
+        self.assertEqual(reloaded.p.hull,100)
+        with patch.object(st.time,'time',return_value=12000),patch.object(st.random,'random',return_value=1):
+            g.key(ord('r'))
+            self.assertEqual(g.p.engineering_ready_at,15600)
+
+    def test_engineering_training_and_helping_disabled_ship(self):
+        g = self.game
+        g.p.credits = 1000; g.key(ord('8')); chance = g.engineering_chance()
+        g.key(ord('t'))
+        self.assertEqual(g.p.engineering_level,1)
+        self.assertGreater(g.engineering_chance(),chance)
+        g.key(ord('8')); g.launch(); g.speed = 0
+        g.disabled_ship = dict(object=[0,0,200],hull=40)
+        g.key(ord('5')); self.assertIs(g.ship_target,g.disabled_ship['object'])
+        g.key(ord('8')); credits = g.p.credits
+        with patch.object(st.random,'random',return_value=0): g.key(ord('h'))
+        self.assertIsNone(g.disabled_ship)
+        self.assertGreater(g.p.credits,credits)
+
+    def test_mouse_clicks_rows_map_and_hold_release(self):
+        g = self.game
+        # Test public mouse dispatch independently of rendering.
+        g.buttons = [(0,0,80,30,lambda:g.mouse_key(ord('l')))]
+        g.click(20,15); self.assertEqual(g.mode,'departure')
+        g.key(27); g.key(ord('g')); g.buttons = []
+        x,y = st.coordinates(1)
+        g.click(60+x*60,155+y*39)
+        self.assertEqual(g.p.waypoint['system'],1)
+        g.launch(); g.speed = 0
+        g.mouse_key(ord('h'),True)
+        self.assertIn(ord('h'),g.keys)
+        g.update(1); g.release_mouse(); g.update(.1)
+        self.assertIsNone(g.jump_charge)
+        self.assertNotIn(ord('h'),g.keys)
+
+
+    def test_rescue_coverage_is_radial_and_does_not_change_equipment(self):
+        g = self.game
+        g.launch(); g.station = [4000,0,4000]; g.open_distress()
+        self.assertFalse(g.rescue['covered'])
+        g.key(ord('r')); g.rescue_cooldown = 0
+        g.station = [3000,0,4000]; g.p.equipment = ['mining','rear']; g.p.hull = 10
+        g.open_distress(); self.assertTrue(g.rescue['covered'])
+        g.accept_rescue()
+        self.assertEqual(g.p.equipment,['mining','rear'])
+        self.assertEqual(g.p.hull,25)
+
+    def test_insufficient_training_and_max_skill_do_not_take_credits(self):
+        g = self.game
+        g.key(ord('8')); g.p.credits = 0; g.key(ord('t'))
+        self.assertEqual(g.p.engineering_level,0)
+        g.p.engineering_level = 5; g.p.credits = 5000; g.key(ord('t'))
+        self.assertEqual(g.p.credits,5000)
+        g.key(ord('8')); g.launch(); g.key(ord('8')); g.key(ord('t'))
+        self.assertEqual(g.p.credits,5000)
+
+    def test_other_ship_repair_checks_target_range_and_parts(self):
+        g = self.game
+        g.launch(); g.speed = 0; g.disabled_ship = dict(object=[0,0,800],hull=20)
+        g.ship_target = g.disabled_ship['object']; g.key(ord('8'))
+        credits = g.p.credits; g.key(ord('h'))
+        self.assertEqual(g.p.credits,credits)
+        g.disabled_ship['object'][2] = 200; g.p.credits = 0; g.key(ord('h'))
+        self.assertIsNotNone(g.disabled_ship)
+        self.assertEqual(g.p.engineering_failures,0)
+
+    def test_docking_clearance_expires_and_new_commander_has_no_old_repair_cooldown(self):
+        g = self.game
+        g.launch(); g.speed = 0; g.dock_clearance = .1; g.update(.2)
+        self.assertEqual(g.dock_clearance,0)
+        old_id = g.p.commander_id
+        g.p.engineering_failures = 1; g.p.engineering_ready_at = st.time.time()+1800
+        g.write_engineering_ledger(); g.mode = 'dead'; g.key(ord('n'))
+        self.assertNotEqual(g.p.commander_id,old_id)
+        self.assertEqual(g.p.engineering_ready_at,0)
+
+    def test_fuel_warning_includes_approach_reserve_and_mouse_release_cancels_thrust(self):
+        g = self.game
+        g.p.waypoint = dict(name='Zaonce',position=st.coordinates(1),system=1)
+        g.p.fuel = st.hyperspace_cost(st.distance(0,1))+.1
+        g.request_launch(); self.assertEqual(g.mode,'launch_warning')
+        g.key(27); g.p.fuel = 7; g.launch(); g.speed = 0
+        g.mouse_key(ord('w'),True); g.update(.1)
+        self.assertGreater(g.speed,0)
+        g.release_mouse(); self.assertNotIn(ord('w'),g.keys)
+
 
 
 if __name__ == '__main__':
