@@ -1,0 +1,24 @@
+STAR TRADER — original Elite-inspired Python game
+
+Run in a terminal:
+  python3 star_trader.py
+
+This laptop already has the required SDL2, SDL2_ttf and font libraries.
+No pip packages or internet connection are needed.
+
+At the station: Up/Down select goods, B buy, S sell, R refuel/repair,
+L launch. Food is cheap on Lave and sells well on Zaonce.
+
+In space: arrow keys steer, W accelerates, S slows down, SPACE fires.
+G opens the galaxy chart; arrows select a system, H jumps.
+D docks when the station is centred, under 350 metres away, speed
+below 40 and no pirate is present. Fly towards the station with W;
+start braking with S before reaching it. F1 opens the manual.
+ESC exits. Saving happens at the station, including after trading.
+Quitting or dying in space keeps your last station save.
+N on the death screen starts a new pilot and replaces the save.
+
+Saved progress: ~/.local/share/star-trader/save.json
+Delete that file to start fresh.
+
+This is a small tribute, not a port of the original Elite.
