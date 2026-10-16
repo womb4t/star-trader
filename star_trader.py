@@ -20,7 +20,7 @@ SYSTEMS = [
     ('Diso', 'Agricultural', 0.34, 0.64), ('Leesti', 'Industrial', 0.60, 0.46),
     ('Riedquat', 'Frontier', 0.76, 0.76), ('Tionisla', 'Industrial', 0.72, 0.16),
     ('Orerve', 'Frontier', 0.14, 0.84), ('Reorte', 'Agricultural', 0.90, 0.43)]
-SAVE = Path.home() / '.local' / 'share' / 'star-trader' / 'save.json'
+SAVE = Path(os.environ.get('XDG_DATA_HOME') or Path.home() / '.local/share') / 'star-trader' / 'save.json'
 
 
 def price(system, good):
@@ -112,8 +112,12 @@ class Display:
         self.rendertext = bind(self.ttf, 'TTF_RenderUTF8_Blended', ptr, [ptr, C.c_char_p, Color])
         if self.init(32) != 0:
             raise RuntimeError('SDL could not open the display.')
-        self.win = self.window(b'STAR TRADER - an Elite-inspired Python game', 0x2FFF0000, 0x2FFF0000, W, H, 0)
+        bind(self.sdl, 'SDL_SetHint', C.c_int, [C.c_char_p, C.c_char_p])(b'SDL_VIDEO_X11_WMCLASS', b'star-trader')
+        self.win = self.window(b'Star Trader', 0x2FFF0000, 0x2FFF0000, W, H, 0x2024)
         self.r = self.renderer(self.win, -1, 2) or self.renderer(self.win, -1, 0)
+        bind(self.sdl, 'SDL_RenderSetLogicalSize', C.c_int, [ptr, i, i])(self.r, W, H)
+        self.fullscreen = bind(self.sdl, 'SDL_SetWindowFullscreen', i, [ptr, C.c_uint32])
+        self.is_fullscreen = False
         if not self.win or not self.r:
             raise RuntimeError('Could not create game window.')
         fonts = ['/usr/share/fonts/TTF/JetBrainsMonoNerdFont-Regular.ttf', '/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf']
@@ -159,6 +163,8 @@ class Display:
             typ = int.from_bytes(raw[:4], sys.byteorder)
             if typ == 256:
                 yield 'quit',0
+            elif typ == 512 and raw[12] == 13:
+                yield 'blur', 0
             elif typ in (768,769):
                 key = int.from_bytes(raw[20:24], sys.byteorder, signed=True)
                 if typ == 769 or raw[13] == 0:
@@ -200,7 +206,10 @@ class Game:
         self.message = 'Station ahead. D to dock within 350 m, centred, speed below 40.'
 
     def key(self, k):
-        if k == 27:
+        if k == 1073741892:  # F11: compositor-friendly desktop fullscreen
+            self.d.is_fullscreen = not self.d.is_fullscreen
+            self.d.fullscreen(self.d.win, 0x1001 if self.d.is_fullscreen else 0)
+        elif k == 27:
             self.running = False
         elif k == 1073741882:  # F1
             self.mode = 'flight' if self.mode == 'help' else 'help' if self.mode == 'flight' else 'help_docked' if self.mode != 'help_docked' else 'market'
@@ -328,7 +337,7 @@ class Game:
                      '         Jump fuel equals distance. Full tank = 7 light years.', '',
                      'Pirates pay a 35-credit bounty. Shields regenerate in flight.',
                      'Dock and trade to save. Quitting in space preserves last dock.',
-                     'F1 returns to game. ESC quits. New pilots begin with 150 credits.', '',
+                     'F1 returns to game. F11 fullscreen. ESC quits. Start: 150 credits.', '',
                      'Original tribute; no original Elite code or assets included.']
             for i,line in enumerate(lines): d.text(40,85+i*29,line)
         elif self.mode == 'market':
@@ -431,6 +440,7 @@ def main():
             dt,last = min(0.05,now-last),now
             for kind,key in display.events():
                 if kind == 'quit': game.running = False
+                elif kind == 'blur': game.keys.clear()
                 elif kind == 'down':
                     game.keys.add(key)
                     game.key(key)
