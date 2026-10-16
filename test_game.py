@@ -424,6 +424,73 @@ class GameplayTests(unittest.TestCase):
         self.assertTrue(all(len(row) == len(st.GOODS) for row in migrated.stock))
         self.assertEqual(migrated.stock[0][:6],[12]*6)
 
+    def test_number_row_controls_and_coordinate_input(self):
+        g = self.game
+        g.key(ord('1')); self.assertEqual(g.mode,'help')
+        g.key(ord('1')); self.assertEqual(g.mode,'market')
+        g.key(ord('2')); self.assertEqual(g.mode,'updates')
+        g.key(ord('2')); self.assertEqual(g.mode,'market')
+        g.key(ord('g')); g.key(ord('c'))
+        for c in '1.2,3.4': g.key(ord(c))
+        g.key(13)
+        self.assertEqual(g.mode,'map')
+        self.assertEqual(g.p.waypoint['position'],[1.2,3.4])
+        g.key(ord('g')); g.launch(); g.key(ord('4'))
+        self.assertTrue(g.rear_view)
+        g.key(ord('4')); self.assertFalse(g.rear_view)
+
+    def test_number_three_toggles_fullscreen(self):
+        class FakeDisplay:
+            is_fullscreen = False
+            win = object()
+            def fullscreen(self,window,flag): self.last_flag = flag
+        g = self.game; g.d = FakeDisplay()
+        g.key(ord('3'))
+        self.assertTrue(g.d.is_fullscreen)
+        self.assertEqual(g.d.last_flag,0x1001)
+        g.key(ord('3'))
+        self.assertFalse(g.d.is_fullscreen)
+        self.assertEqual(g.d.last_flag,0)
+
+    def test_rear_view_projects_only_objects_behind_ship(self):
+        g = self.game
+        self.assertIsNone(g.project([0,0,-500]))
+        self.assertIsNotNone(g.project([0,0,500]))
+        g.rear_view = True
+        self.assertIsNotNone(g.project([0,0,-500]))
+        self.assertIsNone(g.project([0,0,500]))
+        self.assertLess(g.project([50,0,-500])[0],st.W/2)
+
+    def test_rear_laser_purchase_save_and_firing_direction(self):
+        g = self.game
+        rear_index = next(i for i,e in enumerate(st.EQUIPMENT) if e[0] == 'rear')
+        g.p.credits = 1000
+        g.p.buy_equipment(rear_index)
+        self.assertIn('rear',g.p.equipment)
+        self.assertEqual(g.p.credits,400)
+        g.p.save(); p = st.Pilot(); self.assertTrue(p.load())
+        self.assertIn('rear',p.equipment)
+        g.launch(); g.rear_view = True
+        g.enemy = [0,0,-500,1,0]; g.fire_laser()
+        self.assertIsNone(g.enemy)
+        g.enemy = [0,0,500,1,0]; g.fire_laser()
+        self.assertIsNotNone(g.enemy)
+        g.rear_view = False; g.fire_laser()
+        self.assertIsNone(g.enemy)
+
+    def test_unfitted_rear_mount_cannot_fire_or_use_front_upgrade(self):
+        g = self.game
+        g.launch(); g.p.equipment = ['military']; g.p.laser = 'military'
+        g.rear_view = True; g.enemy = [0,0,-500,6,0]
+        g.fire_laser()
+        self.assertEqual(g.enemy[3],6)
+        self.assertEqual(g.laser_flash,0)
+        self.assertIn('No rear laser',g.message)
+        g.p.equipment.append('rear'); g.fire_laser()
+        self.assertEqual(g.enemy[3],5)
+        self.assertEqual(g.p.laser,'military')
+        g.launch(); self.assertFalse(g.rear_view)
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -1,18 +1,19 @@
-STAR TRADER 0.2.0 — original space trading game for Omarchy
+STAR TRADER 0.2.1 — original space trading game for Omarchy
 
 Install: bash install.sh
 Play: open your app launcher and search for Star Trader.
 Or run: python3 star_trader.py
 
-F1: complete flight manual. F10: version and update instructions.
-F11: fullscreen. ESC: quit. Update from a clean checkout: python3 update.py
+1: complete flight manual. 2: version and update instructions.
+3: fullscreen. ESC: quit. Update from a clean checkout: python3 update.py
 
 Station: arrows select, B buy, S sell, U outfitting, F buy fuel,
 R repair, P pay fines, L launch. Buy and sell prices differ.
 Cargo affects speed, turning, braking, fuel use and cruise time.
 
 Flight: arrows steer, W accelerate, S brake/reverse, Q/E roll.
-SPACE laser, V switch installed laser, M missile, B deploy mine.
+SPACE laser, V switch front laser, M missile, B deploy mine.
+4 toggles front/rear view. Rear fire needs a purchased rear pulse laser.
 C docking computer, Z jammer, K cloak (equipment must be bought).
 D station, P planet, A asteroid/ore, J sun, O scoop nearby ore.
 

@@ -14,7 +14,7 @@ import time
 import threading
 import urllib.request
 
-VERSION = '0.2.0'
+VERSION = '0.2.1'
 CRUISE_SECONDS_PER_LY = 45
 W, H = 1100, 760
 GOODS = ['Food', 'Textiles', 'Ore', 'Machinery', 'Medicine', 'Computers', 'Narcotics', 'Unlicensed Arms']
@@ -34,6 +34,7 @@ EQUIPMENT = [
     ('mine', 'Proximity mine', 75, 4, 'B deploys; 1.5 second arming delay; keep clear'),
     ('jammer', 'Signal jammer', 600, 3, 'Z disrupts targeting for 8s; 20s cooldown'),
     ('cloak', 'Phase cloak', 3000, 11, 'K toggles concealment; consumes fuel'),
+    ('rear', 'Rear pulse laser', 600, 4, '4 rear view; SPACE fires the rear-mounted laser'),
 ]
 LASERS = {'pulse': (0.30, 1), 'beam': (0.14, 1), 'military': (0.12, 2), 'mining': (0.65, 1)}
 UP, DOWN, LEFT, RIGHT = 1073741906, 1073741905, 1073741904, 1073741903
@@ -382,6 +383,7 @@ class Game:
         self.sun = [1200., -500., 3500.]
         self.heat = 0.
         self.nav = 'station'
+        self.rear_view = False
         self.planet = [-600.,240.,2400.]
         self.planet_radius = 70 + PROFILES[self.p.system][2]/100
         self.flyby_min = float('inf')
@@ -395,8 +397,8 @@ class Game:
         self.npc_mine_timer = 25.
         self.spawn = 12
         self.cooldown = self.flash = self.laser_flash = 0.
-        self.message = 'Welcome back, Commander.' if loaded else 'Welcome, Commander. F1 manual; U ship outfitting.'
-        self.stars = [[random.uniform(-1000,1000),random.uniform(-650,650),random.uniform(20,1800)] for _ in range(180)]
+        self.message = 'Welcome back, Commander.' if loaded else 'Welcome, Commander. 1 manual; U ship outfitting.'
+        self.stars = [[random.uniform(-1000,1000),random.uniform(-650,650),random.uniform(-1800,1800)] for _ in range(180)]
         self.running = True
 
     def save(self):
@@ -407,6 +409,7 @@ class Game:
 
     def launch(self):
         self.mode = 'flight'
+        self.rear_view = False
         self.station = [0.,0.,1500.] if not self.p.deep_space else [0.,0.,1e9]
         self.planet = [-600.,240.,2400.]
         self.planet_radius = 70 + PROFILES[self.p.system][2]/100
@@ -429,7 +432,7 @@ class Game:
         self.asteroids = [[150.,-70.,1000.,3],[-250.,100.,1700.,3],[320.,180.,2300.,3]]
         self.fragments = []
         self.sun = [1200.,-500.,3500.]
-        self.message = 'Approach slowly. Q/E roll to match the rotating slot. F1 manual.'
+        self.message = 'Approach slowly. Q/E roll to match the rotating slot. 1 manual.'
 
     def inspect_cargo(self):
         self.customs_checked = True
@@ -484,7 +487,7 @@ class Game:
         if self.mode == 'map' and self.map_input:
             self.map_edit(k)
             return
-        if k == 1073741891:  # F10
+        if k == ord('2'):  # Update screen
             if self.mode == 'updates': self.mode = self.update_return
             else:
                 self.update_return = self.mode
@@ -494,7 +497,7 @@ class Game:
         if self.mode == 'updates':
             if k == 27: self.mode = self.update_return
             return
-        if k == 1073741892:
+        if k == ord('3'):
             self.d.is_fullscreen = not self.d.is_fullscreen
             self.d.fullscreen(self.d.win, 0x1001 if self.d.is_fullscreen else 0)
             return
@@ -508,7 +511,7 @@ class Game:
                 self.mode = 'market'
                 self.save()
             return
-        if k == 1073741882:
+        if k == ord('1'):
             if self.mode == 'help': self.mode = self.help_return
             else:
                 self.help_return = self.mode
@@ -588,6 +591,11 @@ class Game:
                 self.message = 'Cruise cancelled. Lock a new course or continue from the map.'
             return
         if self.mode != 'flight': return
+        if k == ord('4'):
+            self.rear_view = not self.rear_view
+            self.laser_flash = 0
+            self.message = ('REAR VIEW - rear pulse laser ready.' if 'rear' in self.p.equipment else 'REAR VIEW - no rear laser fitted. Buy one in outfitting.') if self.rear_view else 'FORWARD VIEW.'
+            return
         if k == ord('t'): self.begin_cruise()
         if k == ord('b'):
             if self.p.mines:
@@ -630,6 +638,9 @@ class Game:
                 self.nav = 'station'
                 self.message = 'Docking computer engaged. C or manual controls cancel.' if self.autodock else 'Manual control.'
         if k == ord('v'):
+            if self.rear_view:
+                self.message = 'Rear mount: pulse laser.' if 'rear' in self.p.equipment else 'No rear laser fitted.'
+                return
             available = [name for name in LASERS if name == 'pulse' or name in self.p.equipment]
             self.p.laser = available[(available.index(self.p.laser)+1)%len(available)]
             self.message = self.p.laser.title() + ' laser selected.'
@@ -841,8 +852,11 @@ class Game:
 
     def project(self, obj):
         x,y,z = obj[:3]
+        roll = self.roll
+        if self.rear_view:
+            x,z,roll = -x,-z,-roll
         if z <= 5: return None
-        c,s = math.cos(self.roll), math.sin(self.roll)
+        c,s = math.cos(roll), math.sin(roll)
         return W/2+(x*c+y*s)*500/z, 330+(-x*s+y*c)*500/z, 500/z
 
     def on_target(self, obj, radius=32):
@@ -932,8 +946,8 @@ class Game:
             star[0] -= dx*0.5
             star[1] -= dy*0.5
             star[2] -= (self.speed+12)*dt
-            if star[2] < 10 or abs(star[0]) > 1800 or abs(star[1]) > 1200:
-                star[:] = [random.uniform(-1000,1000),random.uniform(-650,650),1800]
+            if abs(star[2]) > 1800 or abs(star[0]) > 1800 or abs(star[1]) > 1200:
+                star[:] = [random.uniform(-1000,1000),random.uniform(-650,650),1800 if self.speed+12 >= 0 else -1800]
         sun_range = math.sqrt(sum(v*v for v in self.sun))
         if sun_range < 600:
             self.heat = min(120,self.heat + (6 if sun_range > 250 else 30)*dt)
@@ -965,22 +979,30 @@ class Game:
                 self.damage(7 if abs(e[0])<250 and abs(e[1])<180 else 2)
                 if self.mode == 'dead': return
         if 32 in self.keys and self.cooldown <= 0:
-            self.cloaked = False
-            delay,power = LASERS[self.p.laser]
-            self.cooldown,self.laser_flash = delay,0.09
-            if self.enemy and self.on_target(self.enemy):
-                self.enemy[3] -= power
-                if self.enemy[3] <= 0: self.destroy_enemy()
-            elif self.p.laser == 'mining':
-                rock = next((r for r in self.asteroids if self.on_target(r)),None)
-                if rock:
-                    rock[3] -= 1
-                    if rock[3] <= 0:
-                        self.asteroids.remove(rock)
-                        self.fragments += [[rock[0]+offset,rock[1]+10,rock[2]] for offset in (-18,0,18)]
-                        self.message = 'Asteroid fragmented! Approach slowly; O collects ore within 260m.'
+            self.fire_laser()
         self.shield = min(100,self.shield+dt*(3 if 'energy' in self.p.equipment else 1.5)*(0.3 if self.cloaked else 1))
         if self.p.hull <= 0: self.mode = 'dead'
+
+    def fire_laser(self):
+        if self.rear_view and 'rear' not in self.p.equipment:
+            self.cooldown = .3
+            self.message = 'No rear laser fitted. U opens outfitting when docked.'
+            return
+        self.cloaked = False
+        weapon = 'pulse' if self.rear_view else self.p.laser
+        delay,power = LASERS[weapon]
+        self.cooldown,self.laser_flash = delay,.09
+        if self.enemy and self.on_target(self.enemy):
+            self.enemy[3] -= power
+            if self.enemy[3] <= 0: self.destroy_enemy()
+        elif weapon == 'mining':
+            rock = next((r for r in self.asteroids if self.on_target(r)),None)
+            if rock:
+                rock[3] -= 1
+                if rock[3] <= 0:
+                    self.asteroids.remove(rock)
+                    self.fragments += [[rock[0]+offset,rock[1]+10,rock[2]] for offset in (-18,0,18)]
+                    self.message = 'Asteroid fragmented! Approach slowly; O collects ore within 260m.'
 
     def draw(self):
         d,p = self.d,self.p
@@ -996,7 +1018,8 @@ class Game:
                 'F buys fuel (3 cr/unit), R repairs, P pays fines. * = illegal.',
                 'FLIGHT: Arrows steer. W/S speed/reverse. Q/E roll. SPACE laser.',
                 'Cargo adds inertia, slows turning/braking and uses more fuel.',
-                'V cycles lasers. M missile. B mine (arms 1.5s; blast dangerous).',
+                'V cycles front lasers. M missile. B deploys mine; keep clear.',
+                '4 toggles rear view. SPACE uses rear laser, if bought/fitted.',
                 'D station beacon. Fly into slot: speed 1-25, Q/E match roll.',
                 'Centre +/-14m horizontally, +/-6m vertically; roll under 9deg.',
                 'C docking computer (must be fitted). P local planet beacon.',
@@ -1010,7 +1033,7 @@ class Game:
                 'ENTER locks. H fast, expensive jump. T slow, efficient cruise.',
                 'T also cancels cruise. Low fuel can strand you: plan reserves.',
                 'Dock/trade/purchase to save. In space, quit retains last save.',
-                'F1 return. F10 updates. F11 fullscreen. ESC quit.']
+                '1 return. 2 updates. 3 fullscreen. ESC quit.']
             for i,line in enumerate(lines): d.text(30,77+i*30,line)
         elif self.mode == 'updates':
             latest = self.updates.latest
@@ -1025,7 +1048,7 @@ class Game:
                 'It fetches the official repository, then reruns the installer.',
                 'Release notes: github.com/womb4t/star-trader/releases',
                 '', 'Daily update checks run in the background and fail silently offline.',
-                'Use --no-update-check to disable network checks.', '', 'F10 or ESC returns to the game.']
+                'Use --no-update-check to disable network checks.', '', '2 or ESC returns to the game.']
             for i,line in enumerate(lines): d.text(30,80+i*31,line,GOLD if i==2 else GREEN)
         elif self.mode in ('market','outfit'):
             if self.mode == 'market':
@@ -1050,7 +1073,7 @@ class Game:
                 d.text(35,490,'UP/DOWN select; B or ENTER purchases and fits equipment.')
             for i,t in enumerate(['COMMANDER STATUS',f'Cargo {sum(p.cargo)}/{p.capacity} t',f'Fuel  {p.fuel:.2f}/7',f'Hull  {p.hull:.0f}%',f'Refill {p.fuel_cost()} cr',f'Repair {math.ceil((100-p.hull)*0.5)} cr',f'Mines {p.mines}/4',f'Fine {p.fine} cr']): d.text(790,135+i*40,t)
             d.text(35,550,'F fuel   R repair   P pay fines   U outfitting/market   L launch')
-            d.text(35,590,'G galaxy chart   F1 manual   ESC quit')
+            d.text(35,590,'G galaxy chart   1 manual   ESC quit')
         elif self.mode == 'map':
             self.draw_map()
         elif self.mode == 'cruise':
@@ -1070,7 +1093,7 @@ class Game:
         else:
             self.draw_flight()
         d.line(25,710,W-25,710)
-        notice = 'Update '+self.updates.latest+' available - F10' if self.updates.latest else self.message
+        notice = 'Update '+self.updates.latest+' available - 2' if self.updates.latest else self.message
         d.text(28,725,notice[:94],GOLD)
         d.present(d.r)
 
@@ -1094,12 +1117,13 @@ class Game:
         for fragment in self.fragments: self.object(fragment,'ore')
         if self.enemy: self.object(self.enemy,self.enemy_kind)
         if self.laser_flash:
-            color = GOLD if p.laser == 'mining' else RED
+            color = GOLD if p.laser == 'mining' and not self.rear_view else RED
             d.line(160,550,550,330,color)
             d.line(940,550,550,330,color)
         d.line(530,330,542,330); d.line(558,330,570,330)
         d.line(550,310,550,322); d.line(550,338,550,350)
         clip(d.r,None)
+        d.text(35,73,'REAR VIEW' if self.rear_view else 'FORWARD VIEW',GOLD)
         if self.flash: d.rect(26,65,W-52,490,RED)
         obj,label = self.station,'STATION'
         if self.nav == 'asteroid':
@@ -1112,12 +1136,12 @@ class Game:
         c,s = math.cos(self.roll),math.sin(self.roll)
         x,y,z = obj[:3]
         d.text(35,563,f'BEACON {label}: X {x*c+y*s:+.0f} Y {-x*s+y*c:+.0f} Z {z:+.0f} RANGE {math.sqrt(x*x+y*y+z*z):.0f}m')
-        d.text(35,594,f'SPEED {self.speed:.0f}  FUEL {p.fuel:.2f}  {p.laser.upper()} LASER  MISSILES {p.missiles}  HEAT {self.heat:.0f}%')
+        d.text(35,594,f'SPEED {self.speed:.0f}  FUEL {p.fuel:.2f}  {('REAR PULSE' if 'rear' in p.equipment else 'REAR UNARMED') if self.rear_view else p.laser.upper()} LASER  MISSILES {p.missiles}  HEAT {self.heat:.0f}%')
         d.text(35,625,f'SHIELD {self.shield:.0f}%  HULL {p.hull:.0f}%  HOLD {sum(p.cargo)}/{p.capacity}t')
         error = math.degrees(self.slot_error())
         d.text(650,625,'AUTODOCK' if self.autodock else f'SLOT ROLL {error:+.0f} deg',GOLD)
         status = 'CLOAKED' if self.cloaked else 'JAMMING' if self.jamming else ''
-        d.text(35,657,f'MINES {p.mines}  {status}  F1 controls  F10 updates',GOLD)
+        d.text(35,657,f'MINES {p.mines}  {status}  1 controls  2 updates',GOLD)
         if p.fuel < 1.0:
             d.text(810,657,'LOW FUEL',RED)
         if p.waypoint:
@@ -1133,13 +1157,13 @@ class Game:
         sx,sy,scale = projected
         if sx < -800 or sx > W+800 or sy < -800 or sy > H+800: return
         color = GREEN
-        angle = -self.roll
+        angle = self.roll if self.rear_view else -self.roll
         if kind in ('pirate','police'):
             points = [(-65,10),(-20,-15),(0,-5),(20,-15),(65,10),(0,28)]
             edges = [(0,1),(1,2),(2,3),(3,4),(4,5),(5,0),(0,4),(2,5)]
             color = RED if kind == 'pirate' else (120,170,255)
         elif kind == 'station':
-            angle += self.station_angle
+            angle += -self.station_angle if self.rear_view else self.station_angle
             points = [(math.cos(i*math.pi/4)*100,math.sin(i*math.pi/4)*100) for i in range(8)]
             points += [(-35,-12),(35,-12),(35,12),(-35,12)]
             edges = [(i,(i+1)%8) for i in range(8)] + [(8,9),(9,10),(10,11),(11,8)]
@@ -1152,7 +1176,7 @@ class Game:
         c,s = math.cos(angle),math.sin(angle)
         points = [(sx+(x*c-y*s)*scale,sy+(x*s+y*c)*scale) for x,y in points]
         for a,b in edges: self.d.line(*points[a],*points[b],color)
-        if obj[2] > 150:
+        if abs(obj[2]) > 150:
             self.d.text(max(30,min(W-220,sx-65)),max(75,min(525,sy+110*scale)),kind.upper(),color)
 
 

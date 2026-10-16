@@ -1,6 +1,6 @@
 # Star Trader
 
-An original Elite-inspired Python space game for **Omarchy**. Trade, mine, fight robot pirates, smuggle contraband and navigate a small wireframe universe. Current version: **0.2.0**.
+An original Elite-inspired Python space game for **Omarchy**. Trade, mine, fight robot pirates, smuggle contraband and navigate a small wireframe universe. Current version: **0.2.1**.
 
 The current game is offline single-player. Self-hosted multiplayer is a future project; see [MULTIPLAYER.md](MULTIPLAYER.md). The next offline expansion is outlined in [ROADMAP.md](ROADMAP.md).
 
@@ -16,7 +16,7 @@ Open your application launcher and search for **Star Trader**.
 
 The installer uses `omarchy pkg add` only for missing dependencies: Python, SDL2 compatibility libraries, SDL2_ttf and a font. A dependency installation may ask for your password in the terminal. The game installs for your user without sudo. No pip packages are required.
 
-The native window supports Hyprland tiling, resizing and F11 fullscreen. No compositor configuration changes are needed.
+The native window supports Hyprland tiling, resizing and 3 fullscreen. No compositor configuration changes are needed.
 
 ## Update
 
@@ -27,7 +27,7 @@ git pull --ff-only
 bash install.sh
 ```
 
-**From 0.2.0 onward:** the game checks the official GitHub release once per day in a background thread. When a newer version is available, it shows an update notice. **F10** displays the installed version and instructions. Checks time out quietly offline; no account, telemetry or mandatory connection is required. Disable checks with `--no-update-check` or `STAR_TRADER_NO_UPDATE_CHECK=1`.
+**From 0.2.0 onward:** the game checks the official GitHub release once per day in a background thread. When a newer version is available, it shows an update notice. **2** displays the installed version and instructions. Checks time out quietly offline; no account, telemetry or mandatory connection is required. Disable checks with `--no-update-check` or `STAR_TRADER_NO_UPDATE_CHECK=1`.
 
 To apply an update yourself, quit the game and run from your checkout:
 
@@ -53,13 +53,14 @@ You start docked with 150 credits, a full 7-unit fuel tank, a pulse laser, three
 | Station services | F buys a full fuel refill; R repairs hull; P pays fines |
 | Outfitting | Up/Down browse; B or Enter buy and fit; U returns to market |
 | Flight | Arrows steer; W accelerate; S brake, then reverse; Q/E roll |
+| View | 4 toggles front/rear view; Space fires the current view’s fitted laser |
 | Weapons | Space fires selected laser; V cycles installed lasers; M fires a missile; B deploys a mine |
 | Equipment | C docking computer; Z signal jammer; K phase cloak |
 | Local beacons | D station; P planet; A asteroid/ore; J sun; O collects nearby ore |
 | Galaxy map | G open/close; arrows select planet; / searches names; C enters X,Y |
 | Free map cursor | Tab switches between planet selection and coordinate cursor; arrows move cursor |
 | Course/travel | Enter locks course; H hyperspace; T interstellar cruise; T in cruise cancels |
-| General | F1 manual; F10 updates; F11 fullscreen; Esc quit |
+| General | 1 manual; 2 updates; 3 fullscreen; Esc quit |
 
 ### Docking
 
@@ -71,7 +72,7 @@ A purchased docking computer handles the approach when the station is ahead, wit
 
 Buy and sell quotes are separate: BUY is what you pay, SELL is what you receive. Station stock is finite and saved. Cargo reduces top speed, turning rate, acceleration and braking, and increases fuel consumption. A larger hold increases capacity to 35 tonnes.
 
-Outfitting availability depends on local technology. You can buy a beam laser, military laser, mining laser, missiles, mines, scoops, an energy unit, docking computer, jammer or cloak. Installed lasers can be switched with V. Ammunition must be replaced; missiles and mines each have four storage slots. Browse down to see all equipment.
+Outfitting availability depends on local technology. You can buy a beam laser, military laser, mining laser, missiles, mines, scoops, an energy unit, docking computer, jammer or cloak. Front lasers can be switched with V. A rear pulse laser costs 600 credits at tech level 4 or above. Press 4 for rear view, then Space to fire it; no rear laser means no rear firing. Rear view does not change your ship’s course or flight controls. Ammunition must be replaced; missiles and mines each have four storage slots. Browse down to see all equipment.
 
 Use A to find an asteroid, select a purchased mining laser with V, and fire until it breaks up. Approach the fragments at speed 50 or below. With scoops fitted, O collects one tonne of ore within 260 metres; sell ore at a station. Ordinary lasers do not yield ore.
 

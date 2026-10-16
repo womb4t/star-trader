@@ -1,3 +1,11 @@
+# 0.2.1 — laptop controls and rear weapons
+
+- Number-row controls: 1 manual, 2 updates, 3 fullscreen, 4 front/rear view.
+- Rear view projects ships, mines and other objects behind the ship.
+- Purchasable rear pulse laser (600 credits, tech level 4). Space fires only the weapon fitted for the current view.
+- Front weapon selection, ship motion and original saves are preserved.
+- Updated in-game help, HUD and documentation.
+
 # 0.2.0 — navigation and ship systems
 
 - Rotating-slot manual docking, collision damage and purchasable docking computer.
