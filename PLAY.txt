@@ -1,24 +1,38 @@
-STAR TRADER — original Elite-inspired Python game
+STAR TRADER 0.2.0 — original space trading game for Omarchy
 
-Run in a terminal:
-  python3 star_trader.py
+Install: bash install.sh
+Play: open your app launcher and search for Star Trader.
+Or run: python3 star_trader.py
 
-This laptop already has the required SDL2, SDL2_ttf and font libraries.
-No pip packages or internet connection are needed.
+F1: complete flight manual. F10: version and update instructions.
+F11: fullscreen. ESC: quit. Update from a clean checkout: python3 update.py
 
-At the station: Up/Down select goods, B buy, S sell, R refuel/repair,
-L launch. Food is cheap on Lave and sells well on Zaonce.
+Station: arrows select, B buy, S sell, U outfitting, F buy fuel,
+R repair, P pay fines, L launch. Buy and sell prices differ.
+Cargo affects speed, turning, braking, fuel use and cruise time.
 
-In space: arrow keys steer, W accelerates, S slows down, SPACE fires.
-G opens the galaxy chart; arrows select a system, H jumps.
-D docks when the station is centred, under 350 metres away, speed
-below 40 and no pirate is present. Fly towards the station with W;
-start braking with S before reaching it. F1 opens the manual.
-ESC exits. Saving happens at the station, including after trading.
-Quitting or dying in space keeps your last station save.
-N on the death screen starts a new pilot and replaces the save.
+Flight: arrows steer, W accelerate, S brake/reverse, Q/E roll.
+SPACE laser, V switch installed laser, M missile, B deploy mine.
+C docking computer, Z jammer, K cloak (equipment must be bought).
+D station, P planet, A asteroid/ore, J sun, O scoop nearby ore.
 
-Saved progress: ~/.local/share/star-trader/save.json
-Delete that file to start fresh.
+G galaxy map: / search planets, C coordinates, TAB free cursor,
+arrows select/move, ENTER locks a waypoint. H fast hyperspace
+uses more fuel. T starts slower, more economical cruise; T cancels.
+Read the planet profile and budget fuel before departure.
 
-This is a small tribute, not a port of the original Elite.
+Dock through the rotating slot at speed 1-25. Centre within
+14m horizontal / 6m vertical; use Q/E to keep roll error under 9deg.
+A docking computer is purchasable at sufficiently advanced stations.
+
+Mining needs a mining laser and scoops. Break an asteroid with
+SPACE, then approach ore fragments at speed <=50 and O to collect.
+Illegal goods (*) risk confiscation and fines at regulated stations.
+
+Station activities save automatically; quitting/dying in space
+preserves the last station save. N after death replaces the save.
+Save: ${XDG_DATA_HOME:-~/.local/share}/star-trader/save.json
+
+Offline play works without Internet. Optional daily release checks
+can be disabled with --no-update-check. Updates preserve saves.
+Multiplayer, fleets, chat, player police and bases are future plans.
