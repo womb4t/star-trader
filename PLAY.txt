@@ -1,4 +1,4 @@
-STAR TRADER 0.2.5 — original space trading game for Omarchy
+STAR TRADER 0.2.6 — original space trading game for Omarchy
 
 Install: bash install.sh
 Play: open your app launcher and search for Star Trader.
@@ -54,3 +54,8 @@ Save: ${XDG_DATA_HOME:-~/.local/share}/star-trader/save.json
 Offline play works without Internet. Optional daily release checks
 can be disabled with --no-update-check. Updates preserve saves.
 Multiplayer, fleets, chat, player police and bases are future plans.
+
+Approach guidance: Y toggles centring on the selected local navigation target ahead.
+You retain throttle and roll control; arrows cancel guidance. It does not grant docking clearance.
+Use H/T for remote galaxy destinations. I toggles fine steering (20% arrows and Q/E roll),
+useful for docking. Mouse: Actions > Nav > Guide Y; Actions > Safety > Fine I.

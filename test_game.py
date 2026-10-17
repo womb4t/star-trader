@@ -28,6 +28,46 @@ class GameplayTests(unittest.TestCase):
         st.SAVE = self.original_save
         self.tmp.cleanup()
 
+    def test_guidance_centres_without_throttle_or_roll(self):
+        g = self.game
+        g.mode = 'flight'
+        g.station = [100.,40.,1500.]
+        g.speed,g.roll = 12.,.4
+        g.key(ord('y'))
+        g.update(.1)
+        self.assertLess(g.station[0],100)
+        self.assertLess(g.station[1],40)
+        self.assertEqual(g.speed,12)
+        self.assertEqual(g.roll,.4)
+        self.assertEqual(g.dock_clearance,0)
+        g.key(st.LEFT)
+        self.assertFalse(g.course_assist)
+
+    def test_fine_steering_reduces_translation_and_roll(self):
+        g = self.game
+        g.mode = 'flight'
+        g.keys = {st.RIGHT,ord('e')}
+        g.key(ord('i'))
+        g.update(.1)
+        self.assertAlmostEqual(g.roll,.02)
+        self.assertAlmostEqual(g.station[0],-2.2*st.math.cos(.02))
+        g.key(ord('i'))
+        self.assertFalse(g.fine_control)
+
+    def test_guidance_rejects_remote_course_and_behind(self):
+        g = self.game
+        g.mode = 'flight'
+        g.nav = 'course'
+        g.p.waypoint = dict(position=st.coordinates(1),system=1,name='Zaonce')
+        g.key(ord('y'))
+        g.update(.1)
+        self.assertFalse(g.course_assist)
+        g.nav = 'station'
+        g.station = [0.,0.,-200.]
+        g.key(ord('y'))
+        g.update(.1)
+        self.assertFalse(g.course_assist)
+
     def test_market_spread_and_stock(self):
         p = self.game.p
         cash, stock = p.credits, p.stock[0][0]

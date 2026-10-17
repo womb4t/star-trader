@@ -1,3 +1,10 @@
+# 0.2.6 — approach guidance and fine docking controls
+
+- Y toggles local target centring, with manual throttle and station-slot roll; arrows cancel.
+- I toggles 20% steering and roll sensitivity for precise docking adjustments.
+- Mouse toggles, cockpit indicators, handbook instructions and saved assist settings.
+- Galactic courses still require H/T; guidance disengages for unavailable or rearward targets.
+
 # 0.2.5 — collisions, persistent risk, bank and storage
 
 - Swept ship collisions, mutual damage/bounce and visible flashing announcements.

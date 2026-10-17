@@ -1,6 +1,6 @@
 # Star Trader
 
-An original Elite-inspired Python space game for **Omarchy**. Trade, mine, fight robot pirates, smuggle contraband and navigate a small wireframe universe. Current version: **0.2.5**.
+An original Elite-inspired Python space game for **Omarchy**. Trade, mine, fight robot pirates, smuggle contraband and navigate a small wireframe universe. Current version: **0.2.6**.
 
 The current game is offline single-player. Self-hosted multiplayer is a future project; see [MULTIPLAYER.md](MULTIPLAYER.md). The next offline expansion is outlined in [ROADMAP.md](ROADMAP.md).
 
@@ -181,3 +181,8 @@ You can run `python3 star_trader.py` directly without installing. System librari
 ## License
 
 MIT. An original tribute, not a port of Elite; no original Elite code or assets are included. The galaxy is currently eight predefined planets, not the original's generated galaxies. Several flight and combat mechanics are deliberately simplified.
+
+Approach guidance: Y toggles centring on the selected local navigation target ahead.
+You retain throttle and roll control; arrows cancel guidance. It does not grant docking clearance.
+Use H/T for remote galaxy destinations. I toggles fine steering (20% arrows and Q/E roll),
+useful for docking. Mouse: Actions > Nav > Guide Y; Actions > Safety > Fine I.

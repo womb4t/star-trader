@@ -18,7 +18,7 @@ import tempfile
 import fcntl
 import textwrap
 
-VERSION = '0.2.5'
+VERSION = '0.2.6'
 CRUISE_SECONDS_PER_LY = 45
 W, H = 1100, 760
 GOODS = ['Food', 'Textiles', 'Ore', 'Machinery', 'Medicine', 'Computers', 'Narcotics', 'Unlicensed Arms']
@@ -433,6 +433,8 @@ class Game:
         self.station = [0., 0., 1500.]
         self.roll = self.station_angle = 0.
         self.autodock = False
+        self.course_assist = False
+        self.fine_control = False
         self.enemy = None
         self.ship_target = None
         self.asteroids = []
@@ -507,6 +509,7 @@ class Game:
         self.spawn = 18
         self.roll = self.station_angle = 0.
         self.autodock = False
+        self.course_assist = False
         self.nav_target = None
         self.nav = 'course' if self.p.waypoint and galactic_distance(self.p.position,self.p.waypoint['position']) > .001 else 'station'
         self.heat = 0
@@ -541,7 +544,7 @@ class Game:
 
     def checkpoint(self):
         if getattr(self,'_restoring',False): return
-        fields = ('shield','speed','station','roll','station_angle','autodock','enemy','enemy_kind',
+        fields = ('shield','speed','station','roll','station_angle','autodock','course_assist','fine_control','enemy','enemy_kind',
                   'asteroids','fragments','sun','heat','nav','rear_view','planet','planet_radius',
                   'assist_speed','mine_objects','jamming','jammer_cooldown','cloaked','customs_checked',
                   'cruise','jump_warp','npc_mine_timer','spawn','cooldown','broken_down','breakdown_in',
@@ -1266,10 +1269,20 @@ class Game:
             else:
                 self.cloaked = not self.cloaked
                 self.message = 'Cloak engaged.' if self.cloaked else 'Cloak disengaged.'
+        if k == ord('i'):
+            self.fine_control = not self.fine_control
+            self.message = 'Fine steering ON: arrows and roll at 20%.' if self.fine_control else 'Normal steering.'
+        if k == ord('y'):
+            self.course_assist = not self.course_assist
+            self.autodock = False
+            if self.course_assist:
+                self.message = 'Approach guidance ON. You control throttle and roll; request docking clearance.'
+            else: self.message = 'Approach guidance OFF.'
         if k == ord('p'):
             self.nav = 'planet'
         if k in (UP, DOWN, LEFT, RIGHT, ord('w'),ord('s'),ord('q'),ord('e')):
             self.autodock = False
+            if k in (UP,DOWN,LEFT,RIGHT): self.course_assist = False
         if k == ord('d'):
             if self.p.deep_space:
                 self.message = 'No station here. Use G to lock a planet.'
@@ -1283,6 +1296,7 @@ class Game:
             elif not 65 < self.station[2] <= 2500: self.message = 'Docking computer range: 2500 m.'
             elif not self.station_allows(): self.message = 'Docking refused: wanted status.'
             else:
+                self.course_assist = False
                 self.autodock = not self.autodock
                 if self.autodock and not self.dock_clearance: self.request_docking()
                 self.nav = 'station'
@@ -1769,12 +1783,24 @@ class Game:
             self.speed += max(-70*dt/mass,min(70*dt/mass,desired-self.speed))
         else:
             self.speed = max(-60/mass,min(180/mass+self.assist_speed,self.speed+((ord('w') in self.keys)-(ord('s') in self.keys))*70*dt/mass))
-            self.roll += ((ord('e') in self.keys)-(ord('q') in self.keys))*dt/mass
+            precision = .2 if self.fine_control else 1.
+            self.roll += ((ord('e') in self.keys)-(ord('q') in self.keys))*dt/mass*precision
             # Steering is in cockpit coordinates, including while rolling.
-            horizontal = ((RIGHT in self.keys)-(LEFT in self.keys))*110*dt/mass
-            vertical = ((DOWN in self.keys)-(UP in self.keys))*85*dt/mass
+            horizontal = ((RIGHT in self.keys)-(LEFT in self.keys))*110*dt/mass*precision
+            vertical = ((DOWN in self.keys)-(UP in self.keys))*85*dt/mass*precision
             c,s = math.cos(self.roll),math.sin(self.roll)
             dx,dy = horizontal*c-vertical*s,horizontal*s+vertical*c
+        if self.course_assist and not self.autodock:
+            target,label = self.active_navigation()
+            remote = self.nav == 'course' and self.p.waypoint and galactic_distance(self.p.position,self.p.waypoint['position']) > .001
+            if target is None or remote or target[2] <= 0:
+                self.course_assist = False
+                self.message = 'Guidance unavailable: use H/T for a galaxy course, or select a local target ahead.'
+            else:
+                # Match the existing local-flight model: centre the beacon,
+                # without commanding forward speed or station-slot roll.
+                dx = max(-110*dt/mass,min(110*dt/mass,target[0]*min(1,2*dt/mass)))
+                dy = max(-85*dt/mass,min(85*dt/mass,target[1]*min(1,2*dt/mass)))
         if self.broken_down: self.speed,dx,dy = 0,0,0
         dz = self.speed*dt
         required = math.sqrt(dx*dx+dy*dy+dz*dz)*.00012*mass
@@ -1965,9 +1991,9 @@ class Game:
             self.mouse_button(440,row_y,300,'New pilot / reset',ord('n'))
         if self.mode == 'flight' and self.mouse_controls:
             groups=[('Fly', [('Throttle',ord('w'),True),('Brake/rev',ord('s'),True),('Fire',32,True),('Left',LEFT,True),('Up',UP,True),('Right',RIGHT,True),('Roll L',ord('q'),True),('Down',DOWN,True),('Roll R',ord('e'),True)]),
-                ('Nav',[('Map',ord('g'),False),('Hold jump',ord('h'),True),('Cruise',ord('t'),False),('Station',ord('d'),False),('Planet',ord('p'),False),('Rocks',ord('a'),False),('Sun',ord('j'),False),('Scoop',ord('o'),False)]),
+                ('Nav',[('Map',ord('g'),False),('Hold jump',ord('h'),True),('Cruise',ord('t'),False),('Station',ord('d'),False),('Planet',ord('p'),False),('Rocks',ord('a'),False),('Sun',ord('j'),False),('Scoop',ord('o'),False),('Guide Y',ord('y'),False)]),
                 ('Fight',[('Fire',32,True),('View 4',ord('4'),False),('Laser',ord('v'),False),('Missile',ord('m'),False),('Mine',ord('b'),False),('Jammer',ord('z'),False),('Cloak',ord('k'),False),('Target',ord('5'),False)]),
-                ('Safety',[('Radio 7',ord('7'),False),('Autodock',ord('c'),False),('Skills',ord('8'),False),('Distress',ord('6'),False)])]
+                ('Safety',[('Radio 7',ord('7'),False),('Autodock',ord('c'),False),('Skills',ord('8'),False),('Distress',ord('6'),False),('Fine I',ord('i'),False)])]
             d.fill(30,105,350,270,(5,16,27));d.rect(30,105,350,270,GREEN)
             d.text(40,112,'COCKPIT ACTIONS',GOLD)
             for i,(title,_) in enumerate(groups):
@@ -1996,7 +2022,7 @@ class Game:
                 ('Leaving the game','ESC / click X','Dock for a safe logout. In space your saved ship continues unattended.')]),
             ('Flight',[
                 ('Throttle and braking','HOLD W / S','W accelerates. S brakes, then reverses. Heavy cargo makes stopping slower.'),
-                ('Steering','HOLD ARROWS','Move your ship left, right, up or down. Mouse Fly buttons do the same.'),
+                ('Fine steering','I + ARROWS','I toggles 20% steering and Q/E roll for docking. Safety tab has a mouse toggle.'),
                 ('Rolling','HOLD Q / E','Roll the ship left or right to match the station entrance.'),
                 ('Look behind','4','Toggle rear view. Your course stays the same; a rear laser must be fitted.'),
                 ('Local navigation','D / P / A / J','Select station, planet, rocks or sun. Gold dots and arrows show the bearing.'),
@@ -2007,7 +2033,7 @@ class Game:
                 ('Fast travel','HOLD H','Keep holding for the 3-second countdown. Release early to cancel the jump.'),
                 ('Economical travel','T','Cruise uses less fuel but takes time. T cancels at your current coordinates.'),
                 ('Scanner targets','CLICK / 5','Select a ship. Pink markers track it; edge arrows show off-screen contacts.'),
-                ('Rearward contacts','4','An arrow labelled BEHIND means switch view to see what is behind the ship.')]),
+                ('Approach guidance','Y','Toggle centring on a local target ahead. You set speed and roll. Arrows cancel; H/T for galaxy travel.')]),
             ('Combat',[
                 ('Laser fire','HOLD SPACE','Fire the current view’s fitted laser. Rear view cannot use the front mount.'),
                 ('Choose a laser','V','Cycle front pulse, beam, military or mining lasers you have bought.'),
@@ -2181,6 +2207,7 @@ class Game:
         d.text(35,594,f'SPEED {self.speed:.0f}  FUEL {p.fuel:.2f}  {('REAR PULSE' if 'rear' in p.equipment else 'REAR UNARMED') if self.rear_view else p.laser.upper()} LASER  MISSILES {p.missiles}  HEAT {self.heat:.0f}%')
         d.text(35,625,f'SHIELD {self.shield:.0f}%  HULL {p.hull:.0f}%  HOLD {sum(p.cargo)}/{p.capacity}t')
         error = math.degrees(self.slot_error())
+        d.text(650,598,('GUIDANCE Y  ' if self.course_assist else '')+('FINE I' if self.fine_control else ''),GOLD)
         d.text(650,625,'DRIVE DISABLED' if self.broken_down else 'AUTODOCK' if self.autodock else f'DOCK CLEAR {self.dock_clearance:.0f}s' if self.dock_clearance else f'SLOT {error:+.0f}deg / 7 radio',GOLD)
         status = 'CLOAKED' if self.cloaked else 'JAMMING' if self.jamming else ''
         d.text(35,657,f'MINES {p.mines}  {status}  1 controls  2 updates  6 distress',GOLD)
