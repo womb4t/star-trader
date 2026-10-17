@@ -1,3 +1,10 @@
+# 0.2.4 — gentler starter-ship maintenance
+
+- Halve departure wear and routine servicing rates; hull repairs cost 30% less.
+- A healthy ship gets four departures after service before neglect can cause a breakdown.
+- Lower flight-count/wear contributions to breakdown probability; badly damaged ships still carry risk.
+- Service quotes and actual charges use the same calculation. Existing saves receive the new pricing without conversion.
+
 # 0.2.3 — recovery, engineering, station traffic and mouse controls
 
 - Low/empty-fuel and destination-fuel warning before departure, including local approach reserve.

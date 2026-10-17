@@ -15,7 +15,7 @@ import threading
 import urllib.request
 import uuid
 
-VERSION = '0.2.3'
+VERSION = '0.2.4'
 CRUISE_SECONDS_PER_LY = 45
 W, H = 1100, 760
 GOODS = ['Food', 'Textiles', 'Ore', 'Machinery', 'Medicine', 'Computers', 'Narcotics', 'Unlicensed Arms']
@@ -165,8 +165,14 @@ class Pilot:
         self.fuel = 7.0
         return f'Fuel purchased: {cost} cr. Tank full.'
 
+    def departure_wear(self):
+        return 1+sum(self.cargo)*.025
+
+    def service_cost(self):
+        return math.ceil((100-self.hull)*.35+self.maintenance*.25)
+
     def repair(self):
-        cost = math.ceil((100 - self.hull) * 0.5 + self.maintenance*.5)
+        cost = self.service_cost()
         if self.credits < cost: return f'Repairs cost {cost} cr.'
         self.credits -= cost
         self.hull = 100
@@ -454,7 +460,7 @@ class Game:
     def launch(self, departure=True):
         if departure:
             self.p.flights_since_service += 1
-            self.p.maintenance = min(100,self.p.maintenance+2+sum(self.p.cargo)*.05)
+            self.p.maintenance = min(100,self.p.maintenance+self.p.departure_wear())
         self.breakdown_in = random.uniform(8,25) if departure and random.random() < self.breakdown_risk() else None
         self.broken_down = False
         self.disabled_ship = None
@@ -628,9 +634,9 @@ class Game:
 
     def breakdown_risk(self, next_flight=False):
         flights = self.p.flights_since_service + int(next_flight)
-        wear = self.p.maintenance + (2+sum(self.p.cargo)*.05 if next_flight else 0)
-        if flights < 3 and self.p.hull >= 80: return 0.
-        return min(.65,flights*.005+wear*.003+(100-self.p.hull)*.003)
+        wear = self.p.maintenance + (self.p.departure_wear() if next_flight else 0)
+        if flights < 5 and self.p.hull >= 80: return 0.
+        return min(.65,flights*.003+wear*.002+(100-self.p.hull)*.003)
 
     def read_engineering_ledger(self):
         path = SAVE.parent/f'engineering-{self.p.commander_id}.json'
@@ -1762,7 +1768,7 @@ class Game:
                     d.text(35,135+(i-start)*37,f'{">" if i==self.shop_selected else " "} {label:<23} {cost:>4} cr  {state}',GOLD if i==self.shop_selected else GREEN)
                 d.text(35,455,EQUIPMENT[self.shop_selected][4],GOLD)
                 d.text(35,490,'UP/DOWN select; B or ENTER purchases and fits equipment.')
-            for i,t in enumerate(['COMMANDER STATUS',f'Cargo {sum(p.cargo)}/{p.capacity} t',f'Fuel  {p.fuel:.2f}/7',f'Hull  {p.hull:.0f}%',f'Refill {p.fuel_cost()} cr',f'Service {math.ceil((100-p.hull)*0.5+p.maintenance*.5)} cr',f'Mines {p.mines}/4',f'Fine {p.fine} cr',f'Wear {p.maintenance:.0f}%',f'Eng. {p.engineering_level}/5']): d.text(790,135+i*40,t)
+            for i,t in enumerate(['COMMANDER STATUS',f'Cargo {sum(p.cargo)}/{p.capacity} t',f'Fuel  {p.fuel:.2f}/7',f'Hull  {p.hull:.0f}%',f'Refill {p.fuel_cost()} cr',f'Service {p.service_cost()} cr',f'Mines {p.mines}/4',f'Fine {p.fine} cr',f'Wear {p.maintenance:.0f}%',f'Eng. {p.engineering_level}/5']): d.text(790,135+i*40,t)
             d.text(35,550,'F fuel   R repair   P pay fines   U outfitting/market   L launch')
             d.text(35,590,'G galaxy chart   1 manual   ESC quit')
         elif self.mode == 'map':

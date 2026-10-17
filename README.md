@@ -1,6 +1,6 @@
 # Star Trader
 
-An original Elite-inspired Python space game for **Omarchy**. Trade, mine, fight robot pirates, smuggle contraband and navigate a small wireframe universe. Current version: **0.2.3**.
+An original Elite-inspired Python space game for **Omarchy**. Trade, mine, fight robot pirates, smuggle contraband and navigate a small wireframe universe. Current version: **0.2.4**.
 
 The current game is offline single-player. Self-hosted multiplayer is a future project; see [MULTIPLAYER.md](MULTIPLAYER.md). The next offline expansion is outlined in [ROADMAP.md](ROADMAP.md).
 
@@ -117,7 +117,7 @@ Accepting applies the claim once, tows you to an accepting station, fills the fu
 
 ### Maintenance and engineering
 
-Each actual station departure adds maintenance wear and increments flights since service. Once the ship is neglected (at least three departures, or hull below 80%), each departure rolls a breakdown chance that increases with wear, flight count and existing hull damage. The engineering screen and departure screen show the next-flight risk. A breakdown stops the drive and disables cruise/hyperspace; weapons and the distress radio remain usable. Station **R / Service** repairs hull and resets wear and the flight counter, charging for both damage and wear. Travelling or being towed between systems does not count as an extra departure.
+Each actual station departure adds `1 + 0.025 × cargo tonnes` maintenance wear and increments flights since service. Routine service costs 0.25 credits per wear point; hull work costs 0.35 credits per missing hull point, with the combined quote rounded up once. A healthy ship has no neglect breakdown risk on its first four departures after service; damaged hulls below 80% still carry risk. Once the ship is neglected (at least five departures, or hull below 80%), each departure rolls a breakdown chance that increases with wear, flight count and existing hull damage. The engineering screen and departure screen show the next-flight risk. A breakdown stops the drive and disables cruise/hyperspace; weapons and the distress radio remain usable. Station **R / Service** repairs hull and resets wear and the flight counter, charging for both damage and wear. Travelling or being towed between systems does not count as an extra departure.
 
 Press **8 / Skills** for engineering. Buy levels 1–5 at a station for 200, 400, 800, 1,600 and 3,200 credits. Higher skill improves field-repair probability, hull restoration and wear reduction. Parts cost **15 credits per attempt**. Field repairs can clear a breakdown and repair your own ship; station servicing remains more thorough.
 

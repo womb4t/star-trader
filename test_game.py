@@ -79,9 +79,9 @@ class GameplayTests(unittest.TestCase):
         p = self.game.p
         p.fuel,p.hull = 2,50
         p.repair()
-        self.assertEqual((p.fuel,p.hull,p.credits),(2,100,125))
+        self.assertEqual((p.fuel,p.hull,p.credits),(2,100,132))
         p.refuel()
-        self.assertEqual((p.fuel,p.credits),(7,110))
+        self.assertEqual((p.fuel,p.credits),(7,117))
         p.fuel,p.credits = 0,0
         p.refuel()
         self.assertEqual(p.fuel,0)
@@ -794,6 +794,29 @@ class GameplayTests(unittest.TestCase):
         self.assertGreater(g.speed,0)
         g.release_mouse(); self.assertNotIn(ord('w'),g.keys)
 
+
+    def test_basic_trader_can_make_four_loaded_flights_before_neglect_risk(self):
+        g = self.game
+        g.p.cargo[0] = 20
+        for flight in range(1,5):
+            g.launch()
+            self.assertEqual(g.p.flights_since_service,flight)
+            self.assertEqual(g.breakdown_risk(),0)
+            self.assertIsNone(g.breakdown_in)
+        self.assertEqual(g.p.service_cost(),2)
+        g.launch()
+        self.assertGreater(g.breakdown_risk(),0)
+
+    def test_service_quote_matches_discounted_charge_for_existing_wear(self):
+        p = self.game.p
+        p.hull,p.maintenance,p.credits = 50,20,100
+        # 17.5 credits of hull work + 5 credits of maintenance, rounded once.
+        self.assertEqual(p.service_cost(),23)
+        p.repair()
+        self.assertEqual((p.credits,p.hull,p.maintenance),(77,100,0))
+        p.hull,p.maintenance,p.credits = 50,20,22
+        p.repair()
+        self.assertEqual((p.credits,p.hull,p.maintenance),(22,50,20))
 
 
 if __name__ == '__main__':
