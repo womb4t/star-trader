@@ -818,6 +818,155 @@ class GameplayTests(unittest.TestCase):
         p.repair()
         self.assertEqual((p.credits,p.hull,p.maintenance),(22,50,20))
 
+    def test_swept_collision_catches_ship_crossed_between_frames(self):
+        g = self.game
+        g.launch(); g.station = [5000,0,5000]; g.asteroids=[]; g.speed=180
+        g.disabled_ship = dict(object=[0,0,150.],hull=100)
+        g.update(2)
+        self.assertLess(g.shield,100)
+        self.assertLess(g.disabled_ship['hull'],100)
+        self.assertLess(g.speed,0)
+        self.assertIn('COLLISION',g.message)
+        self.assertIsNotNone(g.alert)
+        shield = g.shield; g.update(.01)
+        self.assertGreaterEqual(g.shield,shield)
+
+    def test_ship_near_miss_does_not_count_as_collision(self):
+        g=self.game
+        g.launch(); g.station=[5000,0,5000];g.asteroids=[];g.speed=180
+        g.disabled_ship=dict(object=[80,0,150.],hull=100)
+        g.update(2)
+        self.assertEqual(g.shield,100)
+        self.assertEqual(g.disabled_ship['hull'],100)
+
+    def test_clean_exit_restores_exact_danger_instead_of_station(self):
+        g=self.game
+        with patch.object(st.time,'time',return_value=10000):
+            g.launch();g.speed=42;g.station=[300,20,4200.]
+            g.enemy=[20,5,700.,4,1.2];g.shield=37;g.p.hull=65
+            g.request_exit()
+            resumed=st.Game(None)
+        self.assertEqual(resumed.mode,'flight')
+        self.assertEqual(resumed.speed,42)
+        self.assertEqual(resumed.station,[300,20,4200.])
+        self.assertEqual(resumed.enemy,[20,5,700.,4,1.2])
+        self.assertEqual((resumed.shield,resumed.p.hull),(37,65))
+
+    def test_unattended_enemy_can_destroy_ship_and_death_stays_saved(self):
+        g=self.game
+        with patch.object(st.time,'time',return_value=10000):
+            g.launch();g.speed=0;g.shield=0;g.p.hull=20
+            g.p.bank_balance=200;g.enemy=[0,0,500.,6,1.9]
+            g.request_exit()
+        with patch.object(st.time,'time',return_value=10010): resumed=st.Game(None)
+        self.assertEqual(resumed.mode,'dead')
+        self.assertEqual(resumed.p.hull,0)
+        self.assertEqual(resumed.p.bank_balance,200)
+        with patch.object(st.time,'time',return_value=10011): again=st.Game(None)
+        self.assertEqual(again.mode,'dead')
+        again.key(ord('r'))
+        self.assertEqual(again.mode,'market')
+        self.assertEqual(again.p.bank_balance,100)
+        self.assertEqual(again.p.cargo,[0]*len(st.GOODS))
+
+    def test_autosave_includes_current_simulation(self):
+        g=self.game
+        g.launch();g.speed=0;g.shield=30;g.update(2.1)
+        data=json.loads(st.SAVE.read_text())
+        self.assertIn('_session',data)
+        self.assertAlmostEqual(data['_session']['state']['shield'],g.shield)
+        self.assertEqual(data['_session']['mode'],'flight')
+
+    def test_bank_money_and_station_cargo_survive_salvage(self):
+        g=self.game
+        g.p.credits=1000;g.key(ord('9'))
+        self.assertEqual(g.mode,'bank')
+        g.bank_amount=500;g.key(ord('d'))
+        self.assertEqual((g.p.credits,g.p.bank_balance),(500,500))
+        g.key(ord('r'));self.assertEqual(g.p.credits,450)
+        g.p.cargo[0]=10;g.key(ord('s'))
+        self.assertEqual(g.p.storage[0]['cargo'][0],1)
+        g.key(ord('9'));g.launch();g.open_distress();g.accept_rescue()
+        self.assertEqual(g.p.bank_balance,500)
+        self.assertEqual(g.p.storage[0]['cargo'][0],1)
+        self.assertLess(g.p.credits,450)
+
+    def test_station_storage_is_local_and_expired_rent_preserves_retrieval(self):
+        g=self.game
+        g.p.credits=200;g.mode='bank';g.buy_storage(True)
+        g.p.cargo[0]=2;g.transfer_storage(True)
+        g.p.storage[0]['rented_until']=1
+        self.assertEqual(g.storage_capacity(),0)
+        g.transfer_storage(True)
+        self.assertEqual(g.p.storage[0]['cargo'][0],1)
+        g.transfer_storage(False)
+        self.assertEqual(g.p.storage[0]['cargo'][0],0)
+        g.p.system=1
+        self.assertEqual(g.p.storage[1]['cargo'][0],0)
+        g.p.credits=1000;g.buy_storage(False)
+        self.assertEqual(g.storage_capacity(),100)
+        cash=g.p.credits;g.buy_storage(False)
+        self.assertEqual(g.p.credits,cash)
+
+    def test_important_alert_expires_and_repeated_text_does_not_restart_it(self):
+        g=self.game
+        g.message='Fuel exhausted. Press 6 for help.'
+        self.assertIsNotNone(g.alert)
+        g.update(1)
+        remaining=g.alert['remaining']
+        g.message='Fuel exhausted. Press 6 for help.'
+        self.assertEqual(g.alert['remaining'],remaining)
+        g.update(5)
+        self.assertIsNone(g.alert)
+
+
+    def test_nested_station_menus_save_as_docked(self):
+        g=self.game
+        g.key(ord('1'));g.key(ord('2'))
+        self.assertEqual(g.mode,'updates')
+        self.assertEqual(g.session_mode(),'market')
+        g.request_exit()
+        with patch.object(st.time,'time',return_value=st.time.time()+500): resumed=st.Game(None)
+        self.assertEqual(resumed.mode,'market')
+
+    def test_bank_and_owned_bays_roundtrip_with_original_pilot_fields(self):
+        p=self.game.p
+        p.bank_balance=1234;p.storage[2]['owned']=True;p.storage[2]['cargo'][3]=50
+        p.save();q=st.Pilot();self.assertTrue(q.load())
+        self.assertEqual(q.bank_balance,1234)
+        self.assertEqual(q.storage[2]['cargo'][3],50)
+        self.assertTrue(q.storage[2]['owned'])
+
+    def test_unattended_autodock_completes_legitimately(self):
+        g=self.game
+        with patch.object(st.time,'time',return_value=10000):
+            g.p.equipment=['docking'];g.launch();g.station=[20,5,500.]
+            g.key(ord('c'));g.request_exit()
+        with patch.object(st.time,'time',return_value=10090): resumed=st.Game(None)
+        self.assertEqual(resumed.mode,'market')
+        self.assertEqual(resumed.p.hull,100)
+
+
+    def test_handbook_keyboard_tabs_preserve_underlying_flight(self):
+        g=self.game
+        g.launch();g.key(ord('1'))
+        self.assertEqual(g.mode,'help')
+        g.key(st.RIGHT);self.assertEqual(g.help_page,1)
+        g.key(st.LEFT);self.assertEqual(g.help_page,0)
+        self.assertEqual(g.session_mode(),'flight')
+        g.key(ord('1'));self.assertEqual(g.mode,'flight')
+
+    def test_prolonged_unattended_safe_drift_uses_salvage_not_free_rollback(self):
+        g=self.game
+        with patch.object(st.time,'time',return_value=10000):
+            g.launch();g.station=[0,0,300.];g.speed=0
+            g.p.credits=200;g.p.bank_balance=100;g.request_exit()
+        with patch.object(st.time,'time',return_value=13000): resumed=st.Game(None)
+        self.assertEqual(resumed.mode,'market')
+        self.assertEqual(resumed.p.credits,150)
+        self.assertEqual(resumed.p.bank_balance,100)
+
+
 
 if __name__ == '__main__':
     unittest.main()

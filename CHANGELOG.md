@@ -1,3 +1,12 @@
+# 0.2.5 — collisions, persistent risk, bank and storage
+
+- Swept ship collisions, mutual damage/bounce and visible flashing announcements.
+- Live two-second autosaves, exact clean-exit snapshots, persisted death and single-instance save protection.
+- Offline unattended catch-up (up to 40 minutes); prolonged undocked absence triggers emergency salvage rather than a free station rollback.
+- Bank deposits, local rented/owned cargo bays, protected stored assets and an explicit starter-ship recovery after destruction.
+- Pilot handbook rebuilt as clickable tabbed cards; cockpit Actions grouped into Fly/Nav/Fight/Safety.
+- Future plans recorded for uncaptained multiplayer ships, owned storage centres, tenant rentals, off-plan station funding, armed bases and fleets.
+
 # 0.2.4 — gentler starter-ship maintenance
 
 - Halve departure wear and routine servicing rates; hull repairs cost 30% less.

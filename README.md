@@ -1,6 +1,6 @@
 # Star Trader
 
-An original Elite-inspired Python space game for **Omarchy**. Trade, mine, fight robot pirates, smuggle contraband and navigate a small wireframe universe. Current version: **0.2.4**.
+An original Elite-inspired Python space game for **Omarchy**. Trade, mine, fight robot pirates, smuggle contraband and navigate a small wireframe universe. Current version: **0.2.5**.
 
 The current game is offline single-player. Self-hosted multiplayer is a future project; see [MULTIPLAYER.md](MULTIPLAYER.md). The next offline expansion is outlined in [ROADMAP.md](ROADMAP.md).
 
@@ -57,6 +57,7 @@ You start docked with 150 credits, a full 7-unit fuel tank, a pulse laser, three
 | Weapons | Space fires selected laser; V cycles installed lasers; M fires a missile; B deploys a mine |
 | Equipment | C docking computer; Z signal jammer; K phase cloak |
 | Safety and radio | 6 distress/recovery; 7 requests docking clearance; 8 engineering and training |
+| Bank/storage | 9 while docked; D deposit money, W withdraw; S store selected cargo, T retrieve; R rent, B buy bay |
 | Local beacons | D station; P planet; A asteroid/ore; J sun; O collects nearby ore |
 | Galaxy map | G open/close; arrows select planet; / searches names; C enters X,Y |
 | Free map cursor | Tab switches between planet selection and coordinate cursor; arrows move cursor |
@@ -68,7 +69,7 @@ You start docked with 150 credits, a full 7-unit fuel tank, a pulse laser, three
 
 Mouse selection is available throughout the game: click commodity/equipment rows, then the buy/sell/fit buttons; click planets or empty coordinates on the map; click scanner contacts; select rescue offers and use the accept/negotiate/refuse buttons. Screen buttons cover departure, docking, station services, training, repair, travel and returning from menus. Search and coordinate fields still support normal keyboard text entry; clicking the map selects a destination without typing.
 
-In flight, click **Actions** in the top bar for a cockpit control panel. Hold a movement, roll or fire button to keep it active; releasing the mouse stops that input. Hold **Hold jump** for the same three-second hyperspace countdown as H. A click can also use weapons, jamming, cloaking, beacons, the radio and engineering. **FS** toggles fullscreen; **X** quits or **<** goes back from a modal screen. Losing window focus releases held inputs.
+Press **1** for the redesigned pilot handbook: six clickable tabs with control cards rather than a text wall. Left/Right switches pages. In flight, click **Actions** for a compact cockpit panel with **Fly**, **Nav**, **Fight** and **Safety** tabs. Hold a movement, roll or fire button to keep it active; releasing the mouse stops that input. Hold **Hold jump** for the same three-second hyperspace countdown as H. A click can also use weapons, jamming, cloaking, beacons, the radio and engineering. **FS** toggles fullscreen; **X** quits or **<** goes back from a modal screen. Losing window focus releases held inputs.
 
 ### Docking and departure clearance
 
@@ -123,7 +124,25 @@ Press **8 / Skills** for engineering. Buy levels 1–5 at a station for 200, 400
 
 Disabled robot ships sometimes appear in local space. Select their gold scanner contact (or cycle targets with 5), get within **350 metres** and slow to **30 or less**. In engineering, choose Help target / H to attempt assistance. Success earns a crew payment; failure uses the same repair cooldown as working on your own ship. Repair parties cannot work with an active hostile present.
 
-A failed attempt imposes a **real-time** wait: **30 minutes, then 60, 120, 240…** for consecutive failures. A successful attempt resets the failure sequence. Cooldowns are tied to the commander and stored immediately in an engineering ledger, so restarting or reloading the previous station save does not skip the wait. A new pilot has a separate identity. Normal field-repair outcomes, cargo and crew rewards still save at the next station. There is no need to wait out a cooldown to call for distress rescue.
+A failed attempt imposes a **real-time** wait: **30 minutes, then 60, 120, 240…** for consecutive failures. A successful attempt resets the failure sequence. Cooldowns are tied to the commander and stored immediately in an engineering ledger, so restarting or reloading the previous station save does not skip the wait. A new pilot has a separate identity. Field-repair outcomes, cargo and crew rewards are retained by the live autosave and on exit. There is no need to wait out a cooldown to call for distress rescue.
+
+### Bank and station storage
+
+Press **9** or click **Bank / storage** while docked. The galactic bank holds credits off-ship; select 10, 50, 100 or All, then deposit or withdraw. Deposited money is not part of a distress salvage claim. Cargo bays belong to individual stations: renting costs **50 credits for 40 tonnes for seven real days**, while buying costs **750 credits for 100 tonnes**. Owned capacity has no recurring rent in this version.
+
+Choose a commodity, then store/retrieve one tonne. Expired rentals keep their contents and allow retrieval; renew or buy to deposit more. Buying a rented bay retains its cargo and increases capacity. A bay at one port cannot be accessed from another. Station cargo and bank money survive ship loss; N explicitly starting a new pilot resets all assets. This version stores cargo, not spare ship modules.
+
+Owning/renting whole storage centres, collecting rent from other players, selling bays off-plan to fund a station, armed personal bases and fleets are recorded **future** features in [MULTIPLAYER.md](MULTIPLAYER.md) and [ROADMAP.md](ROADMAP.md).
+
+### Collisions, announcements and quitting
+
+Ships have swept collision checks: crossing a hull between frames still causes impact damage to both ships and a bounce. There is a brief contact cooldown to prevent repeated damage from one overlap. Critical warnings have a boxed announcement with a flashing border; text remains readable.
+
+The game saves live flight/world state **every two seconds**, on major damage/threat events, on station transactions and on clean exit. It retains position, velocity, shields/hull, nearby contacts/mines, cargo, travel/autopilot state and death. Quitting no longer rolls back to the previous station. Only one running game may use a save at a time.
+
+On rejoining an undocked ship, a bounded **offline catch-up simulation** advances elapsed time: the ship keeps moving, autonomous docking/travel can complete, threats can attack, fuel can run out, and the ship can be destroyed. Human control inputs are released, not replayed. The detailed offline simulation is limited to **40 minutes**; if still adrift after a longer absence, emergency recovery applies the station 25% salvage rate or a 50% private claim and tows to an accepting station. These local catch-up rules are an offline approximation, not an always-running multiplayer universe. Dock before quitting for a safe logout.
+
+A destroyed ship stays destroyed across restarts. **R / Recover starter ship** explicitly obtains a replacement for up to **100 bank credits**, losing carried credits/cargo, fitted equipment and ammunition but retaining station storage, remaining bank funds and the pilot's training. **N / New pilot** resets everything. The future server will keep uncaptained ships in its live simulation, with reconnect attaching to the surviving ship or reporting its destruction; see the multiplayer roadmap.
 
 ### Combat, stealth and smuggling
 
@@ -137,7 +156,7 @@ Narcotics and unlicensed arms are marked `*` in the market. Regulated stations m
 
 Game files install under `${XDG_DATA_HOME:-~/.local/share}/star-trader/`. The launcher is in the same data directory under `applications/star-trader.desktop`.
 
-The save is `star-trader/save.json`. Per-commander repair cooldowns are stored alongside it as `engineering-<commander-id>.json`; back these up with the save. Docking, trades and station purchases save automatically. Original saves are migrated, preserving cash, cargo, equipment and location. Quitting or dying in space retains your last station save. N on the death screen starts a new pilot and replaces the save. Back up `save.json` before experimenting with it.
+The save is `star-trader/save.json`. Per-commander repair cooldowns are stored alongside it as `engineering-<commander-id>.json`; back these up with the save. Live flight and station transactions save automatically, including clean exits and destruction. Original saves are migrated, preserving cash, cargo, equipment and location. The `_session` section records the current simulation for restart/catch-up. N on the death screen explicitly starts a new pilot and replaces all assets. Back up `save.json` before experimenting with it.
 
 Remove installed code and launcher while keeping your save:
 

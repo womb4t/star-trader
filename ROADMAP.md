@@ -16,3 +16,8 @@ Build these around a deterministic simulation, stable entity IDs, versioned ship
 ## Later self-hosted universe
 
 Players may be traders, miners, pirates, police, or combine activities; hosts choose universe policy. Planned fleets, communication, credit transfers, constrained ship customisation and player bases require authoritative server rules and persistence. See [MULTIPLAYER.md](MULTIPLAYER.md) for stages, permissions and acceptance checks. None of these networking features is enabled in 0.2.0.
+
+
+## Requested owner/fleet economy (future)
+
+Add purchasable storage centres with player-set bay rentals, followed by off-plan bay sales to fund station construction. Later add personal bases, armed defences, owned/robot-crewed fleets and shipyards. Whole installations may eventually be bought, rented or captured under server rules. Protect tenant property and define escrow, refunds, construction failures, maintenance, command permissions and siege/offline rules first. Details and the uncaptained-ship disconnect rule are recorded in [MULTIPLAYER.md](MULTIPLAYER.md).

@@ -57,3 +57,25 @@ Add docking/storage permissions, upkeep, production, fleet ownership and trade i
 5. **Persistent construction:** claims, base building, storage and ownership. Check overlapping claims, concurrent withdrawals, upkeep, crash recovery and offline protections before adding sieges.
 
 A host should eventually have documented setup, backups, restore/export, moderation, ruleset configuration and update/migration tools. Hosting on the public Internet will require explicit network/firewall setup by the host; the game should never open router ports automatically.
+
+
+## Owner economy and station development — requested future features
+
+These are recorded plans, not current capabilities:
+
+- **Storage-centre ownership:** players can purchase a centre or a group of bays, set rental prices and terms, collect rent, and manage tenant access with an auditable ledger. The current release only supports personal storage rented from or bought at NPC stations.
+- **Off-plan bay sales:** developers can fund a new station by selling future storage capacity before construction completes. Specify the proposed location, build milestones, completion conditions, buyer claims, escrow, refunds and treatment of project failure before taking money. Do not mint usable bays until the relevant construction phase is complete.
+- **Personal bases and stations:** buying, renting, constructing and, under explicit server rules, capturing or stealing a base. Separate ownership of a building from ownership of tenants' goods and financial deposits; a capture must not silently convert all tenant assets into attacker property.
+- **Armed installations:** hardpoints, ammunition, power/heat budgets, defensive AI, security permissions, docking policies and maintenance. Station defences must obey the server's legal and combat rules.
+- **Owner fleets:** personal/fleet ships, officers or robot captains, orders, escort/patrol/trade assignments, shared navigation, docking/repair facilities and operating costs. Membership and command permissions must be explicit.
+- **Fleet-funded expansion:** rent, trade revenue and off-plan sales may fund additional bays, defence modules, shipyards and later construction stages, with server-side conservation of credits/materials.
+
+This scope should be staged after reliable persistence, ownership, bank transactions and authoritative combat. Define tenant protection, offline raids, sieges, insurance and host moderation before enabling destructive base capture.
+
+## Disconnects and uncaptained ships — future server rule
+
+The universe server keeps a disconnected player's ship as the same persistent entity. It continues its actual trajectory, autonomous orders, fuel/heat use, combat, collisions and damage. Logging out does not grant invulnerability, teleport to a station, unload cargo or remove a bounty.
+
+Reconnect attaches the authenticated player to the existing surviving ship. If it was destroyed, present that recorded outcome and the recovery/insurance choices; do not restore a pre-combat client snapshot. Crewless ships can still be rescued, salvaged, boarded or destroyed under explicit universe policy. A server shutdown checkpoints the universe, distinct from a player disconnect. Test repeated reconnects, duplicate settlement requests, deliberate client termination and server crashes.
+
+The offline game's bounded catch-up and emergency salvage are a local approximation, not a multiplayer simulation or a substitute for an always-running authoritative server.

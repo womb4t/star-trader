@@ -1,4 +1,4 @@
-STAR TRADER 0.2.4 — original space trading game for Omarchy
+STAR TRADER 0.2.5 — original space trading game for Omarchy
 
 Install: bash install.sh
 Play: open your app launcher and search for Star Trader.
@@ -42,8 +42,13 @@ Mining needs a mining laser and scoops. Break an asteroid with
 SPACE, then approach ore fragments at speed <=50 and O to collect.
 Illegal goods (*) risk confiscation and fines at regulated stations.
 
-Station activities save automatically; quitting/dying in space
-preserves the last station save. N after death replaces the save.
+Live state saves every 2 seconds and on exit: quitting cannot undo trouble.
+Undocked ships advance while unattended on rejoin; after long absences
+emergency salvage applies. Dock to log out safely. Destruction stays saved.
+R after death recovers a starter ship for up to 100 bank credits, keeping
+bank/station assets. N explicitly starts a new pilot and resets everything.
+9 while docked: bank deposits and local cargo bays (rent or buy).
+1 opens the tabbed control handbook. Actions has four compact cockpit tabs.
 Save: ${XDG_DATA_HOME:-~/.local/share}/star-trader/save.json
 
 Offline play works without Internet. Optional daily release checks
