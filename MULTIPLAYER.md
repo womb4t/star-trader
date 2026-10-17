@@ -79,3 +79,27 @@ The universe server keeps a disconnected player's ship as the same persistent en
 Reconnect attaches the authenticated player to the existing surviving ship. If it was destroyed, present that recorded outcome and the recovery/insurance choices; do not restore a pre-combat client snapshot. Crewless ships can still be rescued, salvaged, boarded or destroyed under explicit universe policy. A server shutdown checkpoints the universe, distinct from a player disconnect. Test repeated reconnects, duplicate settlement requests, deliberate client termination and server crashes.
 
 The offline game's bounded catch-up and emergency salvage are a local approximation, not a multiplayer simulation or a substitute for an always-running authoritative server.
+
+## Insurance, support plans, player loans and bounties — future requests
+
+These are future game features, not current services or real-money products.
+
+### Insurance
+
+Allow players to purchase policies covering selected ship hulls, equipment, cargo and possibly bases. Display premiums, excess/deductible, insured value, limits, exclusions, term and renewal before purchase. Specify how destruction, theft, piracy, unattended ships and base capture affect claims. Server-verified losses create one claim/settlement; reconnecting or retrying must not create duplicate payouts. Recovery can be replacement equipment or credits under the chosen policy.
+
+### Breakdown and support packages
+
+Offer paid breakdown-style assistance covering some combination of towing, emergency fuel, field repairs and recovery. Define station/frontier coverage, call-out limits, waiting periods, response times and exclusions. Explain whether the package replaces, reduces or leaves part of the existing salvage claim. Support cover must not grant combat invulnerability or silently extract a ship from combat without server rules. Offline robot assistance can precede player-provided services.
+
+### Player-to-player loans with central collection
+
+A lender offers principal in in-game credits, with either an agreed interest rate or a fixed fee. The borrower explicitly accepts the quoted total/repayment schedule and collection terms. A central, server-authoritative ledger disburses the principal once, records the debt, and recoups payments automatically from the agreed funds/income sources. Repayments credit the lender atomically and produce receipts for both parties.
+
+Before implementation, decide: simple versus compound interest; rate periods; instalments/due dates; early repayment; collection priority relative to fines/rent; which wallet, bank balances or future income may be used; protected minimum balances; caps; collateral if any; default/insolvency; and treatment of death, offline periods, account deletion and universe resets. None of those choices should be implied by a client or imposed after acceptance. Retry/disconnect tests must prove that loans cannot duplicate principal, collect twice, or erase debt. Hosts may configure permitted terms and moderation rules.
+
+### Player-funded bounties
+
+Allow a player to place a bounty on another named player by depositing the offered reward into central escrow. Record issuer, target identity, amount, qualifying outcome, jurisdiction, expiry, cancellation/refund rules and who may claim. Distinguish a private contract from a lawful police warrant: posting a bounty does not automatically make the target a criminal. Define whether a contract requires destruction, capture or another verified outcome.
+
+Only the server can verify completion and release the reward once. Define rules for self-claims, alternate accounts, collusive farming, repeat targeting, friendly-fire and safe zones, together with host moderation and target visibility. These choices belong alongside piracy/policing policy before enabling the feature.

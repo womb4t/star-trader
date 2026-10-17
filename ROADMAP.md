@@ -21,3 +21,14 @@ Players may be traders, miners, pirates, police, or combine activities; hosts ch
 ## Requested owner/fleet economy (future)
 
 Add purchasable storage centres with player-set bay rentals, followed by off-plan bay sales to fund station construction. Later add personal bases, armed defences, owned/robot-crewed fleets and shipyards. Whole installations may eventually be bought, rented or captured under server rules. Protect tenant property and define escrow, refunds, construction failures, maintenance, command permissions and siege/offline rules first. Details and the uncaptained-ship disconnect rule are recorded in [MULTIPLAYER.md](MULTIPLAYER.md).
+
+## Insurance, assistance, lending and player bounties (future)
+
+Requested for future releases; none is implemented by this roadmap change:
+
+- **Insurance:** purchasable cover for ships, fitted equipment, cargo and/or bases, with explicit premiums, excess, limits, exclusions and claims/replacement rules.
+- **Breakdown/support cover:** a paid assistance package for towing, emergency fuel and repairs, with coverage areas, call-out limits and the effect on salvage charges clearly defined.
+- **Player lending:** players can offer another player a loan with an agreed interest rate or fixed fee. A central in-game system records the contract and recoups repayments automatically under agreed rules.
+- **Player-posted bounties:** players can fund and place a bounty on a named player, with server-verified completion and payment.
+
+Details and open design decisions are recorded in [MULTIPLAYER.md](MULTIPLAYER.md). All payments are in-game credits.
