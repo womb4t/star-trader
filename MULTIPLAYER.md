@@ -82,7 +82,7 @@ The offline game's bounded catch-up and emergency salvage are a local approximat
 
 ## Insurance, support plans, player loans and bounties — future requests
 
-These are future game features, not current services or real-money products.
+These insurance, support, lending and bounty features are future in-game services. A separate proposed real-money credit exchange is recorded below; none of these services is currently enabled.
 
 ### Insurance
 
@@ -103,3 +103,29 @@ Before implementation, decide: simple versus compound interest; rate periods; in
 Allow a player to place a bounty on another named player by depositing the offered reward into central escrow. Record issuer, target identity, amount, qualifying outcome, jurisdiction, expiry, cancellation/refund rules and who may claim. Distinguish a private contract from a lawful police warrant: posting a bounty does not automatically make the target a criminal. Define whether a contract requires destruction, capture or another verified outcome.
 
 Only the server can verify completion and release the reward once. Define rules for self-claims, alternate accounts, collusive farming, repeat targeting, friendly-fire and safe zones, together with host moderation and target visibility. These choices belong alongside piracy/policing policy before enabling the feature.
+
+## Universal asset sales and StarTraderEx — proposed future marketplace
+
+### Selling anything the player owns
+
+Support selling player-owned ships, installed/spare modules, ammunition, cargo, storage bays, storage centres, bases/stations and fleet assets. Define NPC buyback versus player listings, pricing, condition and included contents. A ship/base listing must disclose what equipment, cargo, rental contracts or other commitments transfer with it. Prevent simultaneous use, duplicate listings, double sales, and sales of assets not legally transferable under the universe rules. Consider loans/collateral, fleet co-ownership, tenants and captured/stolen assets explicitly. Selling the last ship must leave the pilot in a valid station/transport state rather than creating an automatic replacement that can be sold repeatedly.
+
+### Real-money purchases and player credit sales
+
+The requested commercial model is:
+
+1. A player buys credits with real-world money; a settled purchase adds credits to their in-game money.
+2. Players earn credits in the game and may list eligible credits for sale through the marketplace.
+3. A completed sale pays the seller real-money proceeds, with **StarTraderEx taking a commission**.
+
+This is a proposal, not an enabled purchase/redemption service or a promise of a fixed credit value. Commission rates, exchange pricing (fixed price/order book/listings), supported currencies/regions, payment methods, minimums, settlement timing and payout terms have not been chosen. Show gross price, commission and net proceeds before either party commits.
+
+### Decisions before implementation
+
+- Keep an authoritative, auditable ledger for purchases, earned credits, reservations, transfers, refunds, sales, commission and seller payouts. Reserve listed credits so they cannot also be spent, lent or withdrawn; retrying an operation must not duplicate credits or money.
+- Define which purchased/earned credits are eligible for resale, provenance tracking, payout eligibility, and treatment of reversals, disputed payments and fraud. Decide how insurance claims, loans, bounties and asset sales interact with exchange eligibility.
+- Decide how the commercial exchange relates to independently hosted universes. A host's ability to edit saves or mint arbitrary game credits must not automatically create credits eligible for central real-money sale; trusted-universe eligibility and cross-universe transfers require an explicit policy.
+- Define payment-provider, identity, age, jurisdiction, tax/reporting, customer-support and dispute requirements through a dedicated commercial review before enabling real-money operations. These are open planning tasks, not conclusions about any particular legal classification.
+- Evaluate economic balance and abuse controls before connecting earned credits, uncaptained-ship losses, lending, bounties, player property and real-money payouts. Test settlement failures, account compromises, duplicate requests and recovery from interrupted transactions.
+
+Current releases remain offline games with game-only balances. They do not accept payments, redeem credits, pay sellers or collect commission. Record and implement this work as a separately reviewed future service.

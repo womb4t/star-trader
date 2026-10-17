@@ -31,4 +31,15 @@ Requested for future releases; none is implemented by this roadmap change:
 - **Player lending:** players can offer another player a loan with an agreed interest rate or fixed fee. A central in-game system records the contract and recoups repayments automatically under agreed rules.
 - **Player-posted bounties:** players can fund and place a bounty on a named player, with server-verified completion and payment.
 
-Details and open design decisions are recorded in [MULTIPLAYER.md](MULTIPLAYER.md). All payments are in-game credits.
+Details and open design decisions are recorded in [MULTIPLAYER.md](MULTIPLAYER.md). Those game contracts use in-game credits; the separately proposed real-money exchange is described below.
+
+## Universal asset sales and StarTraderEx credit exchange (future)
+
+Requested for future releases; planning only:
+
+- **Sell owned assets:** support selling anything the player owns, including ships, fitted/spare equipment, cargo, storage bays/centres, bases and fleet assets. Define ownership transfer, contents, outstanding commitments and what happens if the last ship is sold.
+- **Buy credits with real money:** let players purchase credits using real-world money and add the settled purchase to their in-game balance.
+- **Earn and sell credits:** let players offer eligible earned credits for sale through a marketplace and receive real-money proceeds from completed sales.
+- **StarTraderEx commission:** StarTraderEx takes a commission on marketplace transactions. The rate, fee basis, pricing mechanism and payout terms remain to be decided and shown before commitment.
+
+See [MULTIPLAYER.md](MULTIPLAYER.md) for the recorded exchange design questions. No real-money purchase, credit redemption, payout or asset marketplace is currently enabled.
