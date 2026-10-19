@@ -1,3 +1,9 @@
+# 0.2.12 — fix mouse clicks in scaled windows
+
+- Remove the second mouse-coordinate conversion: SDL already scales events to the game resolution.
+- Restore aligned button, map and scanner hit detection in resized/scaled windows.
+- Add a real SDL event regression covering four window sizes, letterboxing, jobs, answers and held controls.
+
 # 0.2.11 — visible station job selection
 
 - Add a prominent top Jobs J button at the market, outfitter and bank.

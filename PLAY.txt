@@ -1,4 +1,4 @@
-STAR TRADER 0.2.11 — original space trading game for Omarchy
+STAR TRADER 0.2.12 — original space trading game for Omarchy
 
 Install: bash install.sh
 Play: open your app launcher and search for Star Trader.
@@ -87,3 +87,6 @@ percentage points to repair probability; engineering levels still require traini
 
 Station jobs: use the top Jobs J button from the market, outfitter or bank.
 On the job list click a job card or use Up/Down then Enter; 1/2/3 also works.
+
+Mouse input uses SDL logical event coordinates directly, so buttons, map picks
+and scanner selections stay aligned when the window is scaled or letterboxed.

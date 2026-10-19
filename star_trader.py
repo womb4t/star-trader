@@ -18,7 +18,7 @@ import tempfile
 import fcntl
 import textwrap
 
-VERSION = '0.2.11'
+VERSION = '0.2.12'
 DOCK_ROLL_TOLERANCE = math.radians(14)
 CRUISE_SECONDS_PER_LY = 45
 W, H = 1100, 760
@@ -291,7 +291,6 @@ class Display:
         self.free = bind(self.sdl, 'SDL_FreeSurface', None, [ptr])
         self.destroy = bind(self.sdl, 'SDL_DestroyTexture', None, [ptr])
         self.fill_rect = bind(self.sdl,'SDL_RenderFillRect',i,[ptr,ptr])
-        self.logical_point = bind(self.sdl,'SDL_RenderWindowToLogical',None,[ptr,i,i,C.POINTER(C.c_float),C.POINTER(C.c_float)])
         self.query = bind(self.sdl, 'SDL_QueryTexture', i, [ptr, ptr, ptr, C.POINTER(i), C.POINTER(i)])
         bind(self.ttf, 'TTF_Init', i, [])()
         self.openfont = bind(self.ttf, 'TTF_OpenFont', ptr, [C.c_char_p, i])
@@ -362,9 +361,9 @@ class Display:
             elif typ in (1025,1026) and raw[16] == 1:
                 x = int.from_bytes(raw[20:24],sys.byteorder,signed=True)
                 y = int.from_bytes(raw[24:28],sys.byteorder,signed=True)
-                lx,ly = C.c_float(),C.c_float()
-                self.logical_point(self.r,x,y,C.byref(lx),C.byref(ly))
-                yield 'click' if typ == 1025 else 'mouse_up',(lx.value,ly.value)
+                # SDL_RenderSetLogicalSize already scales mouse events into
+                # game coordinates. Converting again breaks scaled windows.
+                yield 'click' if typ == 1025 else 'mouse_up',(x,y)
             elif typ in (768,769):
                 key = int.from_bytes(raw[20:24], sys.byteorder, signed=True)
                 if typ == 769 or raw[13] == 0:
