@@ -18,7 +18,7 @@ import tempfile
 import fcntl
 import textwrap
 
-VERSION = '0.2.7'
+VERSION = '0.2.8'
 DOCK_ROLL_TOLERANCE = math.radians(14)
 CRUISE_SECONDS_PER_LY = 45
 W, H = 1100, 760
@@ -434,6 +434,10 @@ class Game:
         self.station = [0., 0., 1500.]
         self.roll = self.station_angle = 0.
         self.autodock = False
+        self.station_hostilities = [False]*len(SYSTEMS)
+        self.security_elapsed = 0.
+        self.security_warning = 0
+        self.security_dispatch = 0.
         self.course_assist = False
         self.fine_control = False
         self.enemy = None
@@ -529,7 +533,7 @@ class Game:
     def message(self,text):
         old = getattr(self,'_message','')
         self._message = text
-        critical = ('collision','breakdown','fuel exhausted','refused','seized','repair failed','mine detected','hostile contact','clearance granted','destroyed','rescued')
+        critical = ('station warning','station defence','station police','collision','breakdown','fuel exhausted','refused','seized','repair failed','mine detected','hostile contact','clearance granted','destroyed','rescued')
         if text != old and any(word in text.lower() for word in critical):
             self.alert = dict(text=text,remaining=5.,elapsed=0.)
 
@@ -545,7 +549,7 @@ class Game:
 
     def checkpoint(self):
         if getattr(self,'_restoring',False): return
-        fields = ('shield','speed','station','roll','station_angle','autodock','course_assist','fine_control','enemy','enemy_kind',
+        fields = ('shield','speed','station','roll','station_angle','station_hostilities','security_elapsed','security_warning','security_dispatch','autodock','course_assist','fine_control','enemy','enemy_kind',
                   'asteroids','fragments','sun','heat','nav','rear_view','planet','planet_radius',
                   'assist_speed','mine_objects','jamming','jammer_cooldown','cloaked','customs_checked',
                   'cruise','jump_warp','npc_mine_timer','spawn','cooldown','broken_down','breakdown_in',
@@ -873,7 +877,7 @@ class Game:
 
     def station_allows(self, system=None):
         system = self.p.system if system is None else system
-        return self.p.fine < 100 or PROFILES[system][0] in ('Anarchy','Feudal')
+        return not self.station_hostilities[system] and (self.p.fine < 100 or PROFILES[system][0] in ('Anarchy','Feudal'))
 
     def request_departure(self):
         self.departure_remaining = 2.
@@ -887,12 +891,50 @@ class Game:
         elif not self.station_allows():
             self.dock_clearance = 0
             self.docking_pending = 0
-            self.message = 'Docking refused: wanted status. Seek an anarchy/feudal port.'
+            self.message = 'Docking refused: hostile or wanted status. Seek another accepting port.'
         elif self.dock_clearance > 0:
             self.message = f'Docking clearance remains valid for {math.ceil(self.dock_clearance)}s.'
         else:
             self.docking_pending = 2.
             self.message = 'Docking clearance requested. Await station response.'
+
+    def station_hostile(self, reason):
+        if self.p.deep_space: return
+        if not self.station_hostilities[self.p.system]:
+            self.p.fine += 150
+        self.station_hostilities[self.p.system] = True
+        self.dock_clearance = self.docking_pending = 0.
+        self.autodock = self.course_assist = False
+        self.message = 'STATION DEFENCE: '+reason+' Police dispatched; docking revoked!'
+        self.checkpoint()
+
+    def update_station_security(self, dt):
+        if self.p.deep_space: return
+        self.security_dispatch = max(0,self.security_dispatch-dt)
+        if self.station_hostilities[self.p.system]:
+            if self.enemy is None and self.security_dispatch <= 0:
+                # Existing combat simulation supports one active attacker.
+                # Queue station police while another hostile occupies that slot.
+                self.enemy_kind = 'police'
+                self.enemy = [self.station[0]+90,self.station[1]+50,max(300.,self.station[2]-150),10,0.]
+                self.security_dispatch = 15.
+                self.message = 'STATION POLICE launched: you are hostile. Leave this system!'
+            return
+        x,y,z = self.station
+        restricted = -100 < z < 800 and math.hypot(x,y) < 200 and (self.speed > 0 or z < 150)
+        if self.dock_clearance > 0 or not restricted:
+            self.security_elapsed = 0.
+            self.security_warning = 0
+            return
+        self.security_elapsed += dt
+        if not self.security_warning:
+            self.security_warning = 1
+            self.message = 'STATION WARNING: no clearance! Stop and request docking with 7, or withdraw. Police in 12 seconds.'
+        if self.security_elapsed >= 6 and self.security_warning == 1:
+            self.security_warning = 2
+            self.message = 'FINAL STATION WARNING: withdraw or obtain clearance! Police in 6 seconds.'
+        if self.security_elapsed >= 12:
+            self.station_hostile('Unauthorised docking approach.')
 
     def breakdown_risk(self, next_flight=False):
         flights = self.p.flights_since_service + int(next_flight)
@@ -1429,6 +1471,8 @@ class Game:
         self.p.position = list(position)
         self.p.deep_space = system is None
         if system is not None: self.p.system = system
+        self.security_elapsed = self.security_dispatch = 0.
+        self.security_warning = 0
         self.launch(departure=False)
         if system is not None: self.station = [random.uniform(-80,80),random.uniform(-50,50),2200.]
         name = SYSTEMS[system][0] if system is not None else f'Deep space ({position[0]:.2f}, {position[1]:.2f})'
@@ -1751,6 +1795,7 @@ class Game:
                 self.jump_charge = None
                 self.speed = 0
                 self.message = 'DRIVE BREAKDOWN. Engineering 8 for repairs, or 6 for rescue.'
+        self.update_station_security(dt)
         self.assist_spawn_timer -= dt
         if self.assist_spawn_timer <= 0 and self.disabled_ship is None and self.enemy is None and math.sqrt(sum(v*v for v in self.station)) > 1000:
             self.disabled_ship = dict(object=[-160.,70.,850.],hull=40)
@@ -1900,6 +1945,9 @@ class Game:
         if self.enemy and self.on_target(self.enemy):
             self.enemy[3] -= power
             if self.enemy[3] <= 0: self.destroy_enemy()
+        elif not self.p.deep_space and self.on_target(self.station,60):
+            self.station_hostile('Weapons fire on station.')
+            self.update_station_security(0)
         elif weapon == 'mining':
             rock = next((r for r in self.asteroids if self.on_target(r)),None)
             if rock:

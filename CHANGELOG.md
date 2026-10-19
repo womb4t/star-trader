@@ -1,3 +1,11 @@
+# 0.2.8 — station warnings and police defence
+
+- Uncleared docking approaches receive immediate and six-second warnings, escalating at 12 seconds.
+- Stop outside the entrance, withdraw or obtain clearance to avoid escalation.
+- Station laser hits immediately cause hostility, revoke clearance and trigger attacking police.
+- Hostility and a one-time 150cr offence fine persist in saves; hostile stations refuse docking.
+- Station defence reuses the active combat contact and queues dispatch if another enemy is present.
+
 # 0.2.7 — more forgiving docking
 
 - Add five degrees of roll allowance each side: docking now accepts +/-14 degrees.

@@ -68,6 +68,50 @@ class GameplayTests(unittest.TestCase):
         g.update(.1)
         self.assertFalse(g.course_assist)
 
+    def test_station_warns_before_dispatching_police(self):
+        g = self.game
+        g.mode = 'flight'
+        g.station,g.speed = [0.,0.,500.],10
+        g.update_station_security(.1)
+        self.assertIn('WARNING',g.message)
+        self.assertIsNone(g.enemy)
+        g.update_station_security(6)
+        self.assertIn('FINAL',g.message)
+        self.assertIsNone(g.enemy)
+        g.update_station_security(6)
+        self.assertTrue(g.station_hostilities[0])
+        g.update_station_security(0)
+        self.assertEqual(g.enemy_kind,'police')
+        self.assertIsNotNone(g.enemy)
+        self.assertFalse(g.station_allows())
+
+    def test_station_clearance_or_retreat_stops_warning(self):
+        g = self.game
+        g.station,g.speed = [0.,0.,500.],10
+        g.update_station_security(7)
+        g.dock_clearance = 120
+        g.update_station_security(20)
+        self.assertEqual(g.security_elapsed,0)
+        self.assertFalse(g.station_hostilities[0])
+        g.dock_clearance = 0
+        g.station[2] = 900
+        g.update_station_security(20)
+        self.assertFalse(g.station_hostilities[0])
+
+    def test_station_fire_immediately_hostile_once_and_survives_reload(self):
+        g = self.game
+        g.mode = 'flight'
+        g.station = [0.,0.,600.]
+        g.fire_laser()
+        self.assertTrue(g.station_hostilities[0])
+        self.assertEqual(g.enemy_kind,'police')
+        fine = g.p.fine
+        g.station_hostile('Repeated attack')
+        self.assertEqual(g.p.fine,fine)
+        g.checkpoint()
+        restored = st.Game(None)
+        self.assertTrue(restored.station_hostilities[0])
+
     def test_market_spread_and_stock(self):
         p = self.game.p
         cash, stock = p.credits, p.stock[0][0]

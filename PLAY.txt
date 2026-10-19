@@ -1,4 +1,4 @@
-STAR TRADER 0.2.7 — original space trading game for Omarchy
+STAR TRADER 0.2.8 — original space trading game for Omarchy
 
 Install: bash install.sh
 Play: open your app launcher and search for Star Trader.
@@ -62,3 +62,9 @@ useful for docking. Mouse: Actions > Nav > Guide Y; Actions > Safety > Fine I.
 
 Docking allows +/-14 degrees of roll error. Slow station contact (speed 25 or below)
 causes minor damage; high-speed impacts remain dangerous. Slot roll error stays visible after clearance.
+
+Station defence: approaching the docking lane without clearance triggers warnings,
+then hostility after 12 seconds. Stop outside the entrance, withdraw or obtain clearance
+with 7 before escalation. Shooting the station causes immediate hostility, a 150cr fine,
+revoked clearance and attacking police. Hostility at that station survives saving;
+leave for another accepting port. Paying fines alone does not clear station hostility.

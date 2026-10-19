@@ -1,6 +1,6 @@
 # Star Trader
 
-An original Elite-inspired Python space game for **Omarchy**. Trade, mine, fight robot pirates, smuggle contraband and navigate a small wireframe universe. Current version: **0.2.7**.
+An original Elite-inspired Python space game for **Omarchy**. Trade, mine, fight robot pirates, smuggle contraband and navigate a small wireframe universe. Current version: **0.2.8**.
 
 The current game is offline single-player. Self-hosted multiplayer is a future project; see [MULTIPLAYER.md](MULTIPLAYER.md). The next offline expansion is outlined in [ROADMAP.md](ROADMAP.md).
 
@@ -189,3 +189,9 @@ useful for docking. Mouse: Actions > Nav > Guide Y; Actions > Safety > Fine I.
 
 Docking allows +/-14 degrees of roll error. Slow station contact (speed 25 or below)
 causes minor damage; high-speed impacts remain dangerous. Slot roll error stays visible after clearance.
+
+Station defence: approaching the docking lane without clearance triggers warnings,
+then hostility after 12 seconds. Stop outside the entrance, withdraw or obtain clearance
+with 7 before escalation. Shooting the station causes immediate hostility, a 150cr fine,
+revoked clearance and attacking police. Hostility at that station survives saving;
+leave for another accepting port. Paying fines alone does not clear station hostility.
