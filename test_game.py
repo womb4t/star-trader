@@ -219,6 +219,54 @@ class GameplayTests(unittest.TestCase):
         g.key(13)
         self.assertEqual(g.p.dock_job['kind'],1)
 
+    def test_pirate_hit_in_front_of_station_does_not_make_station_hostile(self):
+        g = self.game
+        g.mode = 'flight'
+        g.station = [0.,0.,1500.]
+        g.enemy = [0.,0.,400.,1,0]
+        g.fire_laser()
+        self.assertIsNone(g.enemy)
+        self.assertFalse(g.station_hostilities[0])
+        self.assertEqual(g.p.fine,0)
+
+    def test_shots_near_station_do_not_count_as_hull_hits(self):
+        g = self.game
+        g.mode = 'flight'
+        g.station = [250.,0.,3000.]
+        self.assertTrue(g.on_target(g.station,60))
+        g.fire_laser()
+        self.assertFalse(g.station_hostilities[0])
+        self.assertEqual(g.p.fine,0)
+
+    def test_nearest_hull_blocks_laser(self):
+        g = self.game
+        g.mode = 'flight'
+        g.station = [0.,0.,500.]
+        g.enemy = [0.,0.,1000.,6,0]
+        g.fire_laser()
+        self.assertTrue(g.station_hostilities[0])
+        self.assertEqual(g.enemy[3],6)
+        g.station_hostilities[0] = False
+        g.station = [0.,0.,1500.]
+        g.enemy = [0.,0.,1000.,6,0]
+        g.asteroids = [[0.,0.,300.,3]]
+        g.fire_laser()
+        self.assertFalse(g.station_hostilities[0])
+        self.assertEqual(g.enemy[3],6)
+
+    def test_incoming_enemy_fire_has_visible_timed_beam(self):
+        g = self.game
+        g.mode = 'flight'
+        g.speed = 0
+        g.enemy = [0.,0.,500.,6,1.95]
+        g.update(.1)
+        self.assertIsNotNone(g.enemy_shot)
+        self.assertEqual(g.enemy_shot['kind'],'pirate')
+        self.assertGreater(g.enemy_shot['remaining'],0)
+        self.assertLess(g.shield,100)
+        g.update(.3)
+        self.assertIsNone(g.enemy_shot)
+
     def test_market_spread_and_stock(self):
         p = self.game.p
         cash, stock = p.credits, p.stock[0][0]

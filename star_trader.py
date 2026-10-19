@@ -18,7 +18,7 @@ import tempfile
 import fcntl
 import textwrap
 
-VERSION = '0.2.12'
+VERSION = '0.2.13'
 DOCK_ROLL_TOLERANCE = math.radians(14)
 CRUISE_SECONDS_PER_LY = 45
 W, H = 1100, 760
@@ -465,12 +465,14 @@ class Game:
         self.jamming = self.jammer_cooldown = 0.
         self.cloaked = False
         self.enemy_kind = 'pirate'
+        self.enemy_shot = None
         self.customs_checked = False
         self.cruise = None
         self.jump_charge = self.jump_warp = self.arrival = None
         self.npc_mine_timer = 25.
         self.spawn = 12
         self.cooldown = self.flash = self.laser_flash = 0.
+        self.enemy_shot = None
         self.message = 'Welcome back, Commander.' if loaded else 'Welcome, Commander. 1 manual; U ship outfitting.'
         self.stars = [[random.uniform(-1000,1000),random.uniform(-650,650),random.uniform(-1800,1800)] for _ in range(180)]
         self.broken_down = False
@@ -513,6 +515,7 @@ class Game:
         self.cloaked = False
         self.jamming = self.jammer_cooldown = 0.
         self.enemy_kind = 'pirate'
+        self.enemy_shot = None
         self.customs_checked = False
         self.cruise = None
         self.jump_charge = self.jump_warp = self.arrival = None
@@ -561,7 +564,7 @@ class Game:
         fields = ('shield','speed','station','roll','station_angle','station_hostilities','security_elapsed','security_warning','security_dispatch','autodock','course_assist','fine_control','enemy','enemy_kind',
                   'asteroids','fragments','sun','heat','nav','rear_view','planet','planet_radius',
                   'assist_speed','mine_objects','jamming','jammer_cooldown','cloaked','customs_checked',
-                  'cruise','jump_warp','npc_mine_timer','spawn','cooldown','broken_down','breakdown_in',
+                  'cruise','jump_warp','npc_mine_timer','spawn','cooldown','enemy_shot','broken_down','breakdown_in',
                   'disabled_ship','assist_spawn_timer','dock_clearance','docking_pending','rescue_cooldown','ship_collision_cooldown')
         state = {key:getattr(self,key) for key in fields}
         if state['nav'] == 'object': state['nav'] = 'station'
@@ -652,6 +655,9 @@ class Game:
             if self.alert['remaining'] <= 0: self.alert = None
         self.ship_collision_cooldown = max(0,self.ship_collision_cooldown-dt)
         self.update_job(dt)
+        if self.enemy_shot:
+            self.enemy_shot['remaining'] -= dt
+            if self.enemy_shot['remaining'] <= 0: self.enemy_shot = None
         self._update_simulation(dt)
         self._save_elapsed += dt
         if self._save_elapsed >= 2 or before != self.mode:
@@ -1878,6 +1884,7 @@ class Game:
         cy,sy,cp,sp = math.cos(yaw),math.sin(yaw),math.cos(pitch),math.sin(pitch)
         objects = [self.station,self.sun,self.planet] + self.stars + self.asteroids + self.fragments + self.mine_objects
         if self.enemy: objects.append(self.enemy)
+        if self.enemy_shot: objects.append(self.enemy_shot['position'])
         if self.disabled_ship: objects.append(self.disabled_ship['object'])
         for obj in objects:
             x,y,z = obj[:3]
@@ -1887,7 +1894,7 @@ class Game:
             obj[0],obj[1],obj[2] = x*c-y*s,x*s+y*c,z
 
     def move_world(self, dx, dy, dz):
-        for obj in [self.station,self.sun,self.planet] + ([self.disabled_ship['object']] if self.disabled_ship else []) + self.asteroids + self.fragments + self.mine_objects:
+        for obj in [self.station,self.sun,self.planet] + ([self.enemy_shot['position']] if self.enemy_shot else []) + ([self.disabled_ship['object']] if self.disabled_ship else []) + self.asteroids + self.fragments + self.mine_objects:
             obj[0] -= dx
             obj[1] -= dy
             obj[2] -= dz
@@ -2062,6 +2069,7 @@ class Game:
             if self.cloaked: e[4] = 0
             if e[4] >= (6 if self.jamming else 2):
                 e[4] = 0
+                self.enemy_shot = dict(position=e[:3],kind=self.enemy_kind,remaining=.25)
                 self.damage(7 if abs(e[0])<250 and abs(e[1])<180 else 2)
                 if self.mode == 'dead': return
         self.ship_collisions(ship_previous)
@@ -2081,20 +2089,50 @@ class Game:
         weapon = 'pulse' if self.rear_view else self.p.laser
         delay,power = LASERS[weapon]
         self.cooldown,self.laser_flash = delay,.09
-        if self.enemy and self.on_target(self.enemy):
-            self.enemy[3] -= power
-            if self.enemy[3] <= 0: self.destroy_enemy()
-        elif not self.p.deep_space and self.on_target(self.station,60):
+        candidates = []
+        if self.enemy: candidates.append(('ship',self.enemy))
+        if self.disabled_ship: candidates.append(('disabled',self.disabled_ship['object']))
+        if not self.p.deep_space: candidates.append(('station',self.station))
+        candidates += [('asteroid',rock) for rock in self.asteroids]
+        hits = [(depth,kind,obj) for kind,obj in candidates if (depth := self.laser_hit_depth(obj,kind)) is not None]
+        if not hits: return
+        _,kind,obj = min(hits,key=lambda hit:hit[0])
+        if kind == 'ship':
+            obj[3] -= power
+            if obj[3] <= 0: self.destroy_enemy()
+        elif kind == 'station':
             self.station_hostile('Weapons fire on station.')
             self.update_station_security(0)
-        elif weapon == 'mining':
-            rock = next((r for r in self.asteroids if self.on_target(r)),None)
-            if rock:
-                rock[3] -= 1
-                if rock[3] <= 0:
-                    self.asteroids.remove(rock)
-                    self.fragments += [[rock[0]+offset,rock[1]+10,rock[2]] for offset in (-18,0,18)]
-                    self.message = 'Asteroid fragmented! Approach slowly; O collects ore within 260m.'
+        elif kind == 'asteroid' and weapon == 'mining':
+            obj[3] -= 1
+            if obj[3] <= 0:
+                self.asteroids.remove(obj)
+                self.fragments += [[obj[0]+offset,obj[1]+10,obj[2]] for offset in (-18,0,18)]
+                self.message = 'Asteroid fragmented! Approach slowly; O collects ore within 260m.'
+
+    def laser_hit_depth(self, obj, kind):
+        point = self.project(obj)
+        if point is None: return None
+        sx,sy,scale = point
+        angle = self.roll if self.rear_view else -self.roll
+        if kind == 'station':
+            angle += -self.station_angle if self.rear_view else self.station_angle
+            vertices = [(math.cos(i*math.pi/4)*100,math.sin(i*math.pi/4)*100) for i in range(8)]
+        elif kind in ('ship','disabled'):
+            vertices = [(-65,10),(-20,-15),(0,-5),(20,-15),(65,10),(0,28)]
+        else:
+            vertices = [(math.cos(i*2*math.pi/7)*42*(.85+.15*(i%3)),math.sin(i*2*math.pi/7)*42) for i in range(7)]
+        # Test the central laser ray against the same outline drawn on screen.
+        x,y = (W/2-sx)/scale,(330-sy)/scale
+        c,s = math.cos(angle),math.sin(angle)
+        x,y = x*c+y*s,-x*s+y*c
+        inside = False
+        for (ax,ay),(bx,by) in zip(vertices,vertices[1:]+vertices[:1]):
+            cross = (x-ax)*(by-ay)-(y-ay)*(bx-ax)
+            if abs(cross)<1e-8 and min(ax,bx)-1e-8<=x<=max(ax,bx)+1e-8 and min(ay,by)-1e-8<=y<=max(ay,by)+1e-8:
+                return self.camera_vector(obj)[2]
+            if (ay>y) != (by>y) and x < (bx-ax)*(y-ay)/(by-ay)+ax: inside = not inside
+        return self.camera_vector(obj)[2] if inside else None
 
     def release_mouse(self):
         for key in self.mouse_held: self.keys.discard(key)
@@ -2389,6 +2427,18 @@ class Game:
             color = GOLD if p.laser == 'mining' and not self.rear_view else RED
             d.line(160,550,550,330,color)
             d.line(940,550,550,330,color)
+        if self.enemy_shot:
+            shot = self.enemy_shot
+            color = RED if shot['kind'] == 'pirate' else (120,170,255)
+            origin = self.project(shot['position'])
+            if origin:
+                x,y,_ = origin
+                d.line(x,y,550,330,color)
+                d.line(x+2,y,552,330,color)
+                d.rect(x-6,y-6,12,12,color)
+            else:
+                self.draw_marker(shot['position'],'INCOMING FIRE',color)
+            d.text(435,465,'INCOMING '+shot['kind'].upper()+' FIRE',color)
         d.line(530,330,542,330); d.line(558,330,570,330)
         d.line(550,310,550,322); d.line(550,338,550,350)
         clip(d.r,None)

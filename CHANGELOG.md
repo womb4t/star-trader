@@ -1,3 +1,11 @@
+# 0.2.13 — accurate laser hits and visible incoming fire
+
+- Replace the oversized station aim area with hit detection against the drawn hull outlines.
+- Resolve the nearest hull first; pirate hits do not also strike a station behind them.
+- Asteroids and disabled ships block shots; mining still requires the mining laser.
+- Incoming pirate and police attacks show coloured laser beams, muzzle flashes and rearward direction warnings.
+- Regression coverage includes near misses, occlusion, pirate kills in front of stations and timed enemy beams.
+
 # 0.2.12 — fix mouse clicks in scaled windows
 
 - Remove the second mouse-coordinate conversion: SDL already scales events to the game resolution.
