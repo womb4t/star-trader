@@ -18,7 +18,7 @@ import tempfile
 import fcntl
 import textwrap
 
-VERSION = '0.2.10'
+VERSION = '0.2.11'
 DOCK_ROLL_TOLERANCE = math.radians(14)
 CRUISE_SECONDS_PER_LY = 45
 W, H = 1100, 760
@@ -481,6 +481,7 @@ class Game:
         self.dock_clearance = self.docking_pending = 0.
         self.rescue = None
         self.rescue_cooldown = 0.
+        self.job_selected = 0
         self.mouse_controls = False
         self.mouse_held = set()
         self.buttons = []
@@ -1175,10 +1176,11 @@ class Game:
             for i,line in enumerate(['Cargo handling: match crates to bays. 60 seconds / 15-25 cr.',
                                       'Inventory checks: compare counts. 75 seconds / 20-35 cr.',
                                       'Workshop assistant: follow repair steps. 90 seconds / 25-40 cr.']):
-                d.text(45,170+i*75,line)
+                d.rect(35,150+i*75,1020,60,GOLD if i == self.job_selected else (45,105,115))
+                d.text(45,170+i*75,('> ' if i == self.job_selected else '  ')+line,GOLD if i == self.job_selected else GREEN)
             d.text(45,440,'Five tasks per shift. Mistakes reduce your bonus, never your balance.')
             d.text(45,480,'Workshop shifts earn 10 XP; practice adds up to 5% repair chance.')
-            d.text(45,520,'Cargo handling is always available. Select a job with 1 / 2 / 3.')
+            d.text(45,520,'Click a job, use 1/2/3, or select with arrows and press ENTER.')
         else:
             duration = (60,75,90)[j['kind']]
             d.text(45,155,['CARGO HANDLING','INVENTORY CHECKS','WORKSHOP ASSISTANT'][j['kind']],GOLD)
@@ -1192,13 +1194,16 @@ class Game:
 
     def key(self, k):
         if self.mode == 'jobs':
-            if k in (27,ord('j')): self.mode = 'market'; self.checkpoint()
+            if self.p.dock_job is None and k in (UP,DOWN):
+                self.job_selected = (self.job_selected+(-1 if k == UP else 1))%3
+            elif self.p.dock_job is None and k == 13: self.start_job(self.job_selected)
+            elif k in (27,ord('j')): self.mode = 'market'; self.checkpoint()
             elif k in (ord('1'),ord('2'),ord('3')):
                 choice = k-ord('1')
                 if self.p.dock_job is None: self.start_job(choice)
                 else: self.answer_job(choice)
             return
-        if k == ord('j') and self.mode in ('market','outfit'):
+        if k == ord('j') and self.mode in ('market','outfit','bank'):
             self.mode = 'jobs'
             self.alert = None
             return
@@ -2120,6 +2125,8 @@ class Game:
         modal = self.mode in ('distress','departure','launch_warning','engineering','hyperspace','bank','jobs')
         if self.mode == 'flight':
             self.mouse_button(310,18,92,'Actions',action=lambda:setattr(self,'mouse_controls',not self.mouse_controls))
+        if self.mode in ('market','outfit','bank'):
+            self.mouse_button(310,18,92,'Jobs J',ord('j'))
         if not modal:
             self.mouse_button(408,18,50,'Help',ord('1'))
             self.mouse_button(462,18,70,'Update',ord('2'))

@@ -210,6 +210,15 @@ class GameplayTests(unittest.TestCase):
         g.start_job(0)
         self.assertIsNone(g.p.dock_job)
 
+    def test_jobs_accessible_from_bank_and_arrow_enter_selection(self):
+        g = self.game
+        g.mode = 'bank'
+        g.key(ord('j'))
+        self.assertEqual(g.mode,'jobs')
+        g.key(st.DOWN)
+        g.key(13)
+        self.assertEqual(g.p.dock_job['kind'],1)
+
     def test_market_spread_and_stock(self):
         p = self.game.p
         cash, stock = p.credits, p.stock[0][0]

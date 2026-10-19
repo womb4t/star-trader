@@ -1,4 +1,4 @@
-STAR TRADER 0.2.10 — original space trading game for Omarchy
+STAR TRADER 0.2.11 — original space trading game for Omarchy
 
 Install: bash install.sh
 Play: open your app launcher and search for Star Trader.
@@ -84,3 +84,6 @@ or the mouse. Payment arrives after the shift timer and tasks finish.
 Mistakes reduce only the bonus. Leaving pauses work; saved shifts resume
 when you reopen J, with no offline pay. Workshop practice adds at most five
 percentage points to repair probability; engineering levels still require training.
+
+Station jobs: use the top Jobs J button from the market, outfitter or bank.
+On the job list click a job card or use Up/Down then Enter; 1/2/3 also works.

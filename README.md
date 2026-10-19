@@ -1,6 +1,6 @@
 # Star Trader
 
-An original Elite-inspired Python space game for **Omarchy**. Trade, mine, fight robot pirates, smuggle contraband and navigate a small wireframe universe. Current version: **0.2.10**.
+An original Elite-inspired Python space game for **Omarchy**. Trade, mine, fight robot pirates, smuggle contraband and navigate a small wireframe universe. Current version: **0.2.11**.
 
 The current game is offline single-player. Self-hosted multiplayer is a future project; see [MULTIPLAYER.md](MULTIPLAYER.md). The next offline expansion is outlined in [ROADMAP.md](ROADMAP.md).
 
@@ -211,3 +211,6 @@ or the mouse. Payment arrives after the shift timer and tasks finish.
 Mistakes reduce only the bonus. Leaving pauses work; saved shifts resume
 when you reopen J, with no offline pay. Workshop practice adds at most five
 percentage points to repair probability; engineering levels still require training.
+
+Station jobs: use the top Jobs J button from the market, outfitter or bank.
+On the job list click a job card or use Up/Down then Enter; 1/2/3 also works.

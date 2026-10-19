@@ -1,3 +1,9 @@
+# 0.2.11 — visible station job selection
+
+- Add a prominent top Jobs J button at the market, outfitter and bank.
+- Allow J from the bank, and highlight clickable job cards.
+- Add Up/Down and Enter job selection alongside mouse and 1/2/3 shortcuts.
+
 # 0.2.10 — dockside jobs for stranded pilots
 
 - J opens repeatable paid cargo-handling, inventory and workshop shifts while docked.
