@@ -1,6 +1,6 @@
 # Star Trader
 
-An original Elite-inspired Python space game for **Omarchy**. Trade, mine, fight robot pirates, smuggle contraband and navigate a small wireframe universe. Current version: **0.2.8**.
+An original Elite-inspired Python space game for **Omarchy**. Trade, mine, fight robot pirates, smuggle contraband and navigate a small wireframe universe. Current version: **0.2.9**.
 
 The current game is offline single-player. Self-hosted multiplayer is a future project; see [MULTIPLAYER.md](MULTIPLAYER.md). The next offline expansion is outlined in [ROADMAP.md](ROADMAP.md).
 
@@ -195,3 +195,10 @@ then hostility after 12 seconds. Stop outside the entrance, withdraw or obtain c
 with 7 before escalation. Shooting the station causes immediate hostility, a 150cr fine,
 revoked clearance and attacking police. Hostility at that station survives saving;
 leave for another accepting port. Paying fines alone does not clear station hostility.
+
+Arrows now turn the ship heading rather than sliding sideways. Objects and stars
+move opposite your turn; forward thrust follows the new heading. I reduces turn
+and roll rates for docking. The top-view radar follows cockpit roll and rear view:
+ahead is up, behind is down, left/right match the view. The TARGET BEARING panel
+shows a selected ship or navigation target relative to your nose: steer toward the
+gold dot until it reaches the centre box. TURN cues show which arrow to use.

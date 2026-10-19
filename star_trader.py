@@ -18,7 +18,7 @@ import tempfile
 import fcntl
 import textwrap
 
-VERSION = '0.2.8'
+VERSION = '0.2.9'
 DOCK_ROLL_TOLERANCE = math.radians(14)
 CRUISE_SECONDS_PER_LY = 45
 W, H = 1100, 760
@@ -1603,7 +1603,7 @@ class Game:
         return contacts
 
     def scanner_position(self, obj):
-        x,z = obj[0],obj[2]
+        x,_,z = self.camera_vector(obj)
         # Fixed 2500m radius. Contacts beyond the radius sit at its rim.
         scale = max(2500,math.hypot(x,z))
         return 955+x/scale*85,165-z/scale*53
@@ -1674,15 +1674,38 @@ class Game:
         d = self.d
         d.fill(840,80,230,165,(5,16,27))
         d.rect(840,80,230,165,(45,105,115))
-        d.text(850,85,'SCANNER  2500m',GREEN)
+        d.text(850,85,'RADAR 2.5km '+('AFT' if self.rear_view else 'FWD'),GREEN)
         d.line(870,165,1040,165,(35,75,85))
         d.line(955,112,955,218,(35,75,85))
-        d.fill(952,162,6,6,(235,245,250))
+        d.line(950,171,955,160,(235,245,250))
+        d.line(955,160,960,171,(235,245,250))
+        d.text(920,105,'AHEAD',GREEN)
+        d.text(920,203,'BEHIND',GREEN)
         for kind,obj,label,color in self.scanner_contacts():
             x,y = self.scanner_position(obj)
             d.fill(x-3,y-3,6,6,color)
             if kind in ('ship','disabled') and obj is self.ship_target: d.rect(x-7,y-7,14,14,GOLD)
-        d.text(850,220,'Click / 5 target',(135,175,185))
+        d.text(850,224,'TOP VIEW / click',(135,175,185))
+        self.draw_bearing()
+
+    def draw_bearing(self):
+        d = self.d
+        d.fill(840,255,230,160,(5,16,27))
+        d.rect(840,255,230,160,(45,105,115))
+        d.text(850,260,'TARGET BEARING',GOLD)
+        d.line(885,340,1025,340,(45,105,115))
+        d.line(955,290,955,385,(45,105,115))
+        d.rect(949,334,12,12,GREEN)
+        obj,label = (self.ship_target,'SHIP') if self.ship_target is not None else self.active_navigation()
+        if obj is None: return
+        x,y,z = self.camera_vector(obj)
+        length = max(1,math.sqrt(x*x+y*y+z*z))
+        px,py = 955+x/length*65,340+y/length*40
+        d.fill(px-4,py-4,8,8,GOLD)
+        direction = ('RIGHT' if x > length*.03 else 'LEFT' if x < -length*.03 else '')
+        direction += (' DOWN' if y > length*.03 else ' UP' if y < -length*.03 else '')
+        d.text(850,390,'BEHIND: 4' if z < 0 else ('TURN '+direction.strip() if direction.strip() else 'ON HEADING'),GOLD)
+        # Positive cockpit Y is downward, matching the view and arrow keys.
 
     def update_jump_charge(self, dt):
         charge = self.jump_charge
@@ -1748,6 +1771,21 @@ class Game:
     def on_target(self, obj, radius=32):
         projected = self.project(obj)
         return projected is not None and abs(projected[0]-W/2) < radius and abs(projected[1]-330) < radius
+
+    def turn_world(self, yaw, pitch):
+        # Rotate every relative vector by the inverse cockpit turn. This
+        # preserves ranges: steering changes heading rather than strafing.
+        c,s = math.cos(self.roll),math.sin(self.roll)
+        cy,sy,cp,sp = math.cos(yaw),math.sin(yaw),math.cos(pitch),math.sin(pitch)
+        objects = [self.station,self.sun,self.planet] + self.stars + self.asteroids + self.fragments + self.mine_objects
+        if self.enemy: objects.append(self.enemy)
+        if self.disabled_ship: objects.append(self.disabled_ship['object'])
+        for obj in objects:
+            x,y,z = obj[:3]
+            x,y = x*c+y*s,-x*s+y*c
+            x,z = x*cy-z*sy,x*sy+z*cy
+            y,z = y*cp-z*sp,y*sp+z*cp
+            obj[0],obj[1],obj[2] = x*c-y*s,x*s+y*c,z
 
     def move_world(self, dx, dy, dz):
         for obj in [self.station,self.sun,self.planet] + ([self.disabled_ship['object']] if self.disabled_ship else []) + self.asteroids + self.fragments + self.mine_objects:
@@ -1831,11 +1869,11 @@ class Game:
             self.speed = max(-60/mass,min(180/mass+self.assist_speed,self.speed+((ord('w') in self.keys)-(ord('s') in self.keys))*70*dt/mass))
             precision = .2 if self.fine_control else 1.
             self.roll += ((ord('e') in self.keys)-(ord('q') in self.keys))*dt/mass*precision
-            # Steering is in cockpit coordinates, including while rolling.
-            horizontal = ((RIGHT in self.keys)-(LEFT in self.keys))*110*dt/mass*precision
-            vertical = ((DOWN in self.keys)-(UP in self.keys))*85*dt/mass*precision
-            c,s = math.cos(self.roll),math.sin(self.roll)
-            dx,dy = horizontal*c-vertical*s,horizontal*s+vertical*c
+            yaw = ((RIGHT in self.keys)-(LEFT in self.keys))*.65*dt/mass*precision
+            pitch = ((DOWN in self.keys)-(UP in self.keys))*.5*dt/mass*precision
+            if not self.broken_down and self.p.fuel > 0:
+                self.turn_world(yaw,pitch)
+            dx,dy = 0.,0.
         if self.course_assist and not self.autodock:
             target,label = self.active_navigation()
             remote = self.nav == 'course' and self.p.waypoint and galactic_distance(self.p.position,self.p.waypoint['position']) > .001
@@ -1843,10 +1881,12 @@ class Game:
                 self.course_assist = False
                 self.message = 'Guidance unavailable: use H/T for a galaxy course, or select a local target ahead.'
             else:
-                # Match the existing local-flight model: centre the beacon,
-                # without commanding forward speed or station-slot roll.
-                dx = max(-110*dt/mass,min(110*dt/mass,target[0]*min(1,2*dt/mass)))
-                dy = max(-85*dt/mass,min(85*dt/mass,target[1]*min(1,2*dt/mass)))
+                x,y,z = target[:3]
+                c,s = math.cos(self.roll),math.sin(self.roll)
+                x,y = x*c+y*s,-x*s+y*c
+                yaw = max(-.65*dt/mass,min(.65*dt/mass,math.atan2(x,z)))
+                pitch = max(-.5*dt/mass,min(.5*dt/mass,math.atan2(y,math.hypot(x,z))))
+                if not self.broken_down and self.p.fuel > 0: self.turn_world(yaw,pitch)
         if self.broken_down: self.speed,dx,dy = 0,0,0
         dz = self.speed*dt
         required = math.sqrt(dx*dx+dy*dy+dz*dz)*.00012*mass
@@ -2072,7 +2112,7 @@ class Game:
                 ('Leaving the game','ESC / click X','Dock for a safe logout. In space your saved ship continues unattended.')]),
             ('Flight',[
                 ('Throttle and braking','HOLD W / S','W accelerates. S brakes, then reverses. Heavy cargo makes stopping slower.'),
-                ('Fine steering','I + ARROWS','I toggles 20% steering and Q/E roll for docking. Safety tab has a mouse toggle.'),
+                ('Fine steering','I + ARROWS','Arrows turn. I toggles 20% turning and Q/E roll. Safety tab has a mouse toggle.'),
                 ('Rolling','HOLD Q / E','Roll the ship left or right to match the station entrance.'),
                 ('Look behind','4','Toggle rear view. Your course stays the same; a rear laser must be fitted.'),
                 ('Local navigation','D / P / A / J','Select station, planet, rocks or sun. Gold dots and arrows show the bearing.'),

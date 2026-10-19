@@ -1,3 +1,11 @@
+# 0.2.9 — connected steering and flight instruments
+
+- Arrows turn heading rather than strafing; stars and local objects rotate together, preserving range.
+- Y approach guidance turns toward the target while leaving throttle and roll manual.
+- Radar uses the cockpit coordinate frame, including roll and rear view, with ahead/behind labels.
+- Target bearing instrument displays horizontal/vertical direction and explicit TURN cues.
+- Fine controls and cargo mass continue to reduce turn rates.
+
 # 0.2.8 — station warnings and police defence
 
 - Uncleared docking approaches receive immediate and six-second warnings, escalating at 12 seconds.

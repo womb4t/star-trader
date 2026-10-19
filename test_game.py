@@ -43,14 +43,14 @@ class GameplayTests(unittest.TestCase):
         g.key(st.LEFT)
         self.assertFalse(g.course_assist)
 
-    def test_fine_steering_reduces_translation_and_roll(self):
+    def test_fine_steering_reduces_turn_and_roll(self):
         g = self.game
         g.mode = 'flight'
         g.keys = {st.RIGHT,ord('e')}
         g.key(ord('i'))
         g.update(.1)
         self.assertAlmostEqual(g.roll,.02)
-        self.assertAlmostEqual(g.station[0],-2.2*st.math.cos(.02))
+        self.assertAlmostEqual(g.station[0],-1500*st.math.sin(.013)*st.math.cos(.02))
         g.key(ord('i'))
         self.assertFalse(g.fine_control)
 
@@ -111,6 +111,46 @@ class GameplayTests(unittest.TestCase):
         g.checkpoint()
         restored = st.Game(None)
         self.assertTrue(restored.station_hostilities[0])
+
+    def test_turn_preserves_range_and_matches_radar_and_view(self):
+        g = self.game
+        g.station = [300.,80.,1500.]
+        before = sum(v*v for v in g.station)
+        view_before = g.project(g.station)[0]
+        radar_before = g.scanner_position(g.station)[0]
+        g.turn_world(.1,0)
+        self.assertAlmostEqual(sum(v*v for v in g.station),before)
+        self.assertLess(g.project(g.station)[0],view_before)
+        self.assertLess(g.scanner_position(g.station)[0],radar_before)
+        g.roll = st.math.pi/2
+        g.station = [0.,300.,1000.]
+        self.assertGreater(g.scanner_position(g.station)[0],955)
+        self.assertGreater(g.project(g.station)[0],st.W/2)
+        g.rear_view = True
+        self.assertLess(g.scanner_position(g.station)[0],955)
+
+    def test_pitch_turns_preserve_range_and_match_vertical_view(self):
+        g = self.game
+        g.mode = 'flight'
+        g.speed = 0
+        g.station = [0.,0.,1500.]
+        for key,sign in ((st.UP,1),(st.DOWN,-1)):
+            g.station = [0.,0.,1500.]
+            g.keys = {key}
+            g.update(.1)
+            self.assertAlmostEqual(sum(v*v for v in g.station),1500**2)
+            self.assertGreater(sign*g.station[1],0)
+            self.assertGreater(sign*(g.project(g.station)[1]-330),0)
+        # Opposite rotations undo each other, including while rolled.
+        g.roll = .7
+        g.station = [100.,200.,900.]
+        original = g.station[:]
+        g.turn_world(.2,0)
+        g.turn_world(-.2,0)
+        g.turn_world(0,.2)
+        g.turn_world(0,-.2)
+        for actual,expected in zip(g.station,original):
+            self.assertAlmostEqual(actual,expected)
 
     def test_market_spread_and_stock(self):
         p = self.game.p
