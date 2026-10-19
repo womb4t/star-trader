@@ -152,6 +152,64 @@ class GameplayTests(unittest.TestCase):
         for actual,expected in zip(g.station,original):
             self.assertAlmostEqual(actual,expected)
 
+    def test_broke_pilot_can_work_buy_fuel_and_not_claim_twice(self):
+        g = self.game
+        g.p.credits,g.p.fuel = 0,0
+        g.key(ord('j'))
+        g.key(ord('1'))
+        for _ in range(5): g.answer_job(g.p.dock_job['answer'])
+        g.update_job(59)
+        self.assertEqual(g.p.credits,0)
+        g.update_job(1)
+        self.assertEqual(g.p.credits,25)
+        self.assertEqual(g.p.fuel,0)
+        g.update_job(60)
+        self.assertEqual(g.p.credits,25)
+        g.key(ord('j'))
+        g.key(ord('f'))
+        self.assertEqual(g.p.fuel,7)
+        self.assertEqual(g.p.credits,4)
+
+    def test_job_mistakes_preserve_base_pay_and_workshop_experience(self):
+        g = self.game
+        g.mode = 'jobs'
+        before = g.engineering_chance()
+        g.start_job(2)
+        for _ in range(5): g.answer_job((g.p.dock_job['answer']+1)%3)
+        cash = g.p.credits
+        g.update_job(90)
+        self.assertEqual(g.p.credits,cash+25)
+        self.assertEqual(g.p.workshop_xp,10)
+        self.assertGreater(g.engineering_chance(),before)
+        self.assertEqual(g.p.engineering_level,0)
+
+    def test_job_pauses_and_resumes_after_reload_without_offline_pay(self):
+        g = self.game
+        g.mode = 'jobs'
+        g.start_job(1)
+        g.update_job(20)
+        g.answer_job(g.p.dock_job['answer'])
+        g.key(27)
+        g.update_job(80)
+        self.assertEqual(g.p.dock_job['elapsed'],20)
+        restored = st.Game(None)
+        self.assertEqual(restored.mode,'market')
+        self.assertEqual(restored.p.dock_job['step'],1)
+        self.assertEqual(restored.p.dock_job['elapsed'],20)
+        restored.key(ord('j'))
+        for _ in range(4): restored.answer_job(restored.p.dock_job['answer'])
+        cash = restored.p.credits
+        restored.update_job(55)
+        self.assertEqual(restored.p.credits,cash+35)
+
+    def test_jobs_only_accessible_docked(self):
+        g = self.game
+        g.mode = 'flight'
+        g.key(ord('j'))
+        self.assertEqual(g.mode,'flight')
+        g.start_job(0)
+        self.assertIsNone(g.p.dock_job)
+
     def test_market_spread_and_stock(self):
         p = self.game.p
         cash, stock = p.credits, p.stock[0][0]

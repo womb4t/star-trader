@@ -18,7 +18,7 @@ import tempfile
 import fcntl
 import textwrap
 
-VERSION = '0.2.9'
+VERSION = '0.2.10'
 DOCK_ROLL_TOLERANCE = math.radians(14)
 CRUISE_SECONDS_PER_LY = 45
 W, H = 1100, 760
@@ -119,6 +119,8 @@ class Pilot:
         self.flights_since_service = 0
         self.engineering_level = self.engineering_failures = 0
         self.engineering_ready_at = 0.
+        self.workshop_xp = 0
+        self.dock_job = None
         self.bank_balance = 0
         self.storage = [dict(owned=False,rented_until=0.,cargo=[0]*len(GOODS)) for _ in SYSTEMS]
 
@@ -218,6 +220,13 @@ class Pilot:
 
     def validate(self):
         def integer(n): return type(n) is int and n >= 0
+        if not integer(self.workshop_xp): raise ValueError('workshop experience')
+        if self.dock_job is not None:
+            j = self.dock_job
+            if not isinstance(j,dict) or j.get('kind') not in (0,1,2): raise ValueError('job')
+            if not all(integer(j.get(k)) for k in ('step','correct','answer')) or not 0 <= j['correct'] <= j['step'] <= 5 or j['answer'] > 2: raise ValueError('job progress')
+            if type(j.get('elapsed')) not in (int,float) or not math.isfinite(j['elapsed']) or not 0 <= j['elapsed'] <= 90: raise ValueError('job time')
+            if type(j.get('prompt')) is not str or len(j['prompt']) > 160 or not isinstance(j.get('choices'),list) or len(j['choices']) != 3 or any(type(v) is not str or len(v)>60 for v in j['choices']): raise ValueError('job task')
         if not integer(self.system) or self.system >= 8: raise ValueError('system')
         if not isinstance(self.equipment, list) or any(type(k) is not str for k in self.equipment): raise ValueError('equipment')
         allowed = {e[0] for e in EQUIPMENT if e[0] not in ('missile','mine')}
@@ -540,7 +549,7 @@ class Game:
     def session_mode(self):
         mode = self.mode
         for _ in range(6):
-            if mode in ('market','outfit','departure','launch_warning','bank'): return 'market'
+            if mode in ('market','outfit','departure','launch_warning','bank','jobs'): return 'market'
             if mode in ('flight','cruise','hyperspace','dead'): return mode
             attr = {'help':'help_return','updates':'update_return','map':'map_return','engineering':'engineering_return'}.get(mode)
             if not attr: return 'flight'
@@ -642,6 +651,7 @@ class Game:
             self.alert['elapsed'] += dt
             if self.alert['remaining'] <= 0: self.alert = None
         self.ship_collision_cooldown = max(0,self.ship_collision_cooldown-dt)
+        self.update_job(dt)
         self._update_simulation(dt)
         self._save_elapsed += dt
         if self._save_elapsed >= 2 or before != self.mode:
@@ -966,7 +976,7 @@ class Game:
 
     def engineering_chance(self, other=False):
         condition = self.disabled_ship['hull'] if other and self.disabled_ship else self.p.hull
-        return max(.05,min(.85,.2+self.p.engineering_level*.12-(100-condition)*.001))
+        return max(.05,min(.85,.2+self.p.engineering_level*.12+min(.05,self.p.workshop_xp*.0005)-(100-condition)*.001))
 
     def train_engineering(self):
         if self.engineering_return not in ('market','outfit'):
@@ -1106,7 +1116,92 @@ class Game:
         self.spawn = 24
         self.message = 'Police ship destroyed. Fine increased by 150 cr.' if self.enemy_kind == 'police' else 'Hostile destroyed. Bounty: 35 credits.'
 
+    def start_job(self, kind):
+        if self.mode != 'jobs' or self.p.dock_job is not None: return
+        self.p.dock_job = dict(kind=kind,step=0,correct=0,elapsed=0.,answer=0,prompt='',choices=['','',''])
+        self.job_question()
+        self.message = 'Shift started. No fuel, equipment or payment required.'
+        self.checkpoint()
+
+    def job_question(self):
+        j = self.p.dock_job
+        if j['kind'] == 0:
+            label = random.choice(['FOOD','MEDICINE','MACHINERY'])
+            choices = ['FOOD bay','MEDICINE bay','MACHINERY bay']
+            prompt,answer = 'Crate label: '+label+'. Select its loading bay.',choices.index(label+' bay')
+        elif j['kind'] == 1:
+            expected = random.randint(12,40)
+            actual = expected+random.choice([-3,-2,2,3])
+            prompt = f'Manifest: {expected} crates. Counted: {actual}. Report the stock.'
+            choices = ['Short by '+str(abs(actual-expected)),'Matches manifest','Surplus of '+str(abs(actual-expected))]
+            answer = 0 if actual < expected else 2
+        else:
+            tasks = [('Before opening a live panel?', ['Isolate power','Remove cover','Touch wiring'],0),
+                     ('Power isolated. Before replacing a part?', ['Restart power','Verify zero voltage','Skip checks'],1),
+                     ('New part installed. Before restoring power?', ['Leave tools inside','Remove safety labels','Secure covers and clear tools'],2),
+                     ('Covers secured. Next step?', ['Run diagnostic test','Open fuel valve','Discard service log'],0),
+                     ('Diagnostic passed. Finish with?', ['Bypass safeguards','Record the repair','Remove covers'],1)]
+            prompt,choices,answer = tasks[j['step']]
+        j.update(prompt=prompt,choices=choices,answer=answer)
+
+    def answer_job(self, choice):
+        j = self.p.dock_job
+        if self.mode != 'jobs' or j is None or j['step'] >= 5: return
+        correct = choice == j['answer']
+        j['correct'] += int(correct)
+        j['step'] += 1
+        self.message = 'Correct. Task recorded.' if correct else 'Supervisor corrected it. Base pay is safe; bonus reduced.'
+        if j['step'] < 5: self.job_question()
+        self.checkpoint()
+
+    def update_job(self, dt):
+        j = self.p.dock_job
+        if self.mode != 'jobs' or j is None: return
+        duration = (60,75,90)[j['kind']]
+        j['elapsed'] = min(duration,j['elapsed']+dt)
+        if j['elapsed'] < duration or j['step'] < 5: return
+        base,bonus = ((15,2),(20,3),(25,3))[j['kind']]
+        pay = base+bonus*j['correct']
+        self.p.credits += pay
+        if j['kind'] == 2: self.p.workshop_xp += 10
+        self.p.dock_job = None
+        self.message = f'Shift complete: {pay} cr paid.'+(' Workshop experience +10.' if j['kind'] == 2 else '')
+        self.checkpoint()
+
+    def draw_jobs(self):
+        d,j = self.d,self.p.dock_job
+        d.text(35,85,'STATION JOBS / NO FUEL OR EQUIPMENT REQUIRED',GOLD)
+        if j is None:
+            for i,line in enumerate(['Cargo handling: match crates to bays. 60 seconds / 15-25 cr.',
+                                      'Inventory checks: compare counts. 75 seconds / 20-35 cr.',
+                                      'Workshop assistant: follow repair steps. 90 seconds / 25-40 cr.']):
+                d.text(45,170+i*75,line)
+            d.text(45,440,'Five tasks per shift. Mistakes reduce your bonus, never your balance.')
+            d.text(45,480,'Workshop shifts earn 10 XP; practice adds up to 5% repair chance.')
+            d.text(45,520,'Cargo handling is always available. Select a job with 1 / 2 / 3.')
+        else:
+            duration = (60,75,90)[j['kind']]
+            d.text(45,155,['CARGO HANDLING','INVENTORY CHECKS','WORKSHOP ASSISTANT'][j['kind']],GOLD)
+            d.text(45,205,f'Tasks {j["step"]}/5   Correct {j["correct"]}   Shift time remaining {math.ceil(duration-j["elapsed"])}s')
+            if j['step'] < 5:
+                d.text(45,280,j['prompt'],GOLD)
+                for i,choice in enumerate(j['choices']): d.text(60,350+i*55,f'{i+1}. {choice}')
+            else: d.text(45,290,'Tasks finished. Waiting for the shift to end; payment follows automatically.')
+            d.text(45,555,'You may return to the market. Shift progress pauses and is saved.')
+        d.text(45,610,f'Workshop experience: {self.p.workshop_xp} XP. J / ESC returns to market.')
+
     def key(self, k):
+        if self.mode == 'jobs':
+            if k in (27,ord('j')): self.mode = 'market'; self.checkpoint()
+            elif k in (ord('1'),ord('2'),ord('3')):
+                choice = k-ord('1')
+                if self.p.dock_job is None: self.start_job(choice)
+                else: self.answer_job(choice)
+            return
+        if k == ord('j') and self.mode in ('market','outfit'):
+            self.mode = 'jobs'
+            self.alert = None
+            return
         if self.mode == 'bank':
             if k in (ord('9'),27): self.mode = 'market'
             elif k == UP: self.selected = (self.selected-1)%len(GOODS)
@@ -2022,7 +2117,7 @@ class Game:
     def draw_mouse_ui(self):
         self.buttons = []
         d = self.d
-        modal = self.mode in ('distress','departure','launch_warning','engineering','hyperspace','bank')
+        modal = self.mode in ('distress','departure','launch_warning','engineering','hyperspace','bank','jobs')
         if self.mode == 'flight':
             self.mouse_button(310,18,92,'Actions',action=lambda:setattr(self,'mouse_controls',not self.mouse_controls))
         if not modal:
@@ -2045,6 +2140,17 @@ class Game:
                 labels = [('Fit',ord('b')),('Fuel',ord('f')),('Service',ord('r')),('Market',ord('u')),('Launch',ord('l')),('Map',ord('g')),('Skills',ord('8')),('Fines',ord('p'))]
             for i,(label,key) in enumerate(labels): self.mouse_button(35+i*128,row_y,120,label,key)
             self.mouse_button(790,570,250,'Bank / storage 9',ord('9'))
+            self.mouse_button(790,610,250,'Station jobs J',ord('j'))
+        elif self.mode == 'jobs':
+            if self.p.dock_job is None:
+                for i,label in enumerate(['Cargo handling','Inventory checks','Workshop assistant']):
+                    self.mouse_row(40,150+i*75,1000,55,lambda i=i:self.start_job(i))
+                    self.mouse_button(40+i*345,674,330,label,ord('1')+i)
+            elif self.p.dock_job['step'] < 5:
+                for i in range(3):
+                    self.mouse_row(45,335+i*55,990,45,lambda i=i:self.answer_job(i))
+                    self.mouse_button(40+i*345,674,330,'Answer '+str(i+1),ord('1')+i)
+            self.mouse_button(790,570,250,'Return to market',ord('j'))
         elif self.mode == 'bank':
             for i in range(len(GOODS)):
                 self.mouse_row(35,165+i*36,600,36,lambda i=i:setattr(self,'selected',i))
@@ -2143,7 +2249,7 @@ class Game:
                 ('Outfitting','U','Buy modules and ammunition. Availability depends on local technology.'),
                 ('Fuel and service','F / R','Fuel is a separate purchase. Service repairs damage and resets maintenance wear.'),
                 ('Bank and cargo bays','9','Deposit money, store cargo, rent 40t or buy 100t of station capacity.'),
-                ('Training and fines','8 / P','Buy engineering training while docked. Pay fines to regain port access.'),
+                ('Earn fuel money','J station jobs','Free dockside shifts pay 15-40 credits. Workshop practice earns engineering experience.'),
                 ('Updates and display','2 / 3','Check version/update instructions, or toggle fullscreen. No function keys needed.')])]
 
     def draw_help(self):
@@ -2168,7 +2274,9 @@ class Game:
         location = 'In transit' if self.mode == 'hyperspace' else 'Deep space' if p.deep_space or self.mode == 'cruise' else SYSTEMS[p.system][0]
         d.text(640,20,f'{location}  CR {p.credits:.0f}  KILLS {p.kills}')
         d.line(25,52,W-25,52)
-        if self.mode == 'engineering':
+        if self.mode == 'jobs':
+            self.draw_jobs()
+        elif self.mode == 'engineering':
             self.draw_engineering()
         elif self.mode == 'departure':
             d.text(80,150,'STATION TRAFFIC CONTROL',GOLD)
@@ -2221,7 +2329,7 @@ class Game:
                 d.text(35,490,'UP/DOWN select; B or ENTER purchases and fits equipment.')
             for i,t in enumerate(['COMMANDER STATUS',f'Cargo {sum(p.cargo)}/{p.capacity} t',f'Fuel  {p.fuel:.2f}/7',f'Hull  {p.hull:.0f}%',f'Refill {p.fuel_cost()} cr',f'Service {p.service_cost()} cr',f'Mines {p.mines}/4',f'Fine {p.fine} cr',f'Wear {p.maintenance:.0f}%',f'Eng. {p.engineering_level}/5']): d.text(790,135+i*40,t)
             d.text(35,550,'F fuel   R repair   P pay fines   U outfitting/market   L launch')
-            d.text(35,590,'G galaxy chart   1 manual   ESC quit')
+            d.text(35,590,'J paid station jobs   G chart   1 manual   ESC quit')
         elif self.mode == 'map':
             self.draw_map()
         elif self.mode == 'cruise':

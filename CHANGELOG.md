@@ -1,3 +1,12 @@
+# 0.2.10 — dockside jobs for stranded pilots
+
+- J opens repeatable paid cargo-handling, inventory and workshop shifts while docked.
+- No fuel, equipment or upfront credits required; five tasks and a 60/75/90-second shift.
+- Guaranteed base pay; correct answers increase bonuses to 25/35/40 credits.
+- Workshop XP grants a small capped repair-chance bonus without unlocking engineering levels.
+- Saved shifts pause outside the jobs screen; completed payouts cannot be claimed twice.
+- Mouse controls, station buttons and handbook instructions included.
+
 # 0.2.9 — connected steering and flight instruments
 
 - Arrows turn heading rather than strafing; stars and local objects rotate together, preserving range.

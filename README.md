@@ -1,6 +1,6 @@
 # Star Trader
 
-An original Elite-inspired Python space game for **Omarchy**. Trade, mine, fight robot pirates, smuggle contraband and navigate a small wireframe universe. Current version: **0.2.9**.
+An original Elite-inspired Python space game for **Omarchy**. Trade, mine, fight robot pirates, smuggle contraband and navigate a small wireframe universe. Current version: **0.2.10**.
 
 The current game is offline single-player. Self-hosted multiplayer is a future project; see [MULTIPLAYER.md](MULTIPLAYER.md). The next offline expansion is outlined in [ROADMAP.md](ROADMAP.md).
 
@@ -202,3 +202,12 @@ and roll rates for docking. The top-view radar follows cockpit roll and rear vie
 ahead is up, behind is down, left/right match the view. The TARGET BEARING panel
 shows a selected ship or navigation target relative to your nose: steer toward the
 gold dot until it reaches the centre box. TURN cues show which arrow to use.
+
+STRANDED AT A STATION? Press J or click Station jobs while docked.
+Cargo handling (60s): 15-25 cr. Inventory checks (75s): 20-35 cr.
+Workshop assistant (90s): 25-40 cr and 10 workshop XP. No fuel, equipment
+or upfront money required. Choose a job and answer five tasks with 1/2/3
+or the mouse. Payment arrives after the shift timer and tasks finish.
+Mistakes reduce only the bonus. Leaving pauses work; saved shifts resume
+when you reopen J, with no offline pay. Workshop practice adds at most five
+percentage points to repair probability; engineering levels still require training.
