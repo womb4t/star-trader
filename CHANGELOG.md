@@ -1,3 +1,9 @@
+# 0.2.7 — more forgiving docking
+
+- Add five degrees of roll allowance each side: docking now accepts +/-14 degrees.
+- Gentle station contact at docking speeds causes minor damage; fast impacts remain dangerous.
+- Keep slot alignment visible after docking clearance; improve collision recovery guidance.
+
 # 0.2.6 — approach guidance and fine docking controls
 
 - Y toggles local target centring, with manual throttle and station-slot roll; arrows cancel.

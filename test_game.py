@@ -138,6 +138,31 @@ class GameplayTests(unittest.TestCase):
         g.key(ord('g')); g.target = 0; g.key(ord('h'))
         self.assertEqual(g.p.system,1)
 
+    def test_docking_roll_tolerance_both_sides(self):
+        g = self.game
+        g.mode = 'flight'
+        g.station = [0.,0.,66.]
+        g.speed,g.dock_clearance = 15,120
+        for angle in (-14,14):
+            g.roll = g.station_angle + st.math.radians(angle)
+            self.assertTrue(g.docking_safe())
+        for angle in (-14.1,14.1):
+            g.roll = g.station_angle + st.math.radians(angle)
+            self.assertFalse(g.docking_safe())
+
+    def test_slow_station_contact_is_gentle_but_fast_impact_is_dangerous(self):
+        g = self.game
+        g.mode = 'flight'
+        g.station = [0.,0.,66.]
+        g.speed,g.roll,g.shield,g.p.hull = 15,.7,0,100
+        g.update(.1)
+        self.assertEqual(g.mode,'flight')
+        self.assertGreaterEqual(g.p.hull,90)
+        g.station = [0.,0.,66.]
+        g.speed = 150
+        g.update(.1)
+        self.assertEqual(g.mode,'dead')
+
     def test_manual_docking_requires_slot_alignment_and_slow_speed(self):
         g = self.game
         g.launch(); g.station = [0,0,66]; g.speed = 15; g.dock_clearance = 120

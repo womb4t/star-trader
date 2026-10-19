@@ -18,7 +18,8 @@ import tempfile
 import fcntl
 import textwrap
 
-VERSION = '0.2.6'
+VERSION = '0.2.7'
+DOCK_ROLL_TOLERANCE = math.radians(14)
 CRUISE_SECONDS_PER_LY = 45
 W, H = 1100, 760
 GOODS = ['Food', 'Textiles', 'Ore', 'Machinery', 'Medicine', 'Computers', 'Narcotics', 'Unlicensed Arms']
@@ -1042,7 +1043,7 @@ class Game:
         x,y,_ = self.station
         c,s = math.cos(self.station_angle),math.sin(self.station_angle)
         x,y = x*c+y*s,-x*s+y*c
-        return abs(x) <= 14 and abs(y) <= 6 and 0 < self.speed <= 25 and abs(self.slot_error()) <= 0.16 and not self.enemy and self.dock_clearance > 0 and self.station_allows()
+        return abs(x) <= 14 and abs(y) <= 6 and 0 < self.speed <= 25 and abs(self.slot_error()) <= DOCK_ROLL_TOLERANCE + 1e-12 and not self.enemy and self.dock_clearance > 0 and self.station_allows()
 
     def damage(self, amount):
         absorbed = min(self.shield, amount)
@@ -1288,7 +1289,7 @@ class Game:
                 self.message = 'No station here. Use G to lock a planet.'
                 return
             self.nav = 'station'
-            self.message = 'Fly through slot: centre +/-14m, height +/-6m, roll +/-9deg, speed 1-25.'
+            self.message = 'Fly through slot: centre +/-14m, height +/-6m, roll +/-14deg, speed 1-25.'
         if k == ord('c'):
             if self.p.deep_space: self.message = 'No station in deep space.'
             elif 'docking' not in self.p.equipment: self.message = 'Buy a docking computer in outfitting (U).'
@@ -1824,11 +1825,12 @@ class Game:
         if self.mode == 'dead': return
         if self.station[2] <= 65 and math.hypot(*self.station[:2]) < 110 and self.station[2] > -100:
             if self.docking_safe(): self.dock(); return
-            self.damage(35+abs(self.speed)*0.7)
+            self.damage(5+abs(self.speed)*.2 if abs(self.speed) <= 25 else 35+abs(self.speed)*.7)
             self.station[2] = 130
             self.speed = 0
             self.autodock = False
-            self.message = 'Station collision! Stop, centre the slot, match roll and approach slowly.'
+            self.course_assist = False
+            self.message = 'Station contact! Use I fine steering; centre slot, roll within +/-14deg, speed 1-25; request clearance with 7.'
             if self.mode == 'dead': return
         # Rocks can damage the ship; fragments drift past if not collected.
         for rock in self.asteroids[:]:
@@ -2043,7 +2045,7 @@ class Game:
                 ('Collision danger','KEEP CLEAR','Ships have solid collision hulls. A fast impact damages both ships.')]),
             ('Safety',[
                 ('Docking radio','7','Request station clearance before entry. Wanted pilots may be refused.'),
-                ('Manual docking','Q / E + LOW SPEED','Enter the rotating slot at 1–25. Centre within 14m / 6m and match roll.'),
+                ('Manual docking','Q / E + LOW SPEED','Enter the rotating slot at 1–25. Centre within 14m / 6m; roll within +/-14 degrees.'),
                 ('Automatic docking','C','A fitted docking computer requests clearance and guides the approach.'),
                 ('Emergency rescue','6','Review rescue terms. Nearby stations claim 25%; distant salvagers negotiate.'),
                 ('Field engineering','8','Repair your ship or a nearby selected disabled ship. Training improves odds.'),
@@ -2208,7 +2210,7 @@ class Game:
         d.text(35,625,f'SHIELD {self.shield:.0f}%  HULL {p.hull:.0f}%  HOLD {sum(p.cargo)}/{p.capacity}t')
         error = math.degrees(self.slot_error())
         d.text(650,598,('GUIDANCE Y  ' if self.course_assist else '')+('FINE I' if self.fine_control else ''),GOLD)
-        d.text(650,625,'DRIVE DISABLED' if self.broken_down else 'AUTODOCK' if self.autodock else f'DOCK CLEAR {self.dock_clearance:.0f}s' if self.dock_clearance else f'SLOT {error:+.0f}deg / 7 radio',GOLD)
+        d.text(650,625,'DRIVE DISABLED' if self.broken_down else 'AUTODOCK' if self.autodock else f'SLOT {error:+.0f}/14deg '+('CLEAR' if self.dock_clearance else '7 radio'),GOLD)
         status = 'CLOAKED' if self.cloaked else 'JAMMING' if self.jamming else ''
         d.text(35,657,f'MINES {p.mines}  {status}  1 controls  2 updates  6 distress',GOLD)
         if p.fuel < 1.0:

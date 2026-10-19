@@ -1,4 +1,4 @@
-STAR TRADER 0.2.6 — original space trading game for Omarchy
+STAR TRADER 0.2.7 — original space trading game for Omarchy
 
 Install: bash install.sh
 Play: open your app launcher and search for Star Trader.
@@ -35,7 +35,7 @@ Navigation uses gold dots/arrows. Click a scanner ship dot or press 5
 to select a ship; its direction marker is pink. 4 reveals rearward targets.
 
 Dock through the rotating slot at speed 1-25. Centre within
-14m horizontal / 6m vertical; use Q/E to keep roll error under 9deg.
+14m horizontal / 6m vertical; use Q/E to keep roll error within +/-14deg.
 A docking computer is purchasable at sufficiently advanced stations.
 
 Mining needs a mining laser and scoops. Break an asteroid with
@@ -59,3 +59,6 @@ Approach guidance: Y toggles centring on the selected local navigation target ah
 You retain throttle and roll control; arrows cancel guidance. It does not grant docking clearance.
 Use H/T for remote galaxy destinations. I toggles fine steering (20% arrows and Q/E roll),
 useful for docking. Mouse: Actions > Nav > Guide Y; Actions > Safety > Fine I.
+
+Docking allows +/-14 degrees of roll error. Slow station contact (speed 25 or below)
+causes minor damage; high-speed impacts remain dangerous. Slot roll error stays visible after clearance.

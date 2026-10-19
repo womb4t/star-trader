@@ -1,6 +1,6 @@
 # Star Trader
 
-An original Elite-inspired Python space game for **Omarchy**. Trade, mine, fight robot pirates, smuggle contraband and navigate a small wireframe universe. Current version: **0.2.6**.
+An original Elite-inspired Python space game for **Omarchy**. Trade, mine, fight robot pirates, smuggle contraband and navigate a small wireframe universe. Current version: **0.2.7**.
 
 The current game is offline single-player. Self-hosted multiplayer is a future project; see [MULTIPLAYER.md](MULTIPLAYER.md). The next offline expansion is outlined in [ROADMAP.md](ROADMAP.md).
 
@@ -186,3 +186,6 @@ Approach guidance: Y toggles centring on the selected local navigation target ah
 You retain throttle and roll control; arrows cancel guidance. It does not grant docking clearance.
 Use H/T for remote galaxy destinations. I toggles fine steering (20% arrows and Q/E roll),
 useful for docking. Mouse: Actions > Nav > Guide Y; Actions > Safety > Fine I.
+
+Docking allows +/-14 degrees of roll error. Slow station contact (speed 25 or below)
+causes minor damage; high-speed impacts remain dangerous. Slot roll error stays visible after clearance.
