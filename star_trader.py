@@ -18,7 +18,7 @@ import tempfile
 import fcntl
 import textwrap
 
-VERSION = '0.2.14'
+VERSION = '0.2.15'
 DOCK_ROLL_TOLERANCE = math.radians(14)
 CRUISE_SECONDS_PER_LY = 45
 W, H = 1100, 760
@@ -64,6 +64,14 @@ def price(system, good):
     factor = (0.65 if good < 3 else 1.25) if economy == 'Agricultural' else (1.3 if good < 3 else 0.7)
     if economy == 'Frontier':
         factor = 1.0
+    if good in ILLEGAL:
+        # Contraband prices reflect supply and demand rather than a flat bonus.
+        demand = {6: {'Industrial': .65, 'Agricultural': 1.40, 'Frontier': 1.15},
+                  7: {'Industrial': .65, 'Agricultural': 1.35, 'Frontier': 1.40}}
+        factor = demand[good][economy]
+        government = PROFILES[system][0]
+        if good == 7 and government in ('Anarchy','Feudal'): factor *= 1.10
+        if good == 6 and government == 'Corporate state': factor *= 1.05
     return round(BASE[good] * factor * rng.uniform(0.9, 1.1))
 
 

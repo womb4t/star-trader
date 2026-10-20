@@ -1,3 +1,10 @@
+# 0.2.15 — planet-dependent smuggling margins
+
+- Improve contraband route profits with distinct narcotics and arms supply/demand factors.
+- Industrial sources are cheaper; agricultural narcotics demand and frontier arms demand pay more.
+- Anarchy/feudal arms premiums and a modest corporate narcotics premium reflect government type.
+- Keep dealer buy/sell spreads, customs enforcement and legal-goods pricing unchanged.
+
 # 0.2.14 — daily station jobs and varied questions
 
 - Each station offers 2-3 cargo shifts, 1-2 inventory shifts and one workshop shift per 24-hour cycle.

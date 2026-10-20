@@ -1,4 +1,4 @@
-STAR TRADER 0.2.14 — original space trading game for Omarchy
+STAR TRADER 0.2.15 — original space trading game for Omarchy
 
 Install: bash install.sh
 Play: open your app launcher and search for Star Trader.
@@ -106,3 +106,8 @@ An unfinished shift can still be completed after the board refreshes.
 Workshop shifts draw five questions from a pool of 30; answer positions are
 shuffled. Cargo labels and inventory counts vary too. Existing active shifts
 are preserved when updating.
+
+Contraband rewards depend on the planet: industrial worlds are cheaper sources,
+agricultural worlds pay more for narcotics, and frontier worlds have strong arms
+demand. Anarchy/feudal governments add an arms premium; corporate states add
+some narcotics demand. Normal dealer spreads and customs risks still apply.

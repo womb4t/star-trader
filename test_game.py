@@ -327,6 +327,19 @@ class GameplayTests(unittest.TestCase):
         self.assertGreaterEqual(len(prompts),25)
         self.assertGreater(len(patterns),10)
 
+    def test_contraband_rewards_reflect_planet_economy_and_government(self):
+        self.assertGreater(st.quote(0,6,False)-st.quote(1,6),70)
+        self.assertGreater(st.quote(0,7,False)-st.quote(1,7),27)
+        # Frontier demand especially rewards arms runs from industrial sources.
+        self.assertGreater(st.quote(4,7,False),st.quote(0,7,False))
+        for system in range(len(st.SYSTEMS)):
+            for good in st.ILLEGAL:
+                self.assertLess(st.quote(system,good,False),st.quote(system,good))
+        # Changing government alone affects arms demand at the same market.
+        with patch.object(st,'PROFILES',[('Corporate state',1,1)]*8):
+            peaceful = st.price(4,7)
+        self.assertGreater(st.price(4,7),peaceful)
+
     def test_market_spread_and_stock(self):
         p = self.game.p
         cash, stock = p.credits, p.stock[0][0]
