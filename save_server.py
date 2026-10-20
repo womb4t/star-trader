@@ -14,6 +14,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import ssl
 import time
 from star_trader import VERSION
+from presence import SharedPresence, PresenceBusy
 
 MAX_SAVE = 256 * 1024
 
@@ -139,17 +140,22 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_PUT(self):
         try:
-            if self.path != '/v1/save': return self.reply(404,dict(error='Not found'))
+            if self.path not in ('/v1/save','/v1/presence'): return self.reply(404,dict(error='Not found'))
             token = self.token()
             self.server.store.read(token)
             length = int(self.headers.get('Content-Length','0'))
             if not 0 < length <= MAX_SAVE+1024: return self.reply(413,dict(error='Save too large or empty'))
             data = json.loads(self.rfile.read(length))
+            if self.path == '/v1/presence':
+                with self.server.store.connect() as db:
+                    player_id,name = db.execute('SELECT id,name FROM players WHERE token_hash=?',(self.server.store.token_hash(token),)).fetchone()
+                return self.reply(200,self.server.presence.exchange(player_id,name,data))
             if type(data) is not dict or type(data.get('revision')) is not int or data['revision'] < 0: raise ValueError('Invalid revision')
             revision = self.server.store.write(token,data['revision'],data['save'])
             if revision is None: return self.reply(409,dict(error='A newer save exists. Reconnect to resolve the conflict.'))
             self.reply(200,dict(revision=revision))
         except PermissionError: self.reply(401,dict(error='Invalid or missing player token'))
+        except PresenceBusy: self.reply(409,dict(error='This player is already online on another computer'))
         except (ValueError,KeyError,TypeError,AttributeError,OverflowError,RecursionError): self.reply(400,dict(error='Invalid save'))
         except sqlite3.Error: self.reply(503,dict(error='Save storage temporarily unavailable'))
 
@@ -158,6 +164,7 @@ def make_server(store, host='127.0.0.1', port=8765):
     server = ThreadingHTTPServer((host,port),Handler)
     server.daemon_threads = True
     server.store = store
+    server.presence = SharedPresence()
     return server
 
 

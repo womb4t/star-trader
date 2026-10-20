@@ -21,7 +21,7 @@ import tempfile
 import fcntl
 import textwrap
 
-VERSION = '0.4.0'
+VERSION = '0.5.0'
 HOSTILITY_COOLDOWN_SECONDS = 30*60
 STATION_POLICE_CAPACITY = 6
 DOCK_ROLL_TOLERANCE = math.radians(14)
@@ -299,6 +299,16 @@ class Pilot:
             if not isinstance(row, list) or len(row) != len(GOODS) or not all(integer(n) for n in row): raise ValueError('stock')
 
 
+def find_sdl_library(name):
+    # macOS Homebrew installs outside the default dyld search path.
+    found = ctypes.util.find_library(name)
+    if found: return found
+    for folder in ('/opt/homebrew/lib', '/usr/local/lib'):
+        candidate = Path(folder) / f'lib{name}.dylib'
+        if candidate.exists(): return str(candidate)
+    return f'lib{name}.so'
+
+
 def bind(lib, name, restype, args):
     f = getattr(lib, name)
     f.restype, f.argtypes = restype, args
@@ -307,8 +317,8 @@ def bind(lib, name, restype, args):
 
 class Display:
     def __init__(self):
-        self.sdl = C.CDLL(ctypes.util.find_library('SDL2') or 'libSDL2.so')
-        self.ttf = C.CDLL(ctypes.util.find_library('SDL2_ttf') or 'libSDL2_ttf.so')
+        self.sdl = C.CDLL(find_sdl_library('SDL2'))
+        self.ttf = C.CDLL(find_sdl_library('SDL2_ttf'))
         ptr, i = C.c_void_p, C.c_int
         self.init = bind(self.sdl, 'SDL_Init', i, [C.c_uint32])
         self.quit = bind(self.sdl, 'SDL_Quit', None, [])
@@ -342,7 +352,8 @@ class Display:
         self.is_fullscreen = False
         if not self.win or not self.r:
             raise RuntimeError('Could not create game window.')
-        fonts = ['/usr/share/fonts/TTF/JetBrainsMonoNerdFont-Regular.ttf', '/usr/share/fonts/TTF/DejaVuSansMono.ttf', '/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf']
+        fonts = ['/usr/share/fonts/TTF/JetBrainsMonoNerdFont-Regular.ttf', '/usr/share/fonts/TTF/DejaVuSansMono.ttf', '/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf',
+                 '/System/Library/Fonts/Menlo.ttc', '/System/Library/Fonts/Monaco.ttf', '/Library/Fonts/Andale Mono.ttf', '/System/Library/Fonts/Supplemental/Andale Mono.ttf']
         fontpath = next((p for p in fonts if Path(p).exists()), None)
         if not fontpath:
             raise RuntimeError('A monospace font is required. Install DejaVu Sans Mono.')
@@ -488,6 +499,9 @@ class Game:
         self.keys = set()
         self.shield = 100
         self.speed = 0
+        self.world_basis = [[1.,0.,0.],[0.,1.,0.],[0.,0.,1.]]
+        self.world_epoch = uuid.uuid4().hex
+        self.other_players = {}
         self.station = [0., 0., 1500.]
         self.roll = self.station_angle = 0.
         self.autodock = False
@@ -566,6 +580,9 @@ class Game:
         self.disabled_ship = None
         self.assist_spawn_timer = 35.
         self.dock_clearance = self.docking_pending = 0.
+        self.world_basis = [[1.,0.,0.],[0.,1.,0.],[0.,0.,1.]]
+        self.world_epoch = uuid.uuid4().hex
+        self.other_players.clear()
         self.mode = 'flight'
         self.release_mouse()
         self.mouse_controls = False
@@ -625,7 +642,7 @@ class Game:
 
     def checkpoint(self):
         if getattr(self,'_restoring',False): return
-        fields = ('shield','speed','station','roll','station_angle','station_hostilities','station_hostile_until','security_elapsed','security_warning','security_dispatch','station_laser_warning','station_laser_timer','enemy_police_system','autodock','course_assist','fine_control','enemy','enemy_kind',
+        fields = ('world_basis','world_epoch','shield','speed','station','roll','station_angle','station_hostilities','station_hostile_until','security_elapsed','security_warning','security_dispatch','station_laser_warning','station_laser_timer','enemy_police_system','autodock','course_assist','fine_control','enemy','enemy_kind',
                   'asteroids','fragments','sun','heat','nav','rear_view','planet','planet_radius',
                   'assist_speed','mine_objects','jamming','jammer_cooldown','cloaked','customs_checked',
                   'cruise','jump_warp','npc_mine_timer','spawn','cooldown','enemy_shot','broken_down','breakdown_in',
@@ -665,6 +682,8 @@ class Game:
                 if isinstance(value,dict): return len(value) <= 70 and all(finite_tree(v,depth+1) for v in value.values())
                 return False
             if not finite_tree(state): raise ValueError('invalid simulation data')
+            basis = state.get('world_basis',self.world_basis)
+            if type(basis) is not list or len(basis) != 3 or any(type(row) is not list or len(row) != 3 or any(type(v) not in (int,float) for v in row) or abs(sum(v*v for v in row)-1) > .001 for row in basis): raise ValueError('world frame')
             for key in ('station','planet','sun'):
                 if not isinstance(state.get(key),list) or len(state[key]) != 3 or not all(type(n) in (int,float) for n in state[key]): raise ValueError('geometry')
             for key in ('shield','speed','roll','station_angle','planet_radius','spawn','rescue_cooldown'):
@@ -725,9 +744,37 @@ class Game:
             if self.enemy_shot['remaining'] <= 0: self.enemy_shot = None
         self.refresh_station_hostility()
         self._update_simulation(dt)
+        self.update_shared_presence()
         self._save_elapsed += dt
         if self._save_elapsed >= 2 or before != self.mode:
             self.checkpoint()
+
+    def presence_state(self):
+        mode = self.session_mode()
+        status = {'market':'docked','dead':'destroyed','cruise':'transit','hyperspace':'transit'}.get(mode,'flight')
+        if self.p.deep_space and status == 'flight': status = 'deep-space'
+        position = [-sum(axis[j]*self.station[j] for j in range(3)) for axis in self.world_basis]
+        velocity = [axis[2]*self.speed for axis in self.world_basis]
+        return dict(system=self.p.system,mode=status,position=position if status == 'flight' else [0.,0.,0.],
+                    velocity=velocity if status == 'flight' else [0.,0.,0.],epoch=self.world_epoch)
+
+    def update_shared_presence(self):
+        presence = getattr(self,'presence',None)
+        if presence is None: return
+        presence.offer(self.presence_state())
+        snapshot = presence.snapshot
+        nearby = {}
+        if not self.p.deep_space:
+            for player in snapshot['players']:
+                if player['id'] == snapshot['you'] or player['system'] != self.p.system or player['mode'] != 'flight': continue
+                if type(player.get('position')) is not list or len(player['position']) != 3: continue
+                obj = self.other_players.get(player['id'],{}).get('object',[0.,0.,0.])
+                obj[:] = [self.station[j]+sum(player['position'][axis]*self.world_basis[axis][j] for axis in range(3)) for j in range(3)]
+                nearby[player['id']] = dict(name=player['name'],object=obj)
+        self.other_players = nearby
+
+    def player_label(self, obj):
+        return next(('PLAYER '+p['name'] for p in self.other_players.values() if p['object'] is obj),None)
 
     @staticmethod
     def swept_ship_distance(start,end):
@@ -1644,6 +1691,8 @@ class Game:
         remote = getattr(self,'remote_save',None)
         status_color = RED if remote and remote.conflicted else GOLD if remote and 'unavailable' in remote.status else GREEN
         d.text(35,155,remote.status if remote else 'Offline game: progress saved on this laptop.',status_color)
+        presence = getattr(self,'presence',None)
+        if presence: d.text(35,180,presence.status,(140,185,255))
         descriptions = ['Key bindings and flight help','Your saved private notes','Bug reports and suggestions','Check for game updates','Toggle display size','Save current state and close']
         for i,description in enumerate(descriptions):
             x,y = 35+(i%2)*515,200+(i//2)*110
@@ -1963,7 +2012,7 @@ class Game:
             self.message = ('REAR VIEW - rear pulse laser ready.' if 'rear' in self.p.equipment else 'REAR VIEW - no rear laser fitted. Buy one in outfitting.') if self.rear_view else 'FORWARD VIEW.'
             return
         if k == ord('5'):
-            targets = ([self.enemy] if self.enemy is not None else [])+([self.disabled_ship['object']] if self.disabled_ship else [])
+            targets = ([self.enemy] if self.enemy is not None else [])+([self.disabled_ship['object']] if self.disabled_ship else [])+[p['object'] for p in self.other_players.values()]
             current = next((i for i,target in enumerate(targets) if target is self.ship_target),-1)
             self.ship_target = targets[current+1] if current+1 < len(targets) else None
             self.message = 'Ship target selected.' if self.ship_target else 'No ship selected.'
@@ -2209,7 +2258,9 @@ class Game:
         for i,(name,_,_,_) in enumerate(SYSTEMS):
             x,y = plot(coordinates(i))
             d.rect(x-4,y-4,8,8,GOLD if i == self.target and not self.cursor_mode else GREEN)
-            d.text(x+9,y-15,name)
+            presence = getattr(self,'presence',None)
+            count = sum(p['system'] == i and p['mode'] not in ('transit','deep-space') for p in presence.snapshot['players']) if presence else 0
+            d.text(x+9,y-15,name+(f' [{count}]' if count else ''))
         x,y = plot(p.position)
         d.rect(x-8,y-8,16,16,(140,185,255))
         d.text(x+12,y+7,'YOU',(140,185,255))
@@ -2311,6 +2362,7 @@ class Game:
             contacts.append(('object',mine,'MINE',RED))
         for rock in self.asteroids: contacts.append(('object',rock,'ASTEROID',GOLD))
         for ore in self.fragments: contacts.append(('object',ore,'ORE',(150,190,255)))
+        contacts += [('player',p['object'],'PLAYER '+p['name'],(140,185,255)) for p in self.other_players.values()]
         contacts.append(('object',self.sun,'SUN',GOLD))
         return contacts
 
@@ -2344,7 +2396,7 @@ class Game:
             if distance <= 12: choices.append((distance,kind,obj,label))
         if not choices: return
         _,kind,obj,label = min(choices,key=lambda contact:contact[0])
-        if kind in ('ship','disabled'):
+        if kind in ('ship','disabled','player'):
             self.ship_target = obj
             self.message = label+' selected. Direction marker tracks this ship; 5 clears selection.'
         elif kind == 'object':
@@ -2407,7 +2459,7 @@ class Game:
         for kind,obj,label,color in self.scanner_contacts():
             x,y = self.scanner_position(obj)
             d.fill(x-3,y-3,6,6,color)
-            if kind in ('ship','disabled') and obj is self.ship_target: d.rect(x-7,y-7,14,14,GOLD)
+            if kind in ('ship','disabled','player') and obj is self.ship_target: d.rect(x-7,y-7,14,14,GOLD)
         d.text(850,224,'TOP VIEW / click',(135,175,185))
         self.draw_bearing()
 
@@ -2500,7 +2552,7 @@ class Game:
         # preserves ranges: steering changes heading rather than strafing.
         c,s = math.cos(self.roll),math.sin(self.roll)
         cy,sy,cp,sp = math.cos(yaw),math.sin(yaw),math.cos(pitch),math.sin(pitch)
-        objects = [self.station,self.sun,self.planet] + self.stars + self.asteroids + self.fragments + self.mine_objects
+        objects = [self.station,self.sun,self.planet] + self.world_basis + self.stars + self.asteroids + self.fragments + self.mine_objects
         if self.enemy: objects.append(self.enemy)
         if self.enemy_shot: objects.append(self.enemy_shot['position'])
         if self.disabled_ship: objects.append(self.disabled_ship['object'])
@@ -2717,11 +2769,14 @@ class Game:
         if self.enemy: candidates.append(('ship',self.enemy))
         if self.disabled_ship: candidates.append(('disabled',self.disabled_ship['object']))
         if not self.p.deep_space: candidates.append(('station',self.station))
+        candidates += [('player',p['object']) for p in self.other_players.values()]
         candidates += [('asteroid',rock) for rock in self.asteroids]
         hits = [(depth,kind,obj) for kind,obj in candidates if (depth := self.laser_hit_depth(obj,kind)) is not None]
         if not hits: return
         _,kind,obj = min(hits,key=lambda hit:hit[0])
-        if kind == 'ship':
+        if kind == 'player':
+            self.message = 'Shared-universe test: player combat is not enabled yet.'
+        elif kind == 'ship':
             obj[3] -= power
             if obj[3] <= 0: self.destroy_enemy()
         elif kind == 'station':
@@ -2742,7 +2797,7 @@ class Game:
         if kind == 'station':
             angle += -self.station_angle if self.rear_view else self.station_angle
             vertices = [(math.cos(i*math.pi/4)*100,math.sin(i*math.pi/4)*100) for i in range(8)]
-        elif kind in ('ship','disabled'):
+        elif kind in ('ship','disabled','player'):
             vertices = [(-65,10),(-20,-15),(0,-5),(20,-15),(65,10),(0,28)]
         else:
             vertices = [(math.cos(i*2*math.pi/7)*42*(.85+.15*(i%3)),math.sin(i*2*math.pi/7)*42) for i in range(7)]
@@ -3209,6 +3264,10 @@ class Game:
         for mine in self.mine_objects: self.object(mine,'mine')
         for rock in self.asteroids: self.object(rock,'asteroid')
         for fragment in self.fragments: self.object(fragment,'ore')
+        for player in self.other_players.values():
+            self.object(player['object'],'player')
+            projected = self.project(player['object'])
+            if projected: d.text(max(35,min(W-240,projected[0]-60)),max(100,min(510,projected[1]-35)),player['name'],(140,185,255))
         if self.enemy: self.object(self.enemy,self.enemy_kind)
         if self.disabled_ship: self.object(self.disabled_ship['object'],'disabled')
         if self.laser_flash:
@@ -3232,11 +3291,12 @@ class Game:
         clip(d.r,None)
         target,label = self.active_navigation()
         if target is not None: self.draw_marker(target,label,GOLD)
-        if self.ship_target is not self.enemy and (not self.disabled_ship or self.ship_target is not self.disabled_ship['object']): self.ship_target = None
-        if self.ship_target is not None: self.draw_marker(self.ship_target,'DISABLED SHIP' if self.disabled_ship and self.ship_target is self.disabled_ship['object'] else 'TARGET '+self.enemy_kind.upper(),(255,100,180))
+        if self.ship_target is not self.enemy and (not self.disabled_ship or self.ship_target is not self.disabled_ship['object']) and not self.player_label(self.ship_target): self.ship_target = None
+        if self.ship_target is not None: self.draw_marker(self.ship_target,self.player_label(self.ship_target) or ('DISABLED SHIP' if self.disabled_ship and self.ship_target is self.disabled_ship['object'] else 'TARGET '+self.enemy_kind.upper()),(255,100,180))
         self.draw_scanner()
         self.draw_heat_instrument()
         d.text(35,73,'REAR VIEW' if self.rear_view else 'FORWARD VIEW',GOLD)
+        if getattr(self,'presence',None): d.text(360,73,f'PLAYERS NEARBY {len(self.other_players)} / PvP disabled',(140,185,255))
         if self.flash: d.rect(26,65,W-52,490,RED)
         obj,label = self.active_navigation()
         if obj is None: obj = [0.,0.,0.]
@@ -3282,7 +3342,7 @@ class Game:
         if sx < -800 or sx > W+800 or sy < -800 or sy > H+800: return
         color = GREEN
         angle = self.roll if self.rear_view else -self.roll
-        if kind in ('pirate','police','disabled'):
+        if kind in ('pirate','police','disabled','player'):
             points = [(-65,10),(-20,-15),(0,-5),(20,-15),(65,10),(0,28)]
             edges = [(0,1),(1,2),(2,3),(3,4),(4,5),(5,0),(0,4),(2,5)]
             color = GOLD if kind == 'disabled' else RED if kind == 'pirate' else (120,170,255)
@@ -3358,6 +3418,7 @@ def main():
     instance_file = None
     remote = None
     game = None
+    presence = None
     try:
         offline_save = SAVE
         if options.offline and options.server: raise ValueError('Choose --offline or --server')
@@ -3419,6 +3480,9 @@ def main():
         game = Game(display)
         if remote:
             game.remote_save = remote
+            from presence import PresenceClient
+            presence = PresenceClient(remote)
+            game.presence = presence
             remote.start()
             game.checkpoint()
         last = time.monotonic()
@@ -3450,6 +3514,7 @@ def main():
     finally:
         if remote and game: game.checkpoint()
         if display: display.quit()
+        if presence: presence.close()
         if remote:
             remote.close()
             print(remote.status)

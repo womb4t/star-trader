@@ -62,9 +62,9 @@ class RemoteSave:
         self.conflicted = False
         self.thread = None
 
-    def request(self, data=None):
+    def request(self, data=None, endpoint='/v1/save'):
         raw = canonical(data) if data is not None else None
-        req = urllib.request.Request(self.url+'/v1/save',data=raw,method='PUT' if raw else 'GET',headers={'Authorization':'Bearer '+self.token,'Content-Type':'application/json'})
+        req = urllib.request.Request(self.url+endpoint,data=raw,method='PUT' if raw else 'GET',headers={'Authorization':'Bearer '+self.token,'Content-Type':'application/json'})
         try:
             with self.opener.open(req,timeout=5) as response:
                 raw = response.read(300000)
@@ -72,6 +72,7 @@ class RemoteSave:
                 return json.loads(raw)
         except urllib.error.HTTPError as error:
             error.close()
+            if error.code == 409 and endpoint != '/v1/save': raise RuntimeError('This player is already online on another computer') from None
             if error.code == 409: raise Conflict('Server save changed on another computer. Local progress retained; reconnect to resolve.') from None
             if error.code == 401: raise RuntimeError('Server rejected the player token') from None
             raise RuntimeError(f'Server returned HTTP {error.code}') from None
