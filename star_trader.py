@@ -20,7 +20,7 @@ import tempfile
 import fcntl
 import textwrap
 
-VERSION = '0.2.19'
+VERSION = '0.2.20'
 STATION_POLICE_CAPACITY = 6
 DOCK_ROLL_TOLERANCE = math.radians(14)
 CRUISE_SECONDS_PER_LY = 45
@@ -519,6 +519,7 @@ class Game:
         self.dock_clearance = self.docking_pending = 0.
         self.rescue = None
         self.rescue_cooldown = 0.
+        self.menu_selected = 0
         self.notes_scroll = 0
         self.credit_code_text = ""
         self.exchange_amount = 50
@@ -597,7 +598,7 @@ class Game:
         for _ in range(6):
             if mode in ('market','outfit','departure','launch_warning','bank','jobs','exchange','trade_deal','money','redeem'): return 'market'
             if mode in ('flight','cruise','hyperspace','dead'): return mode
-            attr = {'help':'help_return','updates':'update_return','map':'map_return','notes':'notes_return','feedback':'feedback_return','planet_profile':'map_return','engineering':'engineering_return'}.get(mode)
+            attr = {'help':'help_return','updates':'update_return','map':'map_return','menu':'menu_return','notes':'notes_return','feedback':'feedback_return','planet_profile':'map_return','engineering':'engineering_return'}.get(mode)
             if not attr: return 'flight'
             mode = getattr(self,attr,'flight')
         return 'flight'
@@ -1484,7 +1485,57 @@ class Game:
         for i,line in enumerate(lines[max(0,end-17):end]): d.text(45,140+i*25,line)
         d.text(35,615,f'{len(self.p.notes)}/4000 characters. Typing appends; arrows scroll; ENTER adds a line.')
 
+    def open_utility(self, target):
+        if target == 'help':
+            if self.mode == 'help': self.mode = self.help_return
+            else: self.help_return,self.mode = self.mode,'help'
+        elif target == 'notes':
+            self.notes_return,self.mode = self.mode,'notes'
+        elif target == 'updates':
+            self.update_return,self.mode = self.mode,'updates'
+        elif target == 'feedback':
+            self.feedback_return,self.mode = self.mode,'feedback'
+        elif target == 'menu':
+            self.menu_return,self.mode = self.mode,'menu'
+        self.keys.clear()
+        self.release_mouse()
+        self.alert = None
+
+    def menu_actions(self):
+        return [
+            ('Controls',lambda:self.open_utility('help')),
+            ('Notes',lambda:self.open_utility('notes')),
+            ('Report a bug / 0',lambda:self.open_utility('feedback')),
+            ('Check updates / 2',lambda:self.open_utility('updates')),
+            ('Fullscreen / 3',self.mouse_fullscreen),
+            ('Save and quit',self.request_exit)]
+
+    def choose_menu_action(self, index):
+        self.mode = self.menu_return
+        self.menu_actions()[index][1]()
+
+    def draw_menu(self):
+        d = self.d
+        d.text(35,85,'GAME MENU',GOLD)
+        d.text(35,125,'UP / DOWN selects. ENTER opens. ESC returns to the game.')
+        descriptions = ['Key bindings and flight help','Your saved private notes','Bug reports and suggestions','Check for game updates','Toggle display size','Save current state and close']
+        for i,description in enumerate(descriptions):
+            x,y = 35+(i%2)*515,200+(i//2)*110
+            d.text(x+10,y+42,description,(135,175,185))
+
     def key(self, k):
+        if self.mode == 'menu':
+            if k in (27,96): self.mode = self.menu_return
+            elif k in (UP,DOWN,LEFT,RIGHT):
+                self.menu_selected = (self.menu_selected+(-1 if k in (UP,LEFT) else 1))%len(self.menu_actions())
+            elif k == 13: self.choose_menu_action(self.menu_selected)
+            return
+        if k == 96 and self.mode not in ('feedback','notes','redeem') and not (self.mode == 'map' and self.map_input):
+            self.menu_return,self.mode = self.mode,'menu'
+            self.release_mouse()
+            self.keys.clear()
+            self.alert = None
+            return
         if self.mode == 'notes':
             if k == UP: self.notes_scroll += 5
             elif k == DOWN: self.notes_scroll = max(0,self.notes_scroll-5)
@@ -2554,11 +2605,11 @@ class Game:
 
     def mouse_button(self, x,y,w,label,key=None,action=None,hold=False):
         d = self.d
-        d.fill(x,y,w,28,(13,35,46))
-        d.rect(x,y,w,28,(55,125,135))
+        d.fill(x,y,w,32,(13,35,46))
+        d.rect(x,y,w,32,(55,125,135))
         d.text(x+5,y+3,label,GREEN)
         callback = action if action is not None else lambda:self.mouse_key(key,hold)
-        self.buttons.append((x,y,w,28,callback))
+        self.buttons.append((x,y,w,32,callback))
 
     def mouse_row(self,x,y,w,h,action):
         self.buttons.append((x,y,w,h,action))
@@ -2566,21 +2617,20 @@ class Game:
     def draw_mouse_ui(self):
         self.buttons = []
         d = self.d
-        if self.mode not in ('feedback','notes','redeem'):
-            self.mouse_button(155,18,100,'Report 0',ord('0'))
-            self.mouse_button(260,18,90,'Notes -',ord('-'))
-        modal = self.mode in ('distress','departure','launch_warning','engineering','hyperspace','bank','jobs','planet_profile','feedback','exchange','trade_deal','money','notes','redeem')
-        if self.mode == 'flight':
-            self.mouse_button(355,18,80,'Actions',action=lambda:setattr(self,'mouse_controls',not self.mouse_controls))
-        if self.mode in ('market','outfit','bank'):
-            self.mouse_button(355,18,80,'Jobs J',ord('j'))
-        if not modal:
-            self.mouse_button(440,18,45,'Help',ord('1'))
-            self.mouse_button(490,18,45,'Upd2',ord('2'))
-        self.mouse_button(540,18,35,'FS',action=self.mouse_fullscreen)
-        self.mouse_button(580,18,45,'<' if modal or self.mode in ('help','updates') else 'X',action=self.mouse_back)
+        if self.mode not in ('feedback','notes','redeem','menu'):
+            if self.mode != 'help': self.mouse_button(160,18,130,'Controls',action=lambda:self.open_utility('help'))
+            self.mouse_button(300,18,100,'Notes',action=lambda:self.open_utility('notes'))
+            self.mouse_button(410,18,100,'Menu',action=lambda:self.open_utility('menu'))
+        modal = self.mode in ('distress','departure','launch_warning','engineering','hyperspace','bank','jobs','planet_profile','feedback','exchange','trade_deal','money','notes','redeem','menu')
+        self.mouse_button(520,18,110,'Back' if modal or self.mode in ('help','updates','map') else 'Save/quit',action=self.mouse_back)
         row_y = 674
-        if self.mode in ('market','outfit'):
+        if self.mode == 'menu':
+            for i,(label,_) in enumerate(self.menu_actions()):
+                x,y = 35+(i%2)*515,200+(i//2)*110
+                self.mouse_button(x,y,490,label,action=lambda i=i:self.choose_menu_action(i))
+                if i == self.menu_selected: d.rect(x-3,y-3,496,38,GOLD)
+            self.mouse_button(35,674,1000,'Return to game',action=lambda:self.key(27))
+        elif self.mode in ('market','outfit'):
             if self.mode == 'market':
                 for i in range(len(GOODS)):
                     self.mouse_row(35,165+i*35,610,35,lambda i=i:setattr(self,'selected',i))
@@ -2677,13 +2727,15 @@ class Game:
         elif self.mode == 'dead':
             self.mouse_button(50,row_y,350,'Recover starter ship',ord('r'))
             self.mouse_button(440,row_y,300,'New pilot / reset',ord('n'))
+        if self.mode == 'flight':
+            self.mouse_button(35,674,190,'Flight controls',action=lambda:setattr(self,'mouse_controls',not self.mouse_controls))
         if self.mode == 'flight' and self.mouse_controls:
-            groups=[('Fly', [('Throttle',ord('w'),True),('Brake/rev',ord('s'),True),('Fire',32,True),('Left',LEFT,True),('Up',UP,True),('Right',RIGHT,True),('Roll L',ord('q'),True),('Down',DOWN,True),('Roll R',ord('e'),True)]),
-                ('Nav',[('Map',ord('g'),False),('Hold jump',ord('h'),True),('Cruise',ord('t'),False),('Station',ord('d'),False),('Planet',ord('p'),False),('Rocks',ord('a'),False),('Sun',ord('j'),False),('Scoop',ord('o'),False),('Guide Y',ord('y'),False)]),
-                ('Fight',[('Fire',32,True),('View 4',ord('4'),False),('Laser',ord('v'),False),('Missile',ord('m'),False),('Mine',ord('b'),False),('Jammer',ord('z'),False),('Cloak',ord('k'),False),('Target',ord('5'),False)]),
-                ('Safety',[('Radio 7',ord('7'),False),('Autodock',ord('c'),False),('Skills',ord('8'),False),('Distress',ord('6'),False),('Fine I',ord('i'),False)])]
+            groups=[('Flight', [('Thrust W',ord('w'),True),('Brake S',ord('s'),True),('Fire Spc',32,True),('Left',LEFT,True),('Up',UP,True),('Right',RIGHT,True),('Roll Q',ord('q'),True),('Down',DOWN,True),('Roll E',ord('e'),True)]),
+                ('Nav',[('Map',ord('g'),False),('Hold jump',ord('h'),True),('Cruise',ord('t'),False),('Station',ord('d'),False),('Planet',ord('p'),False),('Rocks',ord('a'),False),('Sun',ord('j'),False),('Scoop',ord('o'),False),('Guide ON' if self.course_assist else 'Guide Y',ord('y'),False)]),
+                ('Combat',[('Fire',32,True),('View 4',ord('4'),False),('Laser',ord('v'),False),('Missile',ord('m'),False),('Mine',ord('b'),False),('Jammer',ord('z'),False),('Cloak',ord('k'),False),('Target',ord('5'),False)]),
+                ('Safety',[('Radio 7',ord('7'),False),('Autodock',ord('c'),False),('Skills',ord('8'),False),('Distress',ord('6'),False),('Fine ON' if self.fine_control else 'Fine I',ord('i'),False)])]
             d.fill(30,105,350,270,(5,16,27));d.rect(30,105,350,270,GREEN)
-            d.text(40,112,'COCKPIT ACTIONS',GOLD)
+            d.text(40,112,'FLIGHT CONTROLS',GOLD)
             for i,(title,_) in enumerate(groups):
                 self.mouse_button(40+i*82,145,78,title,action=lambda i=i:setattr(self,'action_tab',i))
                 if i == self.action_tab: d.rect(40+i*82,145,78,28,GOLD)
@@ -2695,19 +2747,20 @@ class Game:
         self.d.fullscreen(self.d.win,0x1001 if self.d.is_fullscreen else 0)
 
     def mouse_back(self):
-        if self.mode == 'help': self.key(ord('1'))
+        if self.mode == 'map': self.key(ord('g'))
+        elif self.mode == 'help': self.mode = self.help_return
         elif self.mode == 'updates': self.key(ord('2'))
         else: self.key(27)
 
     def help_sections(self):
         return [
-            ('Start',[
+            ('Quick start',[
                 ('First trade','B / S','Buy food on Lave. Sell it at an industrial port such as Zaonce.'),
-                ('Feedback','0 / Feedback','Report bugs or suggest ideas. Save a draft offline or open GitHub to review and submit.'),
+                ('Mouse flight controls','Flight controls','Open the bottom-left panel. Flight, Nav, Combat and Safety group the actions.'),
                 ('Plan a trip','G / ENTER','Choose a planet or coordinate, check fuel, then lock your course.'),
                 ('Leaving the station','L','Request clearance, wait for approval, then launch. Read fuel warnings.'),
                 ('Keep a reserve','F / R','Buy fuel and service the hull while docked. Cargo adds weight and inertia.'),
-                ('Leaving the game','ESC / click X','Dock for a safe logout. In space your saved ship continues unattended.')]),
+                ('Leaving the game','ESC / Save/quit','Dock for a safe logout. In space your saved ship continues unattended.')]),
             ('Flight',[
                 ('Throttle and braking','HOLD W / S','W accelerates. S brakes, then reverses. Heavy cargo makes stopping slower.'),
                 ('Fine steering','I + ARROWS','Arrows turn. I toggles 20% turning and Q/E roll. Safety tab has a mouse toggle.'),
@@ -2768,7 +2821,9 @@ class Game:
         d.text(640,5,location+economy,GOLD)
         d.text(640,29,f'CR {p.credits:.0f}  CYM {p.crymto}  KILLS {p.kills}')
         d.line(25,52,W-25,52)
-        if self.mode == 'money':
+        if self.mode == 'menu':
+            self.draw_menu()
+        elif self.mode == 'money':
             self.draw_money()
         elif self.mode == 'notes':
             self.draw_notepad()
@@ -2942,15 +2997,15 @@ class Game:
         d.text(650,598,('GUIDANCE Y  ' if self.course_assist else '')+('FINE I' if self.fine_control else ''),GOLD)
         d.text(650,625,'DRIVE DISABLED' if self.broken_down else 'AUTODOCK' if self.autodock else f'SLOT {error:+.0f}/14deg '+('CLEAR' if self.dock_clearance else '7 radio'),GOLD)
         status = 'CLOAKED' if self.cloaked else 'JAMMING' if self.jamming else ''
-        d.text(35,657,f'MINES {p.mines}  {status}  1 controls  2 updates  6 distress',GOLD)
+        d.text(35,650,f'MINES {p.mines}  {status}  6 distress  /  4 rear view',GOLD)
         if p.fuel < 1.0:
-            d.text(810,657,'LOW FUEL',RED)
+            d.text(810,650,'LOW FUEL',RED)
         if p.waypoint:
             w = p.waypoint
             delta = [b-a for a,b in zip(p.position,w['position'])]
-            d.text(35,686,f'COURSE {w["name"]} ({w["position"][0]:.2f},{w["position"][1]:.2f})  {math.hypot(*delta):.2f} LY  T cruise',GOLD)
+            d.text(245,681,f'COURSE {w["name"][:18]}  {math.hypot(*delta):.2f} LY / T cruise',GOLD)
         elif p.fuel < 1.0:
-            d.text(35,686,'LOW FUEL - buy fuel / skim the sun. Press 6 for distress.',RED)
+            d.text(245,681,'LOW FUEL - buy fuel / skim the sun. Press 6 for distress.',RED)
         if self.jump_charge:
             count = max(1,math.ceil(3-self.jump_charge['held']))
             d.fill(240,265,600,90,(4,9,18))

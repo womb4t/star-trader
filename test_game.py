@@ -575,6 +575,22 @@ class GameplayTests(unittest.TestCase):
         self.assertIn('STAR-TEST-100K',restored.p.redeemed_credit_codes)
         self.assertEqual(restored.p.credits,100150)
 
+    def test_global_controls_open_without_triggering_context_actions(self):
+        g = self.game
+        g.mode = 'money'
+        g.open_utility('help')
+        self.assertEqual(g.mode,'help')
+        self.assertEqual(g.help_return,'money')
+        g.mouse_back()
+        self.assertEqual(g.mode,'money')
+        g.open_utility('menu')
+        g.menu_selected = 1
+        g.key(13)
+        self.assertEqual(g.mode,'notes')
+        self.assertEqual(g.notes_return,'money')
+        g.key(27)
+        self.assertEqual(g.mode,'money')
+
     def test_market_spread_and_stock(self):
         p = self.game.p
         cash, stock = p.credits, p.stock[0][0]

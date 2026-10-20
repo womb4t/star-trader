@@ -1,3 +1,11 @@
+# 0.2.20 — clearer controls and navigation
+
+- Simplify the header to consistent Controls, Notes, Menu and Back/Save-quit actions.
+- Group utility actions in a keyboard/mouse menu with focus highlighting.
+- Keep Flight/Nav/Combat/Safety mouse controls in a separate collapsible flight panel.
+- Use 32px click targets, updated handbook cards, visible toggle states and cleaner cockpit footer spacing.
+- Global utility buttons no longer accidentally trigger job answers or Money actions.
+
 # 0.2.19 — departure access checks and finite station defences
 
 - Warn before launch about refused destination docking, hostile station guns, deep-space destinations and fuel reserves.

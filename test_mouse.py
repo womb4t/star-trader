@@ -46,7 +46,7 @@ class MouseIntegrationTests(unittest.TestCase):
                         g = st.Game(d)
                         g.mode = 'market'
                         g.draw()
-                        mouse(g,390,30)
+                        mouse(g,915,620)
                         self.assertEqual(g.mode,'jobs')
                         g.draw()
                         mouse(g,500,180)
@@ -64,7 +64,10 @@ class MouseIntegrationTests(unittest.TestCase):
                         self.assertNotIn(ord('w'),g.keys)
                         g.mode = 'market'
                         g.draw()
-                        mouse(g,205,30)
+                        mouse(g,450,30)
+                        self.assertEqual(g.mode,'menu')
+                        g.draw()
+                        mouse(g,100,325)
                         self.assertEqual(g.mode,'feedback')
                         raw = bytearray(56)
                         struct.pack_into('=I',raw,0,771)
