@@ -1,4 +1,4 @@
-STAR TRADER 0.2.23 — original space trading game for Omarchy
+STAR TRADER 0.2.24 — original space trading game for Omarchy
 
 Install: bash install.sh
 Play: open your app launcher and search for Star Trader.
@@ -156,7 +156,7 @@ will require server validation. Press - or click Notes for a saved personal
 notepad; typing appends text, Enter adds a line, arrows/Earlier/Later scroll,
 and Save notes or returning records changes. Notes survive ship loss.
 
-CONTROLS: the top bar offers Money, VMS, Navigation, Menu and Back/Quit.
+CONTROLS: the top bar offers Money, Nav, VMS, Menu and Back/Quit.
 Menu groups Controls, Notes, reporting, updates, fullscreen and exit. The grave/backtick key opens
 Menu; arrows and Enter select items, Escape returns. The flight-only bottom-left
 Flight controls button opens Flight/Nav/Combat/Safety mouse controls. Buttons
@@ -170,4 +170,8 @@ weapons and fitted equipment. While docked, buy fuel, service, fit equipment,
 train engineering and launch from VMS. In flight, view status and open field
 engineering; station facilities stay unavailable until docking. Money (9) is
 also viewable in flight, with financial services restricted to stations.
-Navigation is the new name for G; its map, search and planet profiles remain.
+Nav is the name for G; its map, search and planet profiles remain.
+
+Top navigation order: Money, Nav, VMS, Menu. Bottom action bars use compact
+buttons with separate keyboard badges, consistent spacing and right-aligned
+Return/Cancel controls. Crowded screens wrap actions into two rows.

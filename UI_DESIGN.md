@@ -6,3 +6,5 @@ Applied guidance:
 - [Nielsen Norman Group usability heuristics](https://www.nngroup.com/articles/ten-usability-heuristics/): recognition over recall, visible state, clear labels, reduced clutter.
 
 Implementation: common navigation bar; utilities grouped in Menu; separate contextual flight controls; six controls topics; persistent toggle labels; 32px mouse targets; keyboard focus in Menu and jobs; consistent return actions. The existing keyboard shortcuts are retained. This is an incremental cleanup, not a claim of full accessibility compliance; remapping and full screen-reader support are future work.
+
+Footer actions now use compact content-sized buttons, explicit shortcut badges, right-aligned return actions and wrapping for crowded screens. Money/Nav/VMS/Menu use a consistent top-level order.

@@ -93,10 +93,10 @@ class MouseIntegrationTests(unittest.TestCase):
                         self.assertTrue(Path(g.feedback_path).exists())
                         g.key(27)
                         g.draw()
-                        mouse(g,290,30)
+                        mouse(g,400,30)
                         self.assertEqual(g.mode,'vms')
                         g.draw()
-                        mouse(g,410,30)
+                        mouse(g,300,30)
                         self.assertEqual(g.mode,'map')
                         self.assertEqual(g.map_return,'market')
 

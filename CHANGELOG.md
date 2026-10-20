@@ -1,3 +1,10 @@
+# 0.2.24 — Nav order and cleaner bottom action bars
+
+- Rename the top navigation item to Nav and place it before VMS.
+- Replace oversized footer buttons with compact, consistently spaced actions and separate shortcut badges.
+- Align Return/Cancel actions to the right and wrap crowded toolbars safely.
+- Preserve cockpit course information alongside the flight control button.
+
 # 0.2.23 — top-level Money, VMS and Navigation
 
 - Put Money, VMS, Navigation and Menu in the consistent top navigation bar.

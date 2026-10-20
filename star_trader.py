@@ -20,7 +20,7 @@ import tempfile
 import fcntl
 import textwrap
 
-VERSION = '0.2.23'
+VERSION = '0.2.24'
 STATION_POLICE_CAPACITY = 6
 DOCK_ROLL_TOLERANCE = math.radians(14)
 CRUISE_SECONDS_PER_LY = 45
@@ -1178,7 +1178,7 @@ class Game:
         self.autodock = False
         self.keys.clear()
         self.cloaked = False
-        self.message = ('Docked.' + inspection) if inspection else 'Docked. X VMS for ship services; 9 Money; G Navigation.'
+        self.message = ('Docked.' + inspection) if inspection else 'Docked. X VMS for ship services; 9 Money; G Nav.'
         self.save()
 
     def slot_error(self):
@@ -1534,7 +1534,7 @@ class Game:
             d.text(45,535,f'Fuel refill: {p.fuel_cost()} cr / Service: {p.service_cost()} cr')
         else:
             d.text(45,535,'Fuel, station repairs and fitting require docking. Field engineering remains available.')
-        d.text(45,625,'X / ESC returns. G opens Navigation. 8 opens engineering.')
+        d.text(45,625,'X / ESC returns. G opens Nav. 8 opens engineering.')
 
     def open_utility(self, target):
         if target == 'help':
@@ -2112,7 +2112,7 @@ class Game:
 
     def draw_map(self):
         d,p = self.d,self.p
-        d.text(30,75,'NAVIGATION / arrows select / TAB cursor / ENTER lock')
+        d.text(30,75,'NAV / arrows select / TAB cursor / ENTER lock')
         d.text(30,105,'/ search  C coordinates  HOLD H jump  T cruise  G return')
         for n in range(11):
             x,y = 60+n*60,155+n*39
@@ -2675,6 +2675,10 @@ class Game:
         self.key(key)
 
     def mouse_button(self, x,y,w,label,key=None,action=None,hold=False):
+        if y >= 638:
+            callback = action if action is not None else lambda:self.mouse_key(key,hold)
+            self.footer_actions.append((label,key,callback,hold))
+            return
         d = self.d
         d.fill(x,y,w,32,(13,35,46))
         d.rect(x,y,w,32,(55,125,135))
@@ -2682,23 +2686,68 @@ class Game:
         callback = action if action is not None else lambda:self.mouse_key(key,hold)
         self.buttons.append((x,y,w,32,callback))
 
+    def draw_action_bar(self):
+        if not self.footer_actions: return
+        d = self.d
+        hints = {13:'Enter',27:'Esc',32:'Space',UP:'Up',DOWN:'Down',LEFT:'Left',RIGHT:'Right'}
+        rows,items,width = [],[],0
+        for label,key,callback,hold in self.footer_actions:
+            hint = hints.get(key,chr(key).upper() if type(key) is int and 32 < key < 127 else '')
+            if hint and label.endswith(' '+hint): label = label[:-len(hint)-1]
+            hint_width = max(30,len(hint)*11+12) if hint else 0
+            button_width = max(132,min(330,len(label)*11+24+hint_width))
+            if items and width+10+button_width > W-70:
+                rows.append(items)
+                items,width = [],0
+            items.append((label,hint,callback,button_width,hint_width,hold))
+            width += (10 if width else 0)+button_width
+        if items: rows.append(items)
+        start = 674-(len(rows)-1)*36
+        d.fill(25,start-6 if self.mode != 'flight' else start,W-50,710-start+6,(7,19,28))
+        if self.mode != 'flight': d.line(25,start-6,W-25,start-6,(35,65,80))
+        for row,items in enumerate(rows):
+            x,y = 35,start+row*36
+            for index,(label,hint,callback,w,hint_width,hold) in enumerate(items):
+                back = label.lower().startswith(('return','back','cancel','decline','refuse'))
+                danger = 'reset' in label.lower() or 'quit' in label.lower()
+                if back and index == len(items)-1: x = max(x,W-35-w)
+                primary = index == 0 and not back and not danger
+                border = GOLD if primary else RED if danger else (55,95,110)
+                d.fill(x,y,w,32,(15,56,61) if primary else (12,29,40))
+                d.rect(x,y,w,32,border)
+                d.text(x+10,y+4,label,RED if danger else GREEN)
+                if hint:
+                    badge = x+w-hint_width-6
+                    d.fill(badge,y+5,hint_width,22,(7,19,28))
+                    d.text(badge+6,y+4,hint,GOLD if primary else (145,180,190))
+                self.buttons.append((x,y,w,32,callback))
+                x += w+10
+        if self.mode == 'flight':
+            if self.p.waypoint:
+                w = self.p.waypoint
+                dist = galactic_distance(self.p.position,w['position'])
+                d.text(245,681,f'COURSE {w["name"][:18]}  {dist:.2f} LY / T cruise',GOLD)
+            elif self.p.fuel < 1:
+                d.text(245,681,'LOW FUEL / 6 distress',RED)
+
     def mouse_row(self,x,y,w,h,action):
         self.buttons.append((x,y,w,h,action))
 
     def draw_mouse_ui(self):
         self.buttons = []
+        self.footer_actions = []
         d = self.d
         if self.mode not in ('feedback','notes','redeem','menu'):
             self.mouse_button(155,18,95,'Money',action=lambda:self.open_hub('money'))
-            self.mouse_button(260,18,75,'VMS',action=lambda:self.open_hub('vms'))
-            self.mouse_button(345,18,130,'Navigation',action=self.open_navigation)
-            self.mouse_button(485,18,65,'Menu',action=lambda:self.open_utility('menu'))
+            self.mouse_button(365,18,75,'VMS',action=lambda:self.open_hub('vms'))
+            self.mouse_button(260,18,95,'Nav',action=self.open_navigation)
+            self.mouse_button(450,18,85,'Menu',action=lambda:self.open_utility('menu'))
             section = 'money' if self.mode in ('money','bank','jobs','exchange') else 'vms' if self.mode in ('vms','outfit','engineering') else 'map' if self.mode in ('map','planet_profile') else None
             if section:
-                x,w = {'money':(155,95),'vms':(260,75),'map':(345,130)}[section]
+                x,w = {'money':(155,95),'vms':(365,75),'map':(260,95)}[section]
                 d.rect(x,18,w,32,GOLD)
         modal = self.mode not in ('market','flight','cruise','dead')
-        self.mouse_button(560,18,70,'Back' if modal else 'Quit',action=self.mouse_back)
+        self.mouse_button(545,18,85,'Back' if modal else 'Quit',action=self.mouse_back)
         row_y = 674
         if self.mode == 'menu':
             for i,(label,_) in enumerate(self.menu_actions()):
@@ -2824,6 +2873,8 @@ class Game:
             for i,(label,key,hold) in enumerate(groups[self.action_tab][1]): self.mouse_button(40+(i%3)*110,190+(i//3)*45,105,label,key,hold=hold)
             d.text(40,341,'Hold movement / fire buttons.',(130,175,185))
 
+        self.draw_action_bar()
+
     def mouse_fullscreen(self):
         self.d.is_fullscreen = not self.d.is_fullscreen
         self.d.fullscreen(self.d.win,0x1001 if self.d.is_fullscreen else 0)
@@ -2850,7 +2901,7 @@ class Game:
                 ('Look behind','4','Toggle rear view. Your course stays the same; a rear laser must be fitted.'),
                 ('Local navigation','D / P / A / J','Select station, planet, rocks or sun. Gold dots and arrows show the bearing.'),
                 ('Pick up ore','O','Fit scoops. Get within 260m of a fragment at speed 50 or below.')]),
-            ('Navigation',[
+            ('Nav',[
                 ('Navigation','G','Click a planet or empty point. Planet profiles show coordinates and services.'),
                 ('Search and lock','/  C  ENTER','Search by name, enter coordinates, then lock. Mouse map clicks also lock.'),
                 ('Fast travel','HOLD H','Keep holding for the 3-second countdown. Release early to cancel the jump.'),
@@ -2986,7 +3037,7 @@ class Game:
                 d.text(35,490,'UP/DOWN select; B or ENTER purchases and fits equipment.')
             for i,t in enumerate(['COMMANDER STATUS',f'Cargo {sum(p.cargo)}/{p.capacity} t',f'Fuel  {p.fuel:.2f}/7',f'Hull  {p.hull:.0f}%',f'Refill {p.fuel_cost()} cr',f'Service {p.service_cost()} cr',f'Mines {p.mines}/4',f'Fine {p.fine} cr',f'Wear {p.maintenance:.0f}%',f'Eng. {p.engineering_level}/5']): d.text(790,135+i*40,t)
             d.text(35,550,'Ship fuel, service, fitting and engineering: open VMS above.')
-            d.text(35,590,'9 Money / station jobs   X VMS   G Navigation')
+            d.text(35,590,'9 Money / station jobs   X VMS   G Nav')
         elif self.mode == 'planet_profile':
             self.draw_planet_profile()
         elif self.mode == 'map':
