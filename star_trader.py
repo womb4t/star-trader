@@ -20,7 +20,7 @@ import tempfile
 import fcntl
 import textwrap
 
-VERSION = '0.2.17'
+VERSION = '0.2.18'
 DOCK_ROLL_TOLERANCE = math.radians(14)
 CRUISE_SECONDS_PER_LY = 45
 W, H = 1100, 760
@@ -1191,7 +1191,8 @@ class Game:
             expected = rng.randint(12,60)
             actual = expected+rng.choice([-5,-3,-2,0,2,3,5])
             prompt = f'Manifest: {expected} crates. Counted: {actual}. Report the stock.'
-            choices = ['Short by '+str(abs(actual-expected)),'Matches manifest','Surplus of '+str(abs(actual-expected))]
+            discrepancy = abs(actual-expected) or rng.randint(1,5)
+            choices = ['Short by '+str(discrepancy),'Matches manifest','Surplus of '+str(discrepancy)]
             answer = 0 if actual < expected else 2 if actual > expected else 1
         else:
             tasks = [('Before opening a live panel?', ['Isolate power','Remove cover','Touch wiring'],0),

@@ -452,6 +452,22 @@ class GameplayTests(unittest.TestCase):
         self.assertGreater(st.quote(0,6,False)*80//100-st.quote(1,6),70)
         self.assertGreater(st.quote(0,7,False)*80//100-st.quote(1,7),27)
 
+    def test_matching_stocktake_has_positive_shortfall_and_surplus_options(self):
+        g = self.game
+        found_matching = False
+        for seed in range(100):
+            g.p.dock_job = dict(kind=1,step=0,seed=str(seed))
+            g.job_question()
+            j = g.p.dock_job
+            for option in j['choices']:
+                if option != 'Matches manifest':
+                    self.assertGreater(int(option.split()[-1]),0)
+            counts = [int(part) for part in j['prompt'].replace('.','').split() if part.isdigit()]
+            if counts[0] == counts[1]:
+                found_matching = True
+                self.assertEqual(j['choices'][j['answer']],'Matches manifest')
+        self.assertTrue(found_matching)
+
     def test_market_spread_and_stock(self):
         p = self.game.p
         cash, stock = p.credits, p.stock[0][0]

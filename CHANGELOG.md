@@ -1,3 +1,8 @@
+# 0.2.18 — unambiguous stocktake answers
+
+- Shortfall and surplus choices always use positive quantities, including when the manifest matches.
+- Matching counts now have only one correct option: Matches manifest.
+
 # 0.2.17 — feedback, Crymto and illicit payment deals
 
 - Add Feedback 0: write bugs/suggestions, save offline drafts and open prefilled GitHub issues for manual review/submission.
