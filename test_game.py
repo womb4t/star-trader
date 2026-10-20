@@ -267,6 +267,66 @@ class GameplayTests(unittest.TestCase):
         g.update(.3)
         self.assertIsNone(g.enemy_shot)
 
+    def test_station_job_limits_persist_and_refresh_after_24_hours(self):
+        g = self.game
+        g.mode = 'jobs'
+        with patch.object(st.time,'time',return_value=1000000):
+            board,limits,_ = g.station_job_board()
+            deadline = board['refresh_at']
+            for _ in range(limits[0]):
+                g.start_job(0)
+                for _ in range(5): g.answer_job(g.p.dock_job['answer'])
+                g.update_job(60)
+            cash = g.p.credits
+            g.start_job(0)
+            self.assertIsNone(g.p.dock_job)
+            self.assertEqual(g.p.credits,cash)
+            g.checkpoint()
+            restored = st.Game(None)
+            restored.mode = 'jobs'
+            restored.start_job(0)
+            self.assertIsNone(restored.p.dock_job)
+        with patch.object(st.time,'time',return_value=deadline-1):
+            restored.start_job(0)
+            self.assertIsNone(restored.p.dock_job)
+        with patch.object(st.time,'time',return_value=deadline):
+            restored.start_job(0)
+            self.assertIsNotNone(restored.p.dock_job)
+            self.assertEqual(restored.p.job_boards[0]['used'][0],1)
+
+    def test_station_boards_are_independent_and_refresh_keeps_active_shift(self):
+        g = self.game
+        g.mode = 'jobs'
+        with patch.object(st.time,'time',return_value=1000000):
+            g.start_job(2)
+            deadline = g.p.job_boards[0]['refresh_at']
+            active = dict(g.p.dock_job)
+            self.assertEqual(g.p.job_boards[0]['used'][2],1)
+            g.p.system = 1
+            board,_,_ = g.station_job_board()
+            self.assertEqual(board['used'],[0,0,0])
+            g.p.system = 0
+        with patch.object(st.time,'time',return_value=deadline+86400*4):
+            board,_,_ = g.station_job_board()
+            self.assertEqual(board['used'],[0,0,0])
+            self.assertEqual(g.p.dock_job,active)
+            self.assertGreater(board['refresh_at'],st.time.time())
+
+    def test_workshop_questions_and_answer_positions_vary(self):
+        g = self.game
+        prompts,patterns = set(),set()
+        for seed in range(20):
+            g.p.dock_job = dict(kind=2,step=0,seed=str(seed))
+            sequence = []
+            for step in range(5):
+                g.p.dock_job['step'] = step
+                g.job_question()
+                prompts.add(g.p.dock_job['prompt'])
+                sequence.append(g.p.dock_job['answer'])
+            patterns.add(tuple(sequence))
+        self.assertGreaterEqual(len(prompts),25)
+        self.assertGreater(len(patterns),10)
+
     def test_market_spread_and_stock(self):
         p = self.game.p
         cash, stock = p.credits, p.stock[0][0]

@@ -1,6 +1,6 @@
 # Star Trader
 
-An original Elite-inspired Python space game for **Omarchy**. Trade, mine, fight robot pirates, smuggle contraband and navigate a small wireframe universe. Current version: **0.2.13**.
+An original Elite-inspired Python space game for **Omarchy**. Trade, mine, fight robot pirates, smuggle contraband and navigate a small wireframe universe. Current version: **0.2.14**.
 
 The current game is offline single-player. Self-hosted multiplayer is a future project; see [MULTIPLAYER.md](MULTIPLAYER.md). The next offline expansion is outlined in [ROADMAP.md](ROADMAP.md).
 
@@ -223,3 +223,13 @@ station or asteroid. Shooting a pirate in front of a station does not hit
 the station too; stray shots that actually strike its hull remain hostile acts.
 Incoming pirate/police fire shows a coloured beam and firing flash, or an
 incoming-fire direction marker when the attacker is behind your view.
+
+Station jobs now have daily limits at each station: 2-3 cargo shifts,
+1-2 inventory shifts and one workshop shift. Boards refresh every 24 real
+hours from first access, including time spent offline; unused shifts do not
+accumulate. The board shows remaining shifts and the refresh countdown.
+Accepting reserves a shift immediately; limits persist after reloading.
+An unfinished shift can still be completed after the board refreshes.
+Workshop shifts draw five questions from a pool of 30; answer positions are
+shuffled. Cargo labels and inventory counts vary too. Existing active shifts
+are preserved when updating.

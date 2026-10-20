@@ -18,7 +18,7 @@ import tempfile
 import fcntl
 import textwrap
 
-VERSION = '0.2.13'
+VERSION = '0.2.14'
 DOCK_ROLL_TOLERANCE = math.radians(14)
 CRUISE_SECONDS_PER_LY = 45
 W, H = 1100, 760
@@ -121,6 +121,7 @@ class Pilot:
         self.engineering_ready_at = 0.
         self.workshop_xp = 0
         self.dock_job = None
+        self.job_boards = [dict(refresh_at=0.,used=[0,0,0]) for _ in SYSTEMS]
         self.bank_balance = 0
         self.storage = [dict(owned=False,rented_until=0.,cargo=[0]*len(GOODS)) for _ in SYSTEMS]
 
@@ -221,6 +222,10 @@ class Pilot:
     def validate(self):
         def integer(n): return type(n) is int and n >= 0
         if not integer(self.workshop_xp): raise ValueError('workshop experience')
+        if not isinstance(self.job_boards,list) or len(self.job_boards) != len(SYSTEMS): raise ValueError('job boards')
+        for board in self.job_boards:
+            if not isinstance(board,dict) or type(board.get('refresh_at')) not in (int,float) or not math.isfinite(board['refresh_at']) or board['refresh_at'] < 0: raise ValueError('job refresh')
+            if not isinstance(board.get('used'),list) or len(board['used']) != 3 or not all(integer(n) and n <= 3 for n in board['used']): raise ValueError('job limits')
         if self.dock_job is not None:
             j = self.dock_job
             if not isinstance(j,dict) or j.get('kind') not in (0,1,2): raise ValueError('job')
@@ -1122,33 +1127,85 @@ class Game:
         self.spawn = 24
         self.message = 'Police ship destroyed. Fine increased by 150 cr.' if self.enemy_kind == 'police' else 'Hostile destroyed. Bounty: 35 credits.'
 
+    def station_job_board(self):
+        board = self.p.job_boards[self.p.system]
+        now = time.time()
+        if not board['refresh_at']:
+            board.update(refresh_at=now+86400,used=[0,0,0])
+        elif now >= board['refresh_at']:
+            periods = int((now-board['refresh_at'])//86400)+1
+            board.update(refresh_at=board['refresh_at']+periods*86400,used=[0,0,0])
+        rng = random.Random(f"{self.p.system}:{board['refresh_at']}")
+        limits = [rng.randint(2,3),rng.randint(1,2),1]
+        titles = [rng.choice(['Food loading','Medical cargo loading','Machinery loading']),
+                  rng.choice(['Supply manifest audit','Warehouse stocktake','Inbound freight audit']),
+                  rng.choice(['Power-panel service','Airlock service','Coolant-system service'])]
+        return board,limits,titles
+
     def start_job(self, kind):
         if self.mode != 'jobs' or self.p.dock_job is not None: return
-        self.p.dock_job = dict(kind=kind,step=0,correct=0,elapsed=0.,answer=0,prompt='',choices=['','',''])
+        board,limits,titles = self.station_job_board()
+        if board['used'][kind] >= limits[kind]:
+            self.message = 'No shifts left for this job. Choose another or wait for the 24-hour refresh.'
+            return
+        board['used'][kind] += 1
+        seed = f"{self.p.system}:{board['refresh_at']}:{kind}:{board['used'][kind]}"
+        self.p.dock_job = dict(seed=seed,title=titles[kind],kind=kind,step=0,correct=0,elapsed=0.,answer=0,prompt='',choices=['','',''])
         self.job_question()
         self.message = 'Shift started. No fuel, equipment or payment required.'
         self.checkpoint()
 
     def job_question(self):
         j = self.p.dock_job
+        rng = random.Random(str(j.get('seed','legacy'))+':'+str(j['step']))
         if j['kind'] == 0:
-            label = random.choice(['FOOD','MEDICINE','MACHINERY'])
-            choices = ['FOOD bay','MEDICINE bay','MACHINERY bay']
+            labels = rng.sample(['FOOD','MEDICINE','MACHINERY','TEXTILES','COMPUTERS','ORE'],3)
+            label = rng.choice(labels)
+            choices = [name+' bay' for name in labels]
             prompt,answer = 'Crate label: '+label+'. Select its loading bay.',choices.index(label+' bay')
         elif j['kind'] == 1:
-            expected = random.randint(12,40)
-            actual = expected+random.choice([-3,-2,2,3])
+            expected = rng.randint(12,60)
+            actual = expected+rng.choice([-5,-3,-2,0,2,3,5])
             prompt = f'Manifest: {expected} crates. Counted: {actual}. Report the stock.'
             choices = ['Short by '+str(abs(actual-expected)),'Matches manifest','Surplus of '+str(abs(actual-expected))]
-            answer = 0 if actual < expected else 2
+            answer = 0 if actual < expected else 2 if actual > expected else 1
         else:
             tasks = [('Before opening a live panel?', ['Isolate power','Remove cover','Touch wiring'],0),
                      ('Power isolated. Before replacing a part?', ['Restart power','Verify zero voltage','Skip checks'],1),
                      ('New part installed. Before restoring power?', ['Leave tools inside','Remove safety labels','Secure covers and clear tools'],2),
                      ('Covers secured. Next step?', ['Run diagnostic test','Open fuel valve','Discard service log'],0),
                      ('Diagnostic passed. Finish with?', ['Bypass safeguards','Record the repair','Remove covers'],1)]
-            prompt,choices,answer = tasks[j['step']]
-        j.update(prompt=prompt,choices=choices,answer=answer)
+            tasks += [('A coolant leak is reported. First action?', ['Isolate the affected circuit','Increase pressure','Ignore the alarm'],0),
+                      ('Airlock seal inspection finds a crack. What next?', ['Approve departure','Replace the seal','Disable the indicator'],1),
+                      ('A replacement part has the wrong rating. What next?', ['Force it to fit','Remove its label','Request the correct part'],2)]
+            tasks += [
+                ('Battery casing is swollen. What should you do?', ['Disconnect and quarantine it','Recharge it harder','Flatten the casing'],0),
+                ('A fuse keeps blowing. Next action?', ['Fit a larger fuse','Find the underlying fault','Bridge the contacts'],1),
+                ('A pump runs dry. What should you do first?', ['Increase pump speed','Silence the alarm','Stop the pump and inspect supply'],2),
+                ('A cable has damaged insulation. Best action?', ['Replace the damaged cable','Wrap it in paper','Leave it exposed'],0),
+                ('A bearing overheats on the test stand. Next action?', ['Ignore the temperature','Stop and inspect lubrication','Increase the load'],1),
+                ('A panel smells burnt. First action?', ['Open it while powered','Spray coolant inside','Isolate power and report it'],2),
+                ('Pressure rises beyond the safe limit. What next?', ['Stop and isolate the pressure source','Override the limit','Increase supply'],0),
+                ('A tool is missing after a repair. What next?', ['Launch immediately','Account for tools before energising','Close the service log'],1),
+                ('A sensor gives inconsistent readings. Best check?', ['Tape over the display','Declare it normal','Compare with a calibrated reference'],2),
+                ('A connector is corroded. What should you do?', ['Replace or service it to specification','Force it together','Paint over the corrosion'],0),
+                ('A seal fails its leak test. What next?', ['Approve it anyway','Replace and retest the seal','Raise operating pressure'],1),
+                ('A replacement motor spins backwards. What next?', ['Run it at full speed','Remove the guards','Isolate and check the wiring'],2),
+                ('A load exceeds the hoist rating. Best action?', ['Use correctly rated lifting gear','Lift it quickly','Disable the load sensor'],0),
+                ('A service hatch will not latch. What next?', ['Hold it with a loose tool','Repair the latch before release','Ignore it in vacuum'],1),
+                ('A diagnostic reports a ground fault. What next?', ['Bypass the ground','Clear the fault log','Isolate and trace the fault'],2),
+                ('A fire alarm sounds during service. First action?', ['Stop work and follow evacuation procedure','Finish the shift first','Mute all alarms'],0),
+                ('Two containers have unreadable labels. Best action?', ['Guess their contents','Quarantine and identify them','Mix them together'],1),
+                ('A torque setting is unknown. What next?', ['Tighten as hard as possible','Use the last tool setting','Check the service specification'],2),
+                ('A fuel coupling leaks during testing. First action?', ['Stop and isolate the fuel supply','Keep testing','Add more fuel'],0),
+                ('A safety interlock fails. What next?', ['Bypass it permanently','Replace and verify it','Hide the fault'],1),
+                ('A repaired unit passes only once in five tests. What next?', ['Mark it reliable','Skip further tests','Find the intermittent fault'],2),
+                ('A maintenance record has no part serial number. What next?', ['Record the verified serial number','Invent a number','Leave the record blank'],0)]
+            order = random.Random(str(j.get('seed','legacy'))).sample(range(len(tasks)),5)
+            prompt,choices,answer = tasks[order[j['step']]]
+        correct = choices[answer]
+        rng.shuffle(choices)
+        j.update(prompt=prompt,choices=choices,answer=choices.index(correct))
 
     def answer_job(self, choice):
         j = self.p.dock_job
@@ -1178,17 +1235,22 @@ class Game:
         d,j = self.d,self.p.dock_job
         d.text(35,85,'STATION JOBS / NO FUEL OR EQUIPMENT REQUIRED',GOLD)
         if j is None:
-            for i,line in enumerate(['Cargo handling: match crates to bays. 60 seconds / 15-25 cr.',
-                                      'Inventory checks: compare counts. 75 seconds / 20-35 cr.',
-                                      'Workshop assistant: follow repair steps. 90 seconds / 25-40 cr.']):
+            board,limits,titles = self.station_job_board()
+            hours,minutes = divmod(max(0,math.ceil((board['refresh_at']-time.time())/60)),60)
+            d.text(45,115,f'Refresh in {hours}h {minutes:02}m / availability is local to this station.')
+            for i in range(3):
+                remaining = limits[i]-board['used'][i]
+                pay = ('15-25','20-35','25-40')[i]
+                line = f'{titles[i]} / {remaining} left / {pay} cr'
+
                 d.rect(35,150+i*75,1020,60,GOLD if i == self.job_selected else (45,105,115))
                 d.text(45,170+i*75,('> ' if i == self.job_selected else '  ')+line,GOLD if i == self.job_selected else GREEN)
-            d.text(45,440,'Five tasks per shift. Mistakes reduce your bonus, never your balance.')
+            d.text(45,440,'Limited shifts per station per 24 hours. Accepting reserves one shift.')
             d.text(45,480,'Workshop shifts earn 10 XP; practice adds up to 5% repair chance.')
             d.text(45,520,'Click a job, use 1/2/3, or select with arrows and press ENTER.')
         else:
             duration = (60,75,90)[j['kind']]
-            d.text(45,155,['CARGO HANDLING','INVENTORY CHECKS','WORKSHOP ASSISTANT'][j['kind']],GOLD)
+            d.text(45,155,j.get('title',['CARGO HANDLING','INVENTORY CHECKS','WORKSHOP ASSISTANT'][j['kind']]),GOLD)
             d.text(45,205,f'Tasks {j["step"]}/5   Correct {j["correct"]}   Shift time remaining {math.ceil(duration-j["elapsed"])}s')
             if j['step'] < 5:
                 d.text(45,280,j['prompt'],GOLD)

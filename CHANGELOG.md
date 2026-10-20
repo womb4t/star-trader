@@ -1,3 +1,12 @@
+# 0.2.14 — daily station jobs and varied questions
+
+- Each station offers 2-3 cargo shifts, 1-2 inventory shifts and one workshop shift per 24-hour cycle.
+- Show remaining availability, daily job titles and refresh countdown; persist reservations across reloads.
+- Refresh uses real elapsed time, including offline time, without accumulating missed-day shifts.
+- Expand workshop to 30 questions, draw five per shift and shuffle answer positions for all job types.
+- Vary cargo categories and inventory discrepancies, including matching manifests.
+- Preserve active shifts across refreshes and upgrades.
+
 # 0.2.13 — accurate laser hits and visible incoming fire
 
 - Replace the oversized station aim area with hit detection against the drawn hull outlines.
