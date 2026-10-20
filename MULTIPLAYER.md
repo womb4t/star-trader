@@ -129,3 +129,10 @@ This is a proposal, not an enabled purchase/redemption service or a promise of a
 - Evaluate economic balance and abuse controls before connecting earned credits, uncaptained-ship losses, lending, bounties, player property and real-money payouts. Test settlement failures, account compromises, duplicate requests and recovery from interrupted transactions.
 
 Current releases remain offline games with game-only balances. They do not accept payments, redeem credits, pay sellers or collect commission. Record and implement this work as a separately reviewed future service.
+
+## Planet messages and local notices (future)
+
+- Let players leave messages at a planet or station for named individual players, with recipient identity, delivery and privacy rules.
+- Add local wanted and for-sale noticeboards, with searchable listings, expiry and moderation. Clarify whether a wanted notice is advertising, a bounty contract or an official police warrant.
+- Link listings to the future asset marketplace and bounty system; posting a notice alone must not transfer ownership, credits or criminal status.
+- Keep planet profiles as the entry point for local information and these future communication features. No messaging or player notices are enabled in this release.

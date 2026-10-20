@@ -43,3 +43,10 @@ Requested for future releases; planning only:
 - **StarTraderEx commission:** StarTraderEx takes a commission on marketplace transactions. The rate, fee basis, pricing mechanism and payout terms remain to be decided and shown before commitment.
 
 See [MULTIPLAYER.md](MULTIPLAYER.md) for the recorded exchange design questions. No real-money purchase, credit redemption, payout or asset marketplace is currently enabled.
+
+## Planet messages and local notices (future)
+
+- Let players leave messages at a planet or station for named individual players, with recipient identity, delivery and privacy rules.
+- Add local wanted and for-sale noticeboards, with searchable listings, expiry and moderation. Clarify whether a wanted notice is advertising, a bounty contract or an official police warrant.
+- Link listings to the future asset marketplace and bounty system; posting a notice alone must not transfer ownership, credits or criminal status.
+- Keep planet profiles as the entry point for local information and these future communication features. No messaging or player notices are enabled in this release.

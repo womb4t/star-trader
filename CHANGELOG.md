@@ -1,3 +1,11 @@
+# 0.2.16 — detailed planet profiles and economy header
+
+- G then I, or Planet profile, opens a full planet information screen with mouse/keyboard browsing.
+- Show demographics, coordinates, economy, government, technology, customs, docking eligibility, facilities and market quotes.
+- Keep the map summary compact so information no longer runs off-screen.
+- Show the current system economy and technology beside its name in the header.
+- Record private planet messages and wanted/for-sale noticeboards as future features.
+
 # 0.2.15 — planet-dependent smuggling margins
 
 - Improve contraband route profits with distinct narcotics and arms supply/demand factors.

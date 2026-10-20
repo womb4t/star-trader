@@ -340,6 +340,25 @@ class GameplayTests(unittest.TestCase):
             peaceful = st.price(4,7)
         self.assertGreater(st.price(4,7),peaceful)
 
+    def test_planet_profile_navigation_preserves_trip_and_safe_docked_session(self):
+        g = self.game
+        g.key(ord('g'))
+        g.target = 1
+        g.key(ord('i'))
+        self.assertEqual(g.mode,'planet_profile')
+        self.assertEqual(g.profile_system,1)
+        self.assertEqual(g.session_mode(),'market')
+        g.key(st.RIGHT)
+        self.assertEqual(g.profile_system,2)
+        self.assertEqual(g.target,1)
+        g.key(27)
+        self.assertEqual(g.mode,'map')
+        g.cursor_mode = True
+        g.map_cursor = [5.,5.]
+        g.key(ord('i'))
+        self.assertEqual(g.mode,'map')
+        self.assertIn('No planet',g.message)
+
     def test_market_spread_and_stock(self):
         p = self.game.p
         cash, stock = p.credits, p.stock[0][0]

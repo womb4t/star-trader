@@ -18,7 +18,7 @@ import tempfile
 import fcntl
 import textwrap
 
-VERSION = '0.2.15'
+VERSION = '0.2.16'
 DOCK_ROLL_TOLERANCE = math.radians(14)
 CRUISE_SECONDS_PER_LY = 45
 W, H = 1100, 760
@@ -567,7 +567,7 @@ class Game:
         for _ in range(6):
             if mode in ('market','outfit','departure','launch_warning','bank','jobs'): return 'market'
             if mode in ('flight','cruise','hyperspace','dead'): return mode
-            attr = {'help':'help_return','updates':'update_return','map':'map_return','engineering':'engineering_return'}.get(mode)
+            attr = {'help':'help_return','updates':'update_return','map':'map_return','planet_profile':'map_return','engineering':'engineering_return'}.get(mode)
             if not attr: return 'flight'
             mode = getattr(self,attr,'flight')
         return 'flight'
@@ -1268,6 +1268,10 @@ class Game:
         d.text(45,610,f'Workshop experience: {self.p.workshop_xp} XP. J / ESC returns to market.')
 
     def key(self, k):
+        if self.mode == 'planet_profile':
+            if k in (27,ord('i'),ord('g')): self.mode = 'map'
+            elif k in (LEFT,RIGHT): self.profile_system = (self.profile_system+(-1 if k == LEFT else 1))%len(SYSTEMS)
+            return
         if self.mode == 'jobs':
             if self.p.dock_job is None and k in (UP,DOWN):
                 self.job_selected = (self.job_selected+(-1 if k == UP else 1))%3
@@ -1389,7 +1393,12 @@ class Game:
             self.keys.clear()
             return
         if self.mode == 'map':
-            if k == ord('/'):
+            if k == ord('i'):
+                system = self.selected_waypoint()['system']
+                if system is None: self.message = 'No planet at these coordinates. Select a named planet for its profile.'
+                else: self.profile_system,self.mode = system,'planet_profile'
+            elif k == ord('/'):
+
                 self.map_input,self.map_text = 'search',''
             elif k == ord('c'):
                 self.map_input,self.map_text = 'coordinates',''
@@ -1719,10 +1728,9 @@ class Game:
                 f'Cruise fuel {dist*.25*p.mass_factor:.2f}',f'Cruise ETA {int(sec//60)}m {int(sec%60)}s',f'Aboard fuel {p.fuel:.2f}/7']
         if w['system'] is not None:
             i = w['system']; govt,pop,size = PROFILES[i]
-            info += [SYSTEMS[i][1],f'Technology {TECH[i]}',govt,f'Population {pop:.1f} billion',f'Diameter {size:,} km',
-                     'Exports: food / ore' if SYSTEMS[i][1] == 'Agricultural' else 'Exports: technology' if SYSTEMS[i][1] == 'Industrial' else 'Exports: mixed goods',
-                     'Customs: minimal' if govt in ('Anarchy','Feudal') else 'Customs: regulated',
-                     'Docking: allowed' if self.station_allows(i) else 'Docking: REFUSED (wanted)']
+            info += [SYSTEMS[i][1],f'Technology {TECH[i]}',govt,
+                     'I / Profile: full details',
+                     'Docking: allowed' if self.station_allows(i) else 'Docking: refused']
         else: info += ['Uninhabited coordinates','No station or services']
         for i,line in enumerate(info): d.text(720,155+i*31,line,GOLD if i==0 else GREEN)
         if self.map_input:
@@ -1734,6 +1742,34 @@ class Game:
         else:
             d.text(30,610,'Selection: '+('free coordinate cursor' if self.cursor_mode else 'planet list'))
             d.text(30,645,'Locked: '+(p.waypoint['name'] if p.waypoint else 'none'))
+
+    def draw_planet_profile(self):
+        d,i = self.d,self.profile_system
+        name,economy,_,_ = SYSTEMS[i]
+        government,population,size = PROFILES[i]
+        position = coordinates(i)
+        d.text(35,85,'PLANET PROFILE / '+name.upper(),GOLD)
+        facts = [f'Coordinates: {position[0]:.2f}, {position[1]:.2f}',
+                 'Economy: '+economy,'Government: '+government,
+                 f'Population: {population:.1f} billion',f'Diameter: {size:,} km',
+                 f'Technology level: {TECH[i]}',
+                 'Customs: minimal' if government in ('Anarchy','Feudal') else 'Customs: regulated; contraband can be seized',
+                 'Docking: allowed' if self.station_allows(i) else 'Docking: refused (hostile or wanted)']
+        for row,line in enumerate(facts): d.text(35,140+row*31,line)
+        d.text(35,410,'STATION FACILITIES',GOLD)
+        for row,line in enumerate(['Fuel, hull service and equipment fitting',
+                                   'Bank, cargo-bay rental and purchase',
+                                   'Daily cargo, inventory and workshop jobs',
+                                   'Engineering training and fine payments']): d.text(35,450+row*30,line)
+        d.text(610,140,'MARKET / credits per tonne',GOLD)
+        d.text(610,178,'COMMODITY              BUY  SELL')
+        for row,good in enumerate(GOODS):
+            d.text(610,215+row*32,f'{good:<20} {quote(i,row):>4} {quote(i,row,False):>5}',GOLD if row in ILLEGAL else GREEN)
+        demand = {'Industrial':'Cheaper manufactured goods / contraband',
+                  'Agricultural':'Food / ore exports; narcotics demand',
+                  'Frontier':'Strong arms demand; mixed exports'}[economy]
+        for row,line in enumerate(textwrap.wrap(demand,42)): d.text(610,500+row*27,line)
+        d.text(35,595,'I / ESC: map     LEFT / RIGHT: browse planets')
 
     def camera_vector(self, obj):
         x,y,z = obj[:3]
@@ -2229,7 +2265,7 @@ class Game:
     def draw_mouse_ui(self):
         self.buttons = []
         d = self.d
-        modal = self.mode in ('distress','departure','launch_warning','engineering','hyperspace','bank','jobs')
+        modal = self.mode in ('distress','departure','launch_warning','engineering','hyperspace','bank','jobs','planet_profile')
         if self.mode == 'flight':
             self.mouse_button(310,18,92,'Actions',action=lambda:setattr(self,'mouse_controls',not self.mouse_controls))
         if self.mode in ('market','outfit','bank'):
@@ -2272,7 +2308,11 @@ class Game:
                 self.mouse_button(720+(i%2)*145,270+(i//2)*38,135,'All' if amount is None else str(amount)+' cr',action=lambda amount=amount:setattr(self,'bank_amount',amount))
             for i,(label,key) in enumerate([('Deposit',ord('d')),('Withdraw',ord('w')),('Rent bay',ord('r')),('Buy bay',ord('b'))]): self.mouse_button(35+i*255,638,240,label,key)
             for i,(label,key) in enumerate([('Store 1t',ord('s')),('Retrieve 1t',ord('t')),('Return',ord('9'))]): self.mouse_button(35+i*340,674,320,label,key)
+        elif self.mode == 'planet_profile':
+            for i,(label,key) in enumerate([('Previous',LEFT),('Next',RIGHT),('Return to map',ord('i'))]):
+                self.mouse_button(35+i*345,674,330,label,key)
         elif self.mode == 'map':
+            if not self.map_input: self.mouse_button(720,590,300,'Planet profile I',ord('i'))
             labels = [('Search',ord('/'),False),('Coords',ord('c'),False),('Lock',13,False),('Hold Jump',ord('h'),True),('Cruise',ord('t'),False),('Return',ord('g'),False)]
             if self.map_input:
                 labels = [('Confirm',13,False),('Erase',8,False),('Cancel',27,False)]
@@ -2386,7 +2426,9 @@ class Game:
         d.clear(d.r)
         d.text(28,20,'S T A R   T R A D E R',GREEN)
         location = 'In transit' if self.mode == 'hyperspace' else 'Deep space' if p.deep_space or self.mode == 'cruise' else SYSTEMS[p.system][0]
-        d.text(640,20,f'{location}  CR {p.credits:.0f}  KILLS {p.kills}')
+        economy = '' if p.deep_space or self.mode in ('cruise','hyperspace') else f' / {SYSTEMS[p.system][1]} / Tech {TECH[p.system]}'
+        d.text(640,5,location+economy,GOLD)
+        d.text(640,29,f'CR {p.credits:.0f}  KILLS {p.kills}')
         d.line(25,52,W-25,52)
         if self.mode == 'jobs':
             self.draw_jobs()
@@ -2444,6 +2486,8 @@ class Game:
             for i,t in enumerate(['COMMANDER STATUS',f'Cargo {sum(p.cargo)}/{p.capacity} t',f'Fuel  {p.fuel:.2f}/7',f'Hull  {p.hull:.0f}%',f'Refill {p.fuel_cost()} cr',f'Service {p.service_cost()} cr',f'Mines {p.mines}/4',f'Fine {p.fine} cr',f'Wear {p.maintenance:.0f}%',f'Eng. {p.engineering_level}/5']): d.text(790,135+i*40,t)
             d.text(35,550,'F fuel   R repair   P pay fines   U outfitting/market   L launch')
             d.text(35,590,'J paid station jobs   G chart   1 manual   ESC quit')
+        elif self.mode == 'planet_profile':
+            self.draw_planet_profile()
         elif self.mode == 'map':
             self.draw_map()
         elif self.mode == 'cruise':

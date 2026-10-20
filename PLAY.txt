@@ -1,4 +1,4 @@
-STAR TRADER 0.2.15 — original space trading game for Omarchy
+STAR TRADER 0.2.16 — original space trading game for Omarchy
 
 Install: bash install.sh
 Play: open your app launcher and search for Star Trader.
@@ -111,3 +111,10 @@ Contraband rewards depend on the planet: industrial worlds are cheaper sources,
 agricultural worlds pay more for narcotics, and frontier worlds have strong arms
 demand. Anarchy/feudal governments add an arms premium; corporate states add
 some narcotics demand. Normal dealer spreads and customs risks still apply.
+
+Detailed planet profiles: G opens the map; select a named planet and press I
+or click Planet profile. View coordinates, government, population, size, tech,
+customs, docking access, station services and all commodity buy/sell prices.
+Left/Right or Previous/Next browses profiles without changing your waypoint.
+I or Escape returns to the map. The main header shows your current system
+name, economy and technology level, with credits/kills below.

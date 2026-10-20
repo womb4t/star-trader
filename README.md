@@ -1,6 +1,6 @@
 # Star Trader
 
-An original Elite-inspired Python space game for **Omarchy**. Trade, mine, fight robot pirates, smuggle contraband and navigate a small wireframe universe. Current version: **0.2.15**.
+An original Elite-inspired Python space game for **Omarchy**. Trade, mine, fight robot pirates, smuggle contraband and navigate a small wireframe universe. Current version: **0.2.16**.
 
 The current game is offline single-player. Self-hosted multiplayer is a future project; see [MULTIPLAYER.md](MULTIPLAYER.md). The next offline expansion is outlined in [ROADMAP.md](ROADMAP.md).
 
@@ -238,3 +238,10 @@ Contraband rewards depend on the planet: industrial worlds are cheaper sources,
 agricultural worlds pay more for narcotics, and frontier worlds have strong arms
 demand. Anarchy/feudal governments add an arms premium; corporate states add
 some narcotics demand. Normal dealer spreads and customs risks still apply.
+
+Detailed planet profiles: G opens the map; select a named planet and press I
+or click Planet profile. View coordinates, government, population, size, tech,
+customs, docking access, station services and all commodity buy/sell prices.
+Left/Right or Previous/Next browses profiles without changing your waypoint.
+I or Escape returns to the map. The main header shows your current system
+name, economy and technology level, with credits/kills below.
