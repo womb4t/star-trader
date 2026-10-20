@@ -1,4 +1,4 @@
-# Private progress server (v0.3.1)
+# Private progress server (v0.4.0)
 
 The iMac stores separate progress for up to eight testers. All eight star systems remain available. The game still runs on each laptop, with robot ships and offline flight. This release synchronises saves; it does **not** make players visible to one another or share combat, markets or credits. The client is trusted to supply its own progress, so this is not yet a competitive multiplayer economy.
 
@@ -53,7 +53,7 @@ python3 /home/kenton/.local/share/star-trader/star_trader.py \
   --token-file "$star_token_path" --allow-lan --import-local-save
 ```
 
-Use the same launch command on later visits; `--import-local-save` does not replace an existing server save. The ordinary app launcher continues to open your separate offline game. Server saves are cached under `~/.local/share/star-trader/servers/<account-id>/save.json`. The Menu shows connection/save status. Saves upload in the background at most every five seconds and once on exit. Your local checkpoint is written first.
+Use the same launch command on later visits; `--import-local-save` does not replace an existing server save. The single Star Trader app launcher offers Online play and Offline play. Configure the server address and token-file path with Connection settings; existing Star Trader Online settings are migrated automatically. Server saves are cached under `~/.local/share/star-trader/servers/<account-id>/save.json`. The Menu shows connection/save status. Saves upload in the background at most every five seconds and once on exit. Your local checkpoint is written first.
 
 If the iMac is temporarily unavailable, append `--offline-if-unavailable` to the server launch command. This works only with an existing local server save and its revision metadata. Reconnection uploads your unsynced progress unless another computer has changed the server copy. This explicitly chosen offline mode keeps the same account's local slot; it does not mix in your ordinary offline pilot.
 

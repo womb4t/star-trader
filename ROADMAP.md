@@ -1,6 +1,6 @@
 # Next offline expansion
 
-These are planned features, not claims about the current release. The current release is 0.3.1; stabilise existing gameplay and private save synchronisation before expanding the game further. Working names below give the next systems their own identity.
+These are planned features, not claims about the current release. The current release is 0.4.0; stabilise existing gameplay and private save synchronisation before expanding the game further. Working names below give the next systems their own identity.
 
 1. **Seeded star atlas:** deterministic sectors, hundreds of generated systems, persistent coordinates, searchable descriptions and distinct local economies. Expand beyond the current eight planets; consider multiple sectors linked by a rare single-use “Fold key”. Keep old saves and routes migratable.
 2. **Orbit Wardens:** more complete police and legal rules, security levels, self-defence and reputation. Expand current customs/fines into justified pursuits and bounty work. A clean trader should not be treated as a criminal for defending against pirates.

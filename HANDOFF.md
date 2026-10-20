@@ -6,8 +6,10 @@ Read SERVER.md before setup. v0.3.0 adds a headless Python/SQLite save server an
 
 On this iMac, inspect Python (3.9+) and Git, clone/update this repository under ~/star-trader, create the Kenton account if it does not already exist, and start the server for the trusted home LAN. Keep credentials outside the repository. Do not print the token into chat or upload it. Identify the real LAN address and help transfer the token file privately to the laptop. Do not open router ports. Ask before making unrelated macOS system changes. Do not run the Omarchy installer on macOS; the server needs no game graphics.
 
-The laptop source checkout is /home/kenton/Documents/Codex/2026-10-16/coul/outputs/star-trader. Installed game: /home/kenton/.local/share/star-trader/star_trader.py. Always give Kenton full Bash commands usable from a fresh terminal. The standard game launcher remains offline; server play uses explicit --server, --token-file and --allow-lan options. Preserve existing saves. SERVER.md gives import, offline fallback, conflict recovery and backup instructions.
+The laptop source checkout is /home/kenton/Documents/Codex/2026-10-16/coul/outputs/star-trader. Installed game: /home/kenton/.local/share/star-trader/star_trader.py. Always give Kenton full Bash commands usable from a fresh terminal. The single Star Trader launcher now offers Online play, Offline play and Connection settings. Server CLI flags remain available. Preserve existing saves. SERVER.md gives import, offline fallback, conflict recovery and backup instructions.
 
 This file is project context for another Codex chat, not a live transfer of the original session. Follow Kenton's latest instructions in the new chat.
 
-Current release: v0.3.1. Escape is a global emergency save-and-close on every screen; mouse Back/Return/Cancel navigates separately. Both the game and save server support --version; /health reports the server version. Update both checkouts from main before testing.
+Current release: v0.4.0. Escape is a global emergency save-and-close on every screen; mouse Back/Return/Cancel navigates separately. Both the game and save server support --version; /health reports the server version. Update both checkouts from main before testing.
+
+The splash artwork and startup.py are installed with the game; the headless server does not need them. The installer migrates old Star Trader Online settings and removes its duplicate desktop entry.

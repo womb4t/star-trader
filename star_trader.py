@@ -21,7 +21,7 @@ import tempfile
 import fcntl
 import textwrap
 
-VERSION = '0.3.1'
+VERSION = '0.4.0'
 HOSTILITY_COOLDOWN_SECONDS = 30*60
 STATION_POLICE_CAPACITY = 6
 DOCK_ROLL_TOLERANCE = math.radians(14)
@@ -3345,6 +3345,7 @@ def main():
         self_test()
         return
     parser = argparse.ArgumentParser(description='Star Trader — offline game with optional private progress server')
+    parser.add_argument('--offline',action='store_true',help='Start offline directly without the mode chooser')
     parser.add_argument('--server')
     parser.add_argument('--token-file',type=Path)
     parser.add_argument('--allow-lan',action='store_true')
@@ -3359,29 +3360,62 @@ def main():
     game = None
     try:
         offline_save = SAVE
-        if options.server:
-            if not options.token_file: raise ValueError('--server requires --token-file')
-            if '--grant-test-credits' in sys.argv or '--smoke-test' in sys.argv: raise ValueError('Testing CLI tools require offline mode')
-            from save_sync import RemoteSave
-            remote = RemoteSave(options.server,options.token_file,SAVE.parent,options.allow_lan)
-            SAVE = remote.save_path
-        elif options.token_file or options.import_local_save or options.restore_server_save:
+        if options.offline and options.server: raise ValueError('Choose --offline or --server')
+        if options.server and not options.token_file: raise ValueError('--server requires --token-file')
+        if not options.server and (options.token_file or options.import_local_save or options.restore_server_save):
             raise ValueError('Server options require --server')
+        testing = '--smoke-test' in sys.argv or '--grant-test-credits' in sys.argv
+        if testing and options.server: raise ValueError('Testing CLI tools require offline mode')
         if '--smoke-test' in sys.argv:
             scratch = tempfile.TemporaryDirectory(prefix='star-trader-smoke-')
             SAVE = Path(scratch.name)/'save.json'
-        SAVE.parent.mkdir(parents=True,exist_ok=True)
-        instance_file = SAVE.with_suffix('.lock').open('a')
-        try: fcntl.flock(instance_file,fcntl.LOCK_EX|fcntl.LOCK_NB)
-        except OSError: raise RuntimeError('Star Trader is already running for this save. Close it before starting another copy.')
-        if remote:
-            remote.prepare(offline_save if options.import_local_save else None,options.restore_server_save,options.offline_if_unavailable)
+        if not testing and not options.offline:
+            from startup import StartScreen,load_connection,migrate_online_launcher
+            migrate_online_launcher(Path.home()/'.local/bin/star-trader-online')
+            config = load_connection()
+            if options.server:
+                config.update(server=options.server,token_file=str(options.token_file),
+                              allow_lan=options.allow_lan,import_local_save=options.import_local_save)
+            display = Display()
+            screen = StartScreen(display,config)
+            if options.server: screen.selected = 0
+            try:
+                while True:
+                    choice = screen.choose()
+                    if choice == 'quit': return
+                    SAVE = offline_save
+                    remote = None
+                    try:
+                        if choice == 'online':
+                            from save_sync import RemoteSave
+                            config = screen.config
+                            remote = RemoteSave(config['server'],config['token_file'],offline_save.parent,config['allow_lan'])
+                            SAVE = remote.save_path
+                            screen.error = 'Connecting to your progress server...'
+                            screen.draw()
+                        SAVE.parent.mkdir(parents=True,exist_ok=True)
+                        instance_file = SAVE.with_suffix('.lock').open('a')
+                        fcntl.flock(instance_file,fcntl.LOCK_EX|fcntl.LOCK_NB)
+                        if remote:
+                            remote.prepare(offline_save if config['import_local_save'] else None,
+                                           options.restore_server_save,options.offline_if_unavailable)
+                        break
+                    except (OSError,RuntimeError,ValueError) as error:
+                        if instance_file: instance_file.close(); instance_file = None
+                        remote = None
+                        screen.error = str(error) if not isinstance(error,OSError) else 'Could not connect or open save. Check settings, retry, or choose Offline play.'
+            finally: screen.close()
+        else:
+            SAVE.parent.mkdir(parents=True,exist_ok=True)
+            instance_file = SAVE.with_suffix('.lock').open('a')
+            try: fcntl.flock(instance_file,fcntl.LOCK_EX|fcntl.LOCK_NB)
+            except OSError: raise RuntimeError('Star Trader is already running for this save. Close it before starting another copy.')
         if '--grant-test-credits' in sys.argv:
             index = sys.argv.index('--grant-test-credits')
             if index+1 >= len(sys.argv): raise ValueError('Specify the testing credit amount.')
             grant_testing_credits(int(sys.argv[index+1]))
             return
-        display = Display()
+        if display is None: display = Display()
         game = Game(display)
         if remote:
             game.remote_save = remote

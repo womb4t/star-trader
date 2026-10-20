@@ -1,6 +1,6 @@
 # Star Trader
 
-An original Elite-inspired Python space game for **Omarchy**. Trade, mine, fight robot pirates, smuggle contraband and navigate a small wireframe universe. Current version: **0.3.1**.
+An original Elite-inspired Python space game for **Omarchy**. Trade, mine, fight robot pirates, smuggle contraband and navigate a small wireframe universe. Current version: **0.4.0**.
 
 Play offline, or use the optional **private progress server** to save separate tester accounts on an iMac or another Python host: [SERVER.md](SERVER.md). Shared flight and combat are a future project; see [MULTIPLAYER.md](MULTIPLAYER.md). The next offline expansion is outlined in [ROADMAP.md](ROADMAP.md).
 
@@ -12,7 +12,7 @@ cd star-trader
 bash install.sh
 ```
 
-Open your application launcher and search for **Star Trader**.
+Open your application launcher and search for **Star Trader**. The splash screen offers **Online play**, **Offline play**, and **Connection settings**. Existing Star Trader Online launchers are migrated into this single entry.
 
 The installer uses `omarchy pkg add` only for missing dependencies: Python, SDL2 compatibility libraries, SDL2_ttf and a font. A dependency installation may ask for your password in the terminal. The game installs for your user without sudo. No pip packages are required.
 
@@ -318,3 +318,11 @@ Station hostility cools after 30 minutes away from the station (more than 10,000
 ## Emergency close
 
 Escape always saves and closes the game immediately, from every screen, including text entry and hyperspace. Click Back, Return or Cancel to navigate without quitting. In-flight logout still preserves your position and unattended recovery rules.
+
+## One launcher, online or offline
+
+The opening screen uses the supplied Star Trader splash artwork, fitted without cropping. Click Online play or Offline play, or use arrows and Enter. Online means private-server progress saving; shared flight and combat remain future work. Offline and server-account saves remain separate. Escape closes the opening screen without changing either save.
+
+Connection settings let you edit the server address, private token **file path**, trusted-LAN HTTP permission and first-account import option. Tab switches fields; Ctrl+V pastes; Enter saves. Settings live in `~/.config/star-trader/connection.json` (or XDG_CONFIG_HOME). The token itself remains in its private file. The installer migrates the old `~/.local/bin/star-trader-online` settings as data and removes its duplicate application menu entry. A failed connection leaves the chooser available so you can retry or play offline. `--offline` skips the chooser for direct offline launch; server CLI flags still prefill an online connection.
+
+The installer includes the artwork as a compressed BMP so no new runtime image libraries are needed. Source PNG supplied by the project owner: `assets/star-trader-splash.png`.

@@ -13,10 +13,17 @@ def install():
     data = Path(os.environ.get('XDG_DATA_HOME') or Path.home() / '.local/share').expanduser().resolve()
     target = data / 'star-trader'
     target.mkdir(parents=True, exist_ok=True)
-    for name in ('star_trader.py', 'save_sync.py', 'update.py', 'LICENSE', 'README.md'):
+    for name in ('star_trader.py', 'startup.py', 'save_sync.py', 'update.py', 'LICENSE', 'README.md'):
         destination = target / name
         if (source / name).resolve() != destination.resolve():
             shutil.copy2(source / name, destination)
+    assets = target/'assets'
+    assets.mkdir(exist_ok=True)
+    splash = source/'assets/star-trader-splash.bmp.gz'
+    if splash.resolve() != (assets/splash.name).resolve():
+        shutil.copy2(splash,assets/splash.name)
+    from startup import migrate_online_launcher
+    migrate_online_launcher(Path.home()/'.local/bin/star-trader-online')
     from star_trader import VERSION
     (target/'install-info.json').write_text(json.dumps(dict(source=str(source),version=VERSION)),encoding='utf-8')
     apps = data / 'applications'
@@ -30,6 +37,9 @@ def install():
                         f'Exec={quote(sys.executable)} {quote(target / "star_trader.py")}\n'
                         'Icon=applications-games\nTerminal=false\nCategories=Game;Simulation;\n'
                         'StartupWMClass=star-trader\n', encoding='utf-8')
+    old_online = apps/'star-trader-online.desktop'
+    if old_online.exists() and 'star-trader-online' in old_online.read_text():
+        old_online.unlink()
     refresh = shutil.which('update-desktop-database')
     if refresh:
         subprocess.run([refresh, str(apps)], check=False)
