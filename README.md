@@ -1,6 +1,6 @@
 # Star Trader
 
-An original Elite-inspired Python space game for **Omarchy**. Trade, mine, fight robot pirates, smuggle contraband and navigate a small wireframe universe. Current version: **0.2.24**.
+An original Elite-inspired Python space game for **Omarchy**. Trade, mine, fight robot pirates, smuggle contraband and navigate a small wireframe universe. Current version: **0.2.25**.
 
 The current game is offline single-player. Self-hosted multiplayer is a future project; see [MULTIPLAYER.md](MULTIPLAYER.md). The next offline expansion is outlined in [ROADMAP.md](ROADMAP.md).
 
@@ -302,3 +302,8 @@ Nav is the name for G; its map, search and planet profiles remain.
 Top navigation order: Money, Nav, VMS, Menu. Bottom action bars use compact
 buttons with separate keyboard badges, consistent spacing and right-aligned
 Return/Cancel controls. Crowded screens wrap actions into two rows.
+
+Code entry supports Ctrl+V paste, Ctrl+C copy, Ctrl+X cut and Ctrl+A select
+all, plus Paste/Copy/Select all buttons. Notes and feedback accept these
+shortcuts too. Heat now has its own flight instrument with shield protection
+and the 90% danger marker; VMS fuel is shown separately.

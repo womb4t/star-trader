@@ -99,6 +99,31 @@ class MouseIntegrationTests(unittest.TestCase):
                         mouse(g,300,30)
                         self.assertEqual(g.mode,'map')
                         self.assertEqual(g.map_return,'market')
+                        g.mode = 'money'
+                        g.money_return = 'market'
+                        g.key(ord('3'))
+                        d.set_clipboard_text('STAR-TEST-100K')
+                        self.assertEqual(d.clipboard_text(),'STAR-TEST-100K')
+                        raw = bytearray(56)
+                        struct.pack_into('=I',raw,0,768)
+                        struct.pack_into('=i',raw,20,ord('v'))
+                        struct.pack_into('=H',raw,24,0x0040)
+                        pending = [bytes(raw)]
+                        with patch.object(d,'poll',side_effect=text_poll):
+                            for kind,value in d.events():
+                                if kind == 'clipboard': g.handle_clipboard(value)
+                        self.assertEqual(g.credit_code_text,'STAR-TEST-100K')
+                        g.draw()
+                        mouse(g,280,330)
+                        self.assertEqual(d.clipboard_text(),'STAR-TEST-100K')
+                        g.credit_code_text = 'wrong code'
+                        g.handle_clipboard('select_all')
+                        g.handle_clipboard('paste')
+                        self.assertEqual(g.credit_code_text,'STAR-TEST-100K')
+                        before = g.p.credits
+                        g.key(13)
+                        self.assertEqual(g.p.credits,before+100000)
+
 
 
             finally:

@@ -20,7 +20,7 @@ import tempfile
 import fcntl
 import textwrap
 
-VERSION = '0.2.24'
+VERSION = '0.2.25'
 STATION_POLICE_CAPACITY = 6
 DOCK_ROLL_TOLERANCE = math.radians(14)
 CRUISE_SECONDS_PER_LY = 45
@@ -381,6 +381,16 @@ class Display:
         rect = (C.c_int * 4)(int(x),int(y),w,h)
         self.copy(self.r,tex,None,rect)
 
+    def clipboard_text(self):
+        pointer = bind(self.sdl,'SDL_GetClipboardText',C.c_void_p,[])()
+        if not pointer: return ''
+        try: return C.string_at(pointer).decode('utf-8',errors='replace')
+        finally: bind(self.sdl,'SDL_free',None,[C.c_void_p])(pointer)
+
+    def set_clipboard_text(self, text):
+        result = bind(self.sdl,'SDL_SetClipboardText',C.c_int,[C.c_char_p])(text.encode('utf-8'))
+        if result < 0: raise RuntimeError('Clipboard is unavailable.')
+
     def events(self):
         event = (C.c_uint64 * 7)()
         while self.poll(C.byref(event)):
@@ -400,7 +410,10 @@ class Display:
                 yield 'text',raw[12:44].split(b'\0',1)[0].decode('utf-8',errors='replace')
             elif typ in (768,769):
                 key = int.from_bytes(raw[20:24], sys.byteorder, signed=True)
-                if typ == 769 or raw[13] == 0:
+                modifiers = int.from_bytes(raw[24:26],sys.byteorder)
+                if typ == 768 and raw[13] == 0 and modifiers & 0x00c0 and key in (ord('a'),ord('c'),ord('v'),ord('x')):
+                    yield 'clipboard',{ord('a'):'select_all',ord('c'):'copy',ord('v'):'paste',ord('x'):'cut'}[key]
+                elif typ == 769 or raw[13] == 0:
                     yield 'down' if typ == 768 else 'up', key
 
 
@@ -523,6 +536,8 @@ class Game:
         self.outfit_return = 'market'
         self.menu_selected = 0
         self.notes_scroll = 0
+        self.text_selection_all = False
+        self.text_selection_mode = None
         self.credit_code_text = ""
         self.exchange_amount = 50
         self.feedback_text = ''
@@ -1386,14 +1401,42 @@ class Game:
             d.text(45,425+i*45,f'{amount} '+('Crymto -> ' if launder else 'credits -> ')+str(net)+(' credits' if launder else ' Crymto'))
         d.text(45,550,'Select an amount, then choose a conversion. ESC returns to market.')
 
+    def active_text_field(self):
+        if self.mode == 'redeem': return self,'credit_code_text',80
+        if self.mode == 'notes': return self.p,'notes',4000
+        if self.mode == 'feedback': return self,'feedback_text',1500
+        return None
+
     def text_input(self, text):
-        if self.mode == 'notes':
-            self.notes_scroll = 0
-            self.p.notes = (self.p.notes+''.join(c for c in text if c.isprintable()))[:4000]
-        elif self.mode == 'redeem':
-            self.credit_code_text = (self.credit_code_text+''.join(c for c in text if c.isprintable()))[:80]
-        elif self.mode == 'feedback':
-            self.feedback_text = (self.feedback_text+''.join(c for c in text if c.isprintable()))[:1500]
+        field = self.active_text_field()
+        if field is None: return
+        owner,name,limit = field
+        before = '' if self.text_selection_all and self.text_selection_mode == self.mode else getattr(owner,name)
+        self.text_selection_all = False
+        text = text.replace('\r\n','\n').replace('\r','\n')
+        text = ''.join(c for c in text if c.isprintable() or c == '\n' and self.mode != 'redeem')
+        setattr(owner,name,(before+text)[:limit])
+        if self.mode == 'notes': self.notes_scroll = 0
+
+    def handle_clipboard(self, action):
+        field = self.active_text_field()
+        if field is None: return
+        owner,name,_ = field
+        if action == 'select_all':
+            self.text_selection_all = True
+            self.text_selection_mode = self.mode
+            return
+        try:
+            if action == 'paste':
+                text = self.d.clipboard_text()
+                if not text: self.message = 'Clipboard has no text.'; return
+                self.text_input(text.strip() if self.mode == 'redeem' else text)
+            elif action in ('copy','cut'):
+                self.d.set_clipboard_text(getattr(owner,name))
+                if action == 'cut': setattr(owner,name,''); self.text_selection_all = False
+                self.message = 'Text copied to clipboard.'
+        except (OSError,RuntimeError) as error:
+            self.message = 'Clipboard unavailable: '+str(error)
 
     def feedback_body(self):
         return (self.feedback_text.strip()+'\n\n---\n'+f'Star Trader: {VERSION}\n'
@@ -1520,7 +1563,7 @@ class Game:
         d,p = self.d,self.p
         d.text(35,85,'VMS / VESSEL MANAGEMENT SYSTEM',GOLD)
         for i,line in enumerate([f'Hull {p.hull:.0f}% / Shields {self.shield:.0f}%',
-                                 f'Fuel {p.fuel:.2f}/7 / Heat {self.heat:.0f}%',
+                                 f'Fuel {p.fuel:.2f}/7',
                                  f'Cargo {sum(p.cargo)}/{p.capacity} tonnes / Mass {p.mass_factor:.2f}',
                                  f'Maintenance wear {p.maintenance:.0f}% / Flights since service {p.flights_since_service}',
                                  f'Front laser: {p.laser} / Rear: '+('pulse' if 'rear' in p.equipment else 'not fitted'),
@@ -1575,6 +1618,11 @@ class Game:
             d.text(x+10,y+42,description,(135,175,185))
 
     def key(self, k):
+        if k == 8 and self.text_selection_all and self.text_selection_mode == self.mode and self.active_text_field():
+            owner,name,_ = self.active_text_field()
+            setattr(owner,name,'')
+            self.text_selection_all = False
+            return
         if self.mode == 'menu':
             if k in (27,96): self.mode = self.menu_return
             elif k in (UP,DOWN,LEFT,RIGHT):
@@ -1592,7 +1640,7 @@ class Game:
             elif k == DOWN: self.notes_scroll = max(0,self.notes_scroll-5)
             elif k == 27: self.mode = self.notes_return; self.checkpoint()
             elif k == 8: self.p.notes = self.p.notes[:-1]
-            elif k == 13: self.p.notes = (self.p.notes+'\n')[:4000]
+            elif k == 13: self.text_input('\n')
             return
         if self.mode == 'redeem':
             if k == 27: self.mode = 'money'
@@ -1669,7 +1717,7 @@ class Game:
             if k in (27,ord('0')):
                 if k == 27: self.mode = self.feedback_return
             elif k == 8: self.feedback_text = self.feedback_text[:-1]
-            elif k == 13: self.feedback_text = (self.feedback_text+'\n')[:1500]
+            elif k == 13: self.text_input('\n')
             return
         if k == ord('0') and not (self.mode == 'map' and self.map_input):
             self.feedback_return,self.mode = self.mode,'feedback'
@@ -2298,6 +2346,17 @@ class Game:
         text = label+(' / BEHIND: 4' if vz <= 0 else '')
         d.text(max(35,min(W-350,x-140)),max(102,min(515,y+14)),text[:34],color)
 
+    def draw_heat_instrument(self):
+        d = self.d
+        color = RED if self.heat >= 90 else GOLD if self.heat >= 70 else GREEN
+        d.fill(840,430,230,82,(5,16,27))
+        d.rect(840,430,230,82,(45,105,115))
+        d.text(850,435,f'HEAT {self.heat:.0f}% / LIMIT 90',color)
+        d.text(850,458,f'SHIELDS {self.shield:.0f}%',color)
+        d.rect(850,490,210,8,(45,105,115))
+        d.fill(851,491,int(min(120,self.heat)/120*208),6,color)
+        d.line(850+210*90/120,487,850+210*90/120,501,GOLD)
+
     def draw_scanner(self):
         d = self.d
         d.fill(840,80,230,165,(5,16,27))
@@ -2785,6 +2844,9 @@ class Game:
         elif self.mode == 'money':
             self.mouse_button(35,674,1000,'Return',ord('9'))
         elif self.mode == 'redeem':
+            self.mouse_button(35,315,160,'Paste',action=lambda:self.handle_clipboard('paste'))
+            self.mouse_button(210,315,160,'Copy',action=lambda:self.handle_clipboard('copy'))
+            self.mouse_button(385,315,160,'Select all',action=lambda:self.handle_clipboard('select_all'))
             self.mouse_button(35,674,490,'Redeem code',action=self.redeem_credit_code)
             self.mouse_button(550,674,490,'Return to Money',action=lambda:setattr(self,'mode','money'))
         elif self.mode == 'notes':
@@ -2964,8 +3026,9 @@ class Game:
             self.draw_notepad()
         elif self.mode == 'redeem':
             d.text(35,85,'MONEY / REDEEM CREDIT CODE',GOLD)
-            d.text(45,180,'Enter a code and press ENTER or click Redeem.')
+            d.text(45,180,'Type a code or paste with CTRL+V, then press ENTER to redeem.')
             d.rect(35,245,1030,60,GREEN)
+            if self.text_selection_all and self.text_selection_mode == 'redeem': d.fill(40,250,max(20,len(self.credit_code_text)*11+20),42,(20,65,70))
             d.text(45,265,self.credit_code_text+'_',GOLD)
             d.text(45,360,'Codes can only be redeemed once by this pilot.')
             d.text(45,415,'ESC returns to Money.')
@@ -3113,6 +3176,7 @@ class Game:
         if self.ship_target is not self.enemy and (not self.disabled_ship or self.ship_target is not self.disabled_ship['object']): self.ship_target = None
         if self.ship_target is not None: self.draw_marker(self.ship_target,'DISABLED SHIP' if self.disabled_ship and self.ship_target is self.disabled_ship['object'] else 'TARGET '+self.enemy_kind.upper(),(255,100,180))
         self.draw_scanner()
+        self.draw_heat_instrument()
         d.text(35,73,'REAR VIEW' if self.rear_view else 'FORWARD VIEW',GOLD)
         if self.flash: d.rect(26,65,W-52,490,RED)
         obj,label = self.active_navigation()
@@ -3126,7 +3190,7 @@ class Game:
             d.text(35,563,f'BEACON {label}: X {x*c+y*s:+.0f} Y {-x*s+y*c:+.0f} Z {z:+.0f} RANGE {math.sqrt(x*x+y*y+z*z):.0f}m')
         if self.heat >= 70:
             d.text(35,520,'THERMAL LIMIT 90% / SHIELDS DRAINING - TURN AWAY',RED if self.heat >= 90 else GOLD)
-        d.text(35,594,f'SPEED {self.speed:.0f}  FUEL {p.fuel:.2f}  {('REAR PULSE' if 'rear' in p.equipment else 'REAR UNARMED') if self.rear_view else p.laser.upper()} LASER  MISSILES {p.missiles}  HEAT {self.heat:.0f}%')
+        d.text(35,594,f'SPEED {self.speed:.0f}  FUEL {p.fuel:.2f}  {('REAR PULSE' if 'rear' in p.equipment else 'REAR UNARMED') if self.rear_view else p.laser.upper()} LASER  MISSILES {p.missiles}')
         d.text(35,625,f'SHIELD {self.shield:.0f}%  HULL {p.hull:.0f}%  HOLD {sum(p.cargo)}/{p.capacity}t')
         error = math.degrees(self.slot_error())
         d.text(650,598,('GUIDANCE Y  ' if self.course_assist else '')+('FINE I' if self.fine_control else ''),GOLD)
@@ -3250,6 +3314,7 @@ def main():
                     game.keys.clear()
                     game.release_mouse()
                 elif kind == 'text': game.text_input(key)
+                elif kind == 'clipboard': game.handle_clipboard(key)
                 elif kind == 'click': game.click(*key)
                 elif kind == 'mouse_up': game.release_mouse()
                 elif kind == 'down':

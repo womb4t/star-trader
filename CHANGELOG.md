@@ -1,3 +1,10 @@
+# 0.2.25 — clipboard code entry and separate heat instrument
+
+- Add Ctrl+V/C/X/A clipboard editing for codes, Notes and feedback.
+- Add Paste, Copy and Select all buttons to code redemption, with visible selection.
+- Separate heat from fuel: dedicated cockpit thermal gauge, shield readout and danger marker.
+- Exercise native SDL clipboard access, Ctrl+V event routing and code redemption at four window sizes.
+
 # 0.2.24 — Nav order and cleaner bottom action bars
 
 - Rename the top navigation item to Nav and place it before VMS.
