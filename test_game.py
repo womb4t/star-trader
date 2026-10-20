@@ -359,6 +359,99 @@ class GameplayTests(unittest.TestCase):
         self.assertEqual(g.mode,'map')
         self.assertIn('No planet',g.message)
 
+    def test_feedback_draft_saves_offline_without_attaching_save(self):
+        g = self.game
+        g.key(ord('0'))
+        self.assertEqual(g.mode,'feedback')
+        self.assertEqual(g.session_mode(),'market')
+        self.assertFalse(g.save_feedback())
+        g.text_input('Buttons fail at 150% scaling. Café test.')
+        self.assertTrue(g.save_feedback())
+        body = Path(g.feedback_path).read_text()
+        self.assertIn(st.VERSION,body)
+        self.assertIn('Café',body)
+        self.assertNotIn(g.p.commander_id,body)
+        g.key(27)
+        self.assertEqual(g.mode,'market')
+
+    def test_feedback_browser_opens_prefilled_issue_and_preserves_local_copy(self):
+        g = self.game
+        g.key(ord('0'))
+        g.feedback_type = 'suggestion'
+        g.text_input('Please add escorts & convoys')
+        with patch.object(st.webbrowser,'open',return_value=True) as browser:
+            g.open_feedback_issue()
+        url = browser.call_args.args[0]
+        self.assertTrue(url.startswith('https://github.com/womb4t/star-trader/issues/new?'))
+        fields = st.urllib.parse.parse_qs(st.urllib.parse.urlsplit(url).query)
+        self.assertTrue(fields['title'][0].startswith('Suggestion:'))
+        self.assertIn('escorts & convoys',fields['body'][0])
+        self.assertTrue(Path(g.feedback_path).exists())
+        with patch.object(st.webbrowser,'open',return_value=False): g.open_feedback_issue()
+        self.assertIn('saved locally',g.message)
+
+    def test_illicit_sale_pays_crymto_but_credit_purchases_remain_available(self):
+        p = self.game.p
+        p.cargo[6] = 1
+        cash = p.credits
+        p.trade(6,False)
+        self.assertEqual(p.credits,cash)
+        self.assertEqual(p.crymto,st.quote(0,6,False))
+        p.credits = 1000
+        dirty = p.crymto
+        p.trade(6,True)
+        self.assertEqual(p.crymto,dirty)
+        self.assertEqual(p.credits,1000-st.quote(0,6))
+        p.crymto = 1000
+        cash = p.credits
+        p.trade(6,True,use_crymto=True)
+        self.assertEqual(p.credits,cash)
+        self.assertEqual(p.crymto,1000-st.quote(0,6))
+
+    def test_crymto_survives_destruction_reload_and_rescue_claims(self):
+        g = self.game
+        g.p.crymto = 500
+        self.assertNotIn('crymto',g.salvage_terms(25))
+        g.p.hull,g.mode = 0,'dead'
+        g.checkpoint()
+        restored = st.Game(None)
+        self.assertEqual(restored.p.crymto,500)
+        restored.recover_destroyed_pilot()
+        self.assertEqual(restored.p.crymto,500)
+        self.assertEqual(restored.p.credits,0)
+
+    def test_crymto_exchange_is_restricted_and_charges_fees(self):
+        g = self.game
+        g.p.crymto = 100
+        g.key(ord('e'))
+        self.assertEqual(g.mode,'market')
+        g.p.system = 6
+        g.key(ord('e'))
+        self.assertEqual(g.mode,'exchange')
+        g.exchange_amount = 100
+        cash = g.p.credits
+        g.convert_crymto(True)
+        self.assertEqual(g.p.crymto,0)
+        self.assertEqual(g.p.credits,cash+80)
+        g.exchange_amount = 80
+        g.convert_crymto(False)
+        self.assertEqual(g.p.crymto,72)
+        self.assertEqual(g.p.credits,cash)
+
+    def test_clean_payment_requires_explicit_deal_and_rewards_cover_fees(self):
+        g = self.game
+        g.p.cargo[6] = 1
+        g.selected = 6
+        g.key(ord('n'))
+        self.assertEqual(g.mode,'trade_deal')
+        cash = g.p.credits
+        g.key(ord('y'))
+        self.assertEqual(g.p.crymto,0)
+        self.assertEqual(g.p.credits,cash+st.quote(0,6,False)*85//100)
+        self.assertEqual(g.p.cargo[6],0)
+        self.assertGreater(st.quote(0,6,False)*80//100-st.quote(1,6),70)
+        self.assertGreater(st.quote(0,7,False)*80//100-st.quote(1,7),27)
+
     def test_market_spread_and_stock(self):
         p = self.game.p
         cash, stock = p.credits, p.stock[0][0]

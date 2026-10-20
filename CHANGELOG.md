@@ -1,3 +1,13 @@
+# 0.2.17 — feedback, Crymto and illicit payment deals
+
+- Add Feedback 0: write bugs/suggestions, save offline drafts and open prefilled GitHub issues for manual review/submission.
+- Contraband sales normally pay Crymto, a saved account balance retained after destruction and exempt from salvage.
+- B buys with credits; C optionally spends Crymto on contraband, then credits for any shortfall.
+- N offers an explicit one-tonne clean-credit settlement at a 15% discount.
+- Feudal/anarchy exchanges offer disclosed 20% Crymto-to-credit and 10% reverse fees with net previews.
+- Increase contraband demand prices so profitable routes remain worthwhile after conversion fees.
+- Test report drafts/browser failures, text input, currency payouts, exchange restrictions/fees and death persistence.
+
 # 0.2.16 — detailed planet profiles and economy header
 
 - G then I, or Planet profile, opens a full planet information screen with mouse/keyboard browsing.

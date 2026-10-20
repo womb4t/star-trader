@@ -62,5 +62,29 @@ class MouseIntegrationTests(unittest.TestCase):
                         self.assertIn(ord('w'),g.keys)
                         mouse(g,80,200,False)
                         self.assertNotIn(ord('w'),g.keys)
+                        g.mode = 'market'
+                        g.draw()
+                        mouse(g,220,30)
+                        self.assertEqual(g.mode,'feedback')
+                        raw = bytearray(56)
+                        struct.pack_into('=I',raw,0,771)
+                        struct.pack_into('=I',raw,8,window_id)
+                        text = 'Mouse & café'.encode('utf-8')
+                        raw[12:12+len(text)] = text
+                        # sdl2-compat crashes when synthetic TEXTINPUT is pushed;
+                        # feed the SDL2 text record at the polling boundary instead.
+                        pending = [bytes(raw)]
+                        def text_poll(pointer):
+                            if not pending: return 0
+                            C.memmove(pointer,pending.pop(),56)
+                            return 1
+                        with patch.object(d,'poll',side_effect=text_poll):
+                            for kind,value in d.events():
+                                if kind == 'text': g.text_input(value)
+                        self.assertEqual(g.feedback_text,'Mouse & café')
+                        g.draw()
+                        mouse(g,100,688)
+                        self.assertTrue(Path(g.feedback_path).exists())
+
             finally:
                 d.quit()

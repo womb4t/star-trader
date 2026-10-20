@@ -136,3 +136,7 @@ Current releases remain offline games with game-only balances. They do not accep
 - Add local wanted and for-sale noticeboards, with searchable listings, expiry and moderation. Clarify whether a wanted notice is advertising, a bounty contract or an official police warrant.
 - Link listings to the future asset marketplace and bounty system; posting a notice alone must not transfer ownership, credits or criminal status.
 - Keep planet profiles as the entry point for local information and these future communication features. No messaging or player notices are enabled in this release.
+
+## Crymto ledger
+
+The offline game now separates clean credits from Crymto contraband proceeds. Crymto survives ship destruction. Future servers should keep the balance in an authoritative player account, with atomic commodity settlement, explicit clean-payment deals and audited port exchanges. Ship loss must not erase this account or duplicate it on reconnect.

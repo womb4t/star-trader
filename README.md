@@ -1,6 +1,6 @@
 # Star Trader
 
-An original Elite-inspired Python space game for **Omarchy**. Trade, mine, fight robot pirates, smuggle contraband and navigate a small wireframe universe. Current version: **0.2.16**.
+An original Elite-inspired Python space game for **Omarchy**. Trade, mine, fight robot pirates, smuggle contraband and navigate a small wireframe universe. Current version: **0.2.17**.
 
 The current game is offline single-player. Self-hosted multiplayer is a future project; see [MULTIPLAYER.md](MULTIPLAYER.md). The next offline expansion is outlined in [ROADMAP.md](ROADMAP.md).
 
@@ -245,3 +245,20 @@ customs, docking access, station services and all commodity buy/sell prices.
 Left/Right or Previous/Next browses profiles without changing your waypoint.
 I or Escape returns to the map. The main header shows your current system
 name, economy and technology level, with credits/kills below.
+
+FEEDBACK: click Feedback 0 or press 0, choose Bug report or Suggestion,
+then type a description. Save draft keeps an offline copy under the game data
+folder in feedback/. Open GitHub draft opens a prefilled issue for you to
+review and submit (GitHub sign-in may be required). Only your text, game
+version, platform, screen and system are included; no save file is attached.
+
+CRYMTO (CYM): contraband sales normally pay this separate account balance.
+Crymto survives ship destruction and is exempt from salvage claims. B always
+buys with credits; C at the market buys contraband with Crymto first, with
+credits covering any shortfall. Ordinary shops, fuel and banks use credits.
+N negotiates a one-tonne contraband sale for clean credits at a 15% discount;
+review the offer and press Y to accept. E opens the exchange at feudal and
+anarchy ports: Crymto -> credits costs 20%; credits -> Crymto costs 10%.
+Conversion previews show net proceeds before you choose to convert. Exchange
+proceeds round down to whole units. Smuggling demand prices include room
+for these fees; route choice still matters.

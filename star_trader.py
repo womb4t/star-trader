@@ -13,12 +13,14 @@ import sys
 import time
 import threading
 import urllib.request
+import urllib.parse
+import webbrowser
 import uuid
 import tempfile
 import fcntl
 import textwrap
 
-VERSION = '0.2.16'
+VERSION = '0.2.17'
 DOCK_ROLL_TOLERANCE = math.radians(14)
 CRUISE_SECONDS_PER_LY = 45
 W, H = 1100, 760
@@ -66,8 +68,8 @@ def price(system, good):
         factor = 1.0
     if good in ILLEGAL:
         # Contraband prices reflect supply and demand rather than a flat bonus.
-        demand = {6: {'Industrial': .65, 'Agricultural': 1.40, 'Frontier': 1.15},
-                  7: {'Industrial': .65, 'Agricultural': 1.35, 'Frontier': 1.40}}
+        demand = {6: {'Industrial': .65, 'Agricultural': 1.65, 'Frontier': 1.40},
+                  7: {'Industrial': .65, 'Agricultural': 1.65, 'Frontier': 1.60}}
         factor = demand[good][economy]
         government = PROFILES[system][0]
         if good == 7 and government in ('Anarchy','Feudal'): factor *= 1.10
@@ -108,6 +110,7 @@ def hyperspace_cost(distance):
 class Pilot:
     def __init__(self):
         self.credits = 150
+        self.crymto = 0
         self.cargo = [0] * len(GOODS)
         self.system = 0
         self.fuel = 7.0
@@ -137,22 +140,27 @@ class Pilot:
     def capacity(self):
         return 35 if 'cargo' in self.equipment else 20
 
-    def trade(self, good, buy):
+    def trade(self, good, buy, clean_deal=False, use_crymto=False):
         value = quote(self.system, good, buy)
+        if clean_deal and not buy and good in ILLEGAL: value = value*85//100
         stock = self.stock[self.system]
         if buy:
             if stock[good] <= 0: return 'Station has no stock.'
             if sum(self.cargo) >= self.capacity: return 'Cargo hold full.'
-            if self.credits < value: return 'Insufficient credits.'
-            self.credits -= value
+            dirty = min(self.crymto,value) if good in ILLEGAL and use_crymto else 0
+            if self.credits < value-dirty: return 'Insufficient funds (Crymto is only accepted for contraband).'
+            self.crymto -= dirty
+            self.credits -= value-dirty
             self.cargo[good] += 1
             stock[good] -= 1
         else:
             if self.cargo[good] <= 0: return 'None aboard to sell.'
-            self.credits += value
+            if good in ILLEGAL and not clean_deal: self.crymto += value
+            else: self.credits += value
             self.cargo[good] -= 1
             stock[good] += 1
-        return f'{"Bought" if buy else "Sold"} 1 t {GOODS[good]} for {value} cr.'
+        unit = ('Crymto / credits' if use_crymto and good in ILLEGAL else 'cr') if buy else ('Crymto' if good in ILLEGAL and not clean_deal else 'cr')
+        return f'{"Bought" if buy else "Sold"} 1 t {GOODS[good]} for {value} {unit}.'
 
     def buy_equipment(self, index):
         key, label, cost, tech, _ = EQUIPMENT[index]
@@ -229,6 +237,7 @@ class Pilot:
 
     def validate(self):
         def integer(n): return type(n) is int and n >= 0
+        if not integer(self.crymto): raise ValueError('Crymto balance')
         if not integer(self.workshop_xp): raise ValueError('workshop experience')
         if not isinstance(self.job_boards,list) or len(self.job_boards) != len(SYSTEMS): raise ValueError('job boards')
         for board in self.job_boards:
@@ -317,6 +326,7 @@ class Display:
         self.win = self.window(b'Star Trader', 0x2FFF0000, 0x2FFF0000, W, H, 0x2024)
         self.r = self.renderer(self.win, -1, 2) or self.renderer(self.win, -1, 0)
         bind(self.sdl, 'SDL_RenderSetLogicalSize', C.c_int, [ptr, i, i])(self.r, W, H)
+        bind(self.sdl,'SDL_StartTextInput',None,[])()
         self.fullscreen = bind(self.sdl, 'SDL_SetWindowFullscreen', i, [ptr, C.c_uint32])
         self.is_fullscreen = False
         if not self.win or not self.r:
@@ -377,6 +387,8 @@ class Display:
                 # SDL_RenderSetLogicalSize already scales mouse events into
                 # game coordinates. Converting again breaks scaled windows.
                 yield 'click' if typ == 1025 else 'mouse_up',(x,y)
+            elif typ == 771:
+                yield 'text',raw[12:44].split(b'\0',1)[0].decode('utf-8',errors='replace')
             elif typ in (768,769):
                 key = int.from_bytes(raw[20:24], sys.byteorder, signed=True)
                 if typ == 769 or raw[13] == 0:
@@ -495,6 +507,10 @@ class Game:
         self.dock_clearance = self.docking_pending = 0.
         self.rescue = None
         self.rescue_cooldown = 0.
+        self.exchange_amount = 50
+        self.feedback_text = ''
+        self.feedback_type = 'bug'
+        self.feedback_path = None
         self.job_selected = 0
         self.mouse_controls = False
         self.mouse_held = set()
@@ -565,9 +581,9 @@ class Game:
     def session_mode(self):
         mode = self.mode
         for _ in range(6):
-            if mode in ('market','outfit','departure','launch_warning','bank','jobs'): return 'market'
+            if mode in ('market','outfit','departure','launch_warning','bank','jobs','exchange','trade_deal'): return 'market'
             if mode in ('flight','cruise','hyperspace','dead'): return mode
-            attr = {'help':'help_return','updates':'update_return','map':'map_return','planet_profile':'map_return','engineering':'engineering_return'}.get(mode)
+            attr = {'help':'help_return','updates':'update_return','map':'map_return','feedback':'feedback_return','planet_profile':'map_return','engineering':'engineering_return'}.get(mode)
             if not attr: return 'flight'
             mode = getattr(self,attr,'flight')
         return 'flight'
@@ -892,7 +908,7 @@ class Game:
             d.text(40,175+i*38,f'{">" if i == contract["selected"] else " "} {offer["name"]}: {offer["percent"]}% of credits AND cargo',GOLD if i == contract['selected'] else GREEN)
         offer = contract['offers'][contract['selected']]
         fee = self.salvage_terms(offer['percent'])
-        d.text(40,315,f'Exact claim: {fee["credits"]:.2f} credits + {fee["tonnes"]} tonnes (rounded up).',GOLD)
+        d.text(40,315,f'Exact claim: {fee["credits"]:.2f} cr + {fee["tonnes"]} tonnes.',GOLD)
         goods = ', '.join(f'{n}t {GOODS[i]}' for i,n in enumerate(fee['cargo']) if n)
         if goods:
             for i in range(0,len(goods),86): d.text(40,355+(i//86)*27,goods[i:i+86])
@@ -1267,7 +1283,131 @@ class Game:
             d.text(45,555,'You may return to the market. Shift progress pauses and is saved.')
         d.text(45,610,f'Workshop experience: {self.p.workshop_xp} XP. J / ESC returns to market.')
 
+    def exchange_available(self):
+        return not self.p.deep_space and PROFILES[self.p.system][0] in ('Anarchy','Feudal')
+
+    def convert_crymto(self, launder=True):
+        if self.mode != 'exchange' or not self.exchange_available(): return
+        balance = self.p.crymto if launder else self.p.credits
+        amount = math.floor(balance if self.exchange_amount is None else min(balance,self.exchange_amount))
+        rate = 80 if launder else 90
+        received = amount*rate//100
+        if received < 1:
+            self.message = 'Amount too small after the exchange fee. No funds taken.'
+            return
+        if launder:
+            self.p.crymto -= amount
+            self.p.credits += received
+        else:
+            self.p.credits -= amount
+            self.p.crymto += received
+        self.message = f'Exchanged {amount} '+('Crymto' if launder else 'credits')+f' for {received} '+('credits' if launder else 'Crymto')+'. Fee included.'
+        self.checkpoint()
+
+    def draw_exchange(self):
+        d = self.d
+        d.text(35,85,'CRYMTO EXCHANGE / '+SYSTEMS[self.p.system][0].upper(),GOLD)
+        d.text(45,145,f'Credits: {self.p.credits:.2f}    Crymto: {self.p.crymto}')
+        d.text(45,205,'Contraband sales pay Crymto. Crymto survives ship loss; banks hold credits.')
+        d.text(45,250,'B buys with credits. C at the market buys contraband using Crymto first.')
+        d.text(45,310,'Crymto to credits: 20% fee. Credits to Crymto: 10% fee.',GOLD)
+        d.text(45,355,'Exchange proceeds are rounded down to whole units; no fee-free loop.')
+        for i,launder in enumerate((True,False)):
+            balance = self.p.crymto if launder else self.p.credits
+            amount = math.floor(balance if self.exchange_amount is None else min(balance,self.exchange_amount))
+            net = amount*(80 if launder else 90)//100
+            d.text(45,425+i*45,f'{amount} '+('Crymto -> ' if launder else 'credits -> ')+str(net)+(' credits' if launder else ' Crymto'))
+        d.text(45,550,'Select an amount, then choose a conversion. ESC returns to market.')
+
+    def text_input(self, text):
+        if self.mode == 'feedback':
+            self.feedback_text = (self.feedback_text+''.join(c for c in text if c.isprintable()))[:1500]
+
+    def feedback_body(self):
+        return (self.feedback_text.strip()+'\n\n---\n'+f'Star Trader: {VERSION}\n'
+                +f'Platform: {sys.platform}\nScreen: {self.feedback_return}\n'
+                +f'System: {"Deep space" if self.p.deep_space else SYSTEMS[self.p.system][0]}\n')
+
+    def save_feedback(self):
+        if not self.feedback_text.strip():
+            self.message = 'Write a description first.'
+            return False
+        try:
+            folder = SAVE.parent/'feedback'
+            folder.mkdir(parents=True,exist_ok=True)
+            path = folder/(self.feedback_type+'-'+uuid.uuid4().hex[:12]+'.md')
+            path.write_text(self.feedback_body(),encoding='utf-8')
+            self.feedback_path = str(path)
+            self.message = 'Feedback draft saved locally. It has not been submitted.'
+            return True
+        except OSError as error:
+            self.message = 'Could not save feedback: '+str(error)
+            return False
+
+    def open_feedback_issue(self):
+        if not self.save_feedback(): return
+        prefix = 'Bug' if self.feedback_type == 'bug' else 'Suggestion'
+        title = prefix+': '+self.feedback_text.strip().splitlines()[0][:85]
+        url = 'https://github.com/womb4t/star-trader/issues/new?'+urllib.parse.urlencode(dict(title=title,body=self.feedback_body()))
+        try: opened = webbrowser.open(url,new=2)
+        except (OSError,webbrowser.Error): opened = False
+        self.message = ('GitHub draft opened. Review it and submit there; sign-in may be required.' if opened
+                        else 'Could not open browser. Your draft is saved locally for later.')
+
+    def draw_feedback(self):
+        d = self.d
+        d.text(35,85,'BUG REPORTS AND SUGGESTIONS',GOLD)
+        d.text(35,125,'Type what happened, steps to reproduce, and what you expected.')
+        d.rect(35,205,1030,305,GREEN)
+        lines = []
+        for paragraph in self.feedback_text.split('\n'):
+            lines.extend(textwrap.wrap(paragraph,89) or [''])
+        for i,line in enumerate(lines[-11:]): d.text(45,215+i*25,line)
+        d.text(45,490,f'{len(self.feedback_text)}/1500 characters',GOLD)
+        d.text(35,535,'Saved drafts work offline. GitHub opens a preview for you to submit.')
+        d.text(35,570,'Includes version, platform, screen and system; no save file attached.')
+        if self.feedback_path: d.text(35,610,'Draft folder: '+str(SAVE.parent/'feedback'))
+
     def key(self, k):
+        if self.mode == 'trade_deal' and k != ord('0'):
+            if k == ord('y'):
+                self.message = self.p.trade(self.deal_good,False,clean_deal=True)
+                self.mode = 'market'
+                self.checkpoint()
+            elif k in (27,ord('n')): self.mode = 'market'
+            return
+        if self.mode == 'exchange' and k != ord('0'):
+            if k in (27,ord('e')): self.mode = 'market'
+            elif k == ord('l'): self.convert_crymto(True)
+            elif k == ord('b'): self.convert_crymto(False)
+            return
+        if k == ord('c') and self.mode == 'market':
+            if self.selected not in ILLEGAL: self.message = 'Crymto purchases are available for contraband only.'
+            else: self.message = self.p.trade(self.selected,True,use_crymto=True); self.checkpoint()
+            return
+        if k == ord('n') and self.mode == 'market':
+            if self.selected not in ILLEGAL or self.p.cargo[self.selected] < 1:
+                self.message = 'Select contraband aboard to negotiate a clean-credit sale.'
+            else:
+                self.deal_good,self.mode = self.selected,'trade_deal'
+                self.alert = None
+            return
+        if k == ord('e') and self.mode in ('market','outfit','bank'):
+            if self.exchange_available(): self.mode = 'exchange'; self.alert = None
+            else: self.message = 'Crymto exchanges operate at feudal and anarchy ports.'
+            return
+        if self.mode == 'feedback':
+            if k in (27,ord('0')):
+                if k == 27: self.mode = self.feedback_return
+            elif k == 8: self.feedback_text = self.feedback_text[:-1]
+            elif k == 13: self.feedback_text = (self.feedback_text+'\n')[:1500]
+            return
+        if k == ord('0') and not (self.mode == 'map' and self.map_input):
+            self.feedback_return,self.mode = self.mode,'feedback'
+            self.release_mouse()
+            self.keys.clear()
+            self.alert = None
+            return
         if self.mode == 'planet_profile':
             if k in (27,ord('i'),ord('g')): self.mode = 'map'
             elif k in (LEFT,RIGHT): self.profile_system = (self.profile_system+(-1 if k == LEFT else 1))%len(SYSTEMS)
@@ -1759,12 +1899,13 @@ class Game:
         d.text(35,410,'STATION FACILITIES',GOLD)
         for row,line in enumerate(['Fuel, hull service and equipment fitting',
                                    'Bank, cargo-bay rental and purchase',
+                                   'Crymto exchange' if government in ('Anarchy','Feudal') else 'No Crymto exchange',
                                    'Daily cargo, inventory and workshop jobs',
-                                   'Engineering training and fine payments']): d.text(35,450+row*30,line)
-        d.text(610,140,'MARKET / credits per tonne',GOLD)
+                                   'Engineering training and fine payments']): d.text(35,440+row*27,line)
+        d.text(610,140,'MARKET / * sells for Crymto',GOLD)
         d.text(610,178,'COMMODITY              BUY  SELL')
         for row,good in enumerate(GOODS):
-            d.text(610,215+row*32,f'{good:<20} {quote(i,row):>4} {quote(i,row,False):>5}',GOLD if row in ILLEGAL else GREEN)
+            d.text(610,215+row*32,f'{good+chr(42) if row in ILLEGAL else good:<20} {quote(i,row):>4} {quote(i,row,False):>5}',GOLD if row in ILLEGAL else GREEN)
         demand = {'Industrial':'Cheaper manufactured goods / contraband',
                   'Agricultural':'Food / ore exports; narcotics demand',
                   'Frontier':'Strong arms demand; mixed exports'}[economy]
@@ -2265,7 +2406,8 @@ class Game:
     def draw_mouse_ui(self):
         self.buttons = []
         d = self.d
-        modal = self.mode in ('distress','departure','launch_warning','engineering','hyperspace','bank','jobs','planet_profile')
+        if self.mode != 'feedback': self.mouse_button(170,18,130,'Feedback 0',ord('0'))
+        modal = self.mode in ('distress','departure','launch_warning','engineering','hyperspace','bank','jobs','planet_profile','feedback','exchange','trade_deal')
         if self.mode == 'flight':
             self.mouse_button(310,18,92,'Actions',action=lambda:setattr(self,'mouse_controls',not self.mouse_controls))
         if self.mode in ('market','outfit','bank'):
@@ -2291,8 +2433,29 @@ class Game:
             for i,(label,key) in enumerate(labels): self.mouse_button(35+i*128,row_y,120,label,key)
             self.mouse_button(790,570,250,'Bank / storage 9',ord('9'))
             self.mouse_button(790,610,250,'Station jobs J',ord('j'))
+            self.mouse_button(35,638,300,'Crymto exchange E',ord('e'))
+            if self.mode == 'market':
+                self.mouse_button(350,638,300,'Negotiate payout N',ord('n'))
+                self.mouse_button(665,638,300,'Buy with Crymto C',ord('c'))
+        elif self.mode == 'trade_deal':
+            self.mouse_button(35,674,490,'Accept clean-credit deal',ord('y'))
+            self.mouse_button(550,674,490,'Decline',ord('n'))
+        elif self.mode == 'exchange':
+            for i,amount in enumerate([10,50,100,None]):
+                self.mouse_button(35+i*255,594,240,'All' if amount is None else str(amount),action=lambda amount=amount:setattr(self,'exchange_amount',amount))
+                if self.exchange_amount == amount: d.rect(35+i*255,594,240,28,GOLD)
+            self.mouse_button(35,674,330,'Launder to credits',ord('l'))
+            self.mouse_button(380,674,330,'Buy Crymto',ord('b'))
+            self.mouse_button(725,674,330,'Return',ord('e'))
+        elif self.mode == 'feedback':
+            for i,(label,kind) in enumerate([('Bug report','bug'),('Suggestion','suggestion')]):
+                self.mouse_button(35+i*240,165,225,label,action=lambda kind=kind:setattr(self,'feedback_type',kind))
+                if self.feedback_type == kind: d.rect(35+i*240,165,225,28,GOLD)
+            for i,(label,action) in enumerate([('Save draft',self.save_feedback),('Open GitHub draft',self.open_feedback_issue),('Return',lambda:self.key(27))]):
+                self.mouse_button(35+i*345,674,330,label,action=action)
         elif self.mode == 'jobs':
             if self.p.dock_job is None:
+
                 for i,label in enumerate(['Cargo handling','Inventory checks','Workshop assistant']):
                     self.mouse_row(40,150+i*75,1000,55,lambda i=i:self.start_job(i))
                     self.mouse_button(40+i*345,674,330,label,ord('1')+i)
@@ -2365,7 +2528,7 @@ class Game:
         return [
             ('Start',[
                 ('First trade','B / S','Buy food on Lave. Sell it at an industrial port such as Zaonce.'),
-                ('Mouse controls','Actions','Use the cockpit Actions tabs for flying, navigation, weapons and safety.'),
+                ('Feedback','0 / Feedback','Report bugs or suggest ideas. Save a draft offline or open GitHub to review and submit.'),
                 ('Plan a trip','G / ENTER','Choose a planet or coordinate, check fuel, then lock your course.'),
                 ('Leaving the station','L','Request clearance, wait for approval, then launch. Read fuel warnings.'),
                 ('Keep a reserve','F / R','Buy fuel and service the hull while docked. Cargo adds weight and inertia.'),
@@ -2424,13 +2587,26 @@ class Game:
         d,p = self.d,self.p
         d.color(d.r,4,9,18,255)
         d.clear(d.r)
-        d.text(28,20,'S T A R   T R A D E R',GREEN)
+        d.text(28,20,'STAR TRADER',GREEN)
         location = 'In transit' if self.mode == 'hyperspace' else 'Deep space' if p.deep_space or self.mode == 'cruise' else SYSTEMS[p.system][0]
         economy = '' if p.deep_space or self.mode in ('cruise','hyperspace') else f' / {SYSTEMS[p.system][1]} / Tech {TECH[p.system]}'
         d.text(640,5,location+economy,GOLD)
-        d.text(640,29,f'CR {p.credits:.0f}  KILLS {p.kills}')
+        d.text(640,29,f'CR {p.credits:.0f}  CYM {p.crymto}  KILLS {p.kills}')
         d.line(25,52,W-25,52)
-        if self.mode == 'jobs':
+        if self.mode == 'trade_deal':
+            good = self.deal_good
+            dirty = quote(p.system,good,False)
+            clean = dirty*85//100
+            d.text(35,85,'NEGOTIATE CLEAN PAYMENT',GOLD)
+            d.text(45,180,f'Buyer offers {clean} clean credits for 1 tonne of {GOODS[good]}.')
+            d.text(45,240,f'Normal sale pays {dirty} Crymto. This deal takes a 15% discount.')
+            d.text(45,300,'Y accepts and sells one tonne. N or ESC declines without selling.')
+            d.text(45,360,'Crymto is retained after ship destruction; shipboard credits are lost.')
+        elif self.mode == 'exchange':
+            self.draw_exchange()
+        elif self.mode == 'feedback':
+            self.draw_feedback()
+        elif self.mode == 'jobs':
             self.draw_jobs()
         elif self.mode == 'engineering':
             self.draw_engineering()
@@ -2472,7 +2648,7 @@ class Game:
                     d.text(35,170+i*35,('> ' if i == self.selected else '  ')+g+(' *' if i in ILLEGAL else ''),color)
                     for x,value in [(280,quote(p.system,i)),(380,quote(p.system,i,False)),(480,p.stock[p.system][i]),(580,p.cargo[i])]:
                         d.text(x,170+i*35,str(value),color)
-                d.text(35,470,'BUY = you pay. SELL = you receive. * Illegal: customs risk.')
+                d.text(35,470,'BUY = you pay. * Contraband sales pay Crymto (CYM).')
             else:
                 d.text(35,85,f'SHIP OUTFITTING / LOCAL TECH {TECH[p.system]} / U market')
                 start = max(0,min(self.shop_selected-4,len(EQUIPMENT)-8))
@@ -2671,6 +2847,7 @@ def main():
                 elif kind == 'blur':
                     game.keys.clear()
                     game.release_mouse()
+                elif kind == 'text': game.text_input(key)
                 elif kind == 'click': game.click(*key)
                 elif kind == 'mouse_up': game.release_mouse()
                 elif kind == 'down':
