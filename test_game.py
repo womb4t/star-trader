@@ -166,6 +166,8 @@ class GameplayTests(unittest.TestCase):
         g.update_job(60)
         self.assertEqual(g.p.credits,25)
         g.key(ord('j'))
+        self.assertEqual(g.mode,'money')
+        g.key(ord('9'))
         g.key(ord('f'))
         self.assertEqual(g.p.fuel,7)
         self.assertEqual(g.p.credits,4)

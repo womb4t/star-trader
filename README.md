@@ -1,6 +1,6 @@
 # Star Trader
 
-An original Elite-inspired Python space game for **Omarchy**. Trade, mine, fight robot pirates, smuggle contraband and navigate a small wireframe universe. Current version: **0.2.21**.
+An original Elite-inspired Python space game for **Omarchy**. Trade, mine, fight robot pirates, smuggle contraband and navigate a small wireframe universe. Current version: **0.2.22**.
 
 The current game is offline single-player. Self-hosted multiplayer is a future project; see [MULTIPLAYER.md](MULTIPLAYER.md). The next offline expansion is outlined in [ROADMAP.md](ROADMAP.md).
 
@@ -288,3 +288,5 @@ Menu groups reporting, updates, fullscreen and exit. The grave/backtick key open
 Menu; arrows and Enter select items, Escape returns. The flight-only bottom-left
 Flight controls button opens Flight/Nav/Combat/Safety mouse controls. Buttons
 use consistent 32px targets, clear labels and context-specific actions.
+
+Open Money (9) then Station jobs (5) to earn credits. Jobs return to Money.

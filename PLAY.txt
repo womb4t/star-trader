@@ -1,4 +1,4 @@
-STAR TRADER 0.2.21 — original space trading game for Omarchy
+STAR TRADER 0.2.22 — original space trading game for Omarchy
 
 Install: bash install.sh
 Play: open your app launcher and search for Star Trader.
@@ -161,3 +161,5 @@ Menu groups reporting, updates, fullscreen and exit. The grave/backtick key open
 Menu; arrows and Enter select items, Escape returns. The flight-only bottom-left
 Flight controls button opens Flight/Nav/Combat/Safety mouse controls. Buttons
 use consistent 32px targets, clear labels and context-specific actions.
+
+Open Money (9) then Station jobs (5) to earn credits. Jobs return to Money.

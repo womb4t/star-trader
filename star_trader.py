@@ -20,7 +20,7 @@ import tempfile
 import fcntl
 import textwrap
 
-VERSION = '0.2.21'
+VERSION = '0.2.22'
 STATION_POLICE_CAPACITY = 6
 DOCK_ROLL_TOLERANCE = math.radians(14)
 CRUISE_SECONDS_PER_LY = 45
@@ -1346,7 +1346,7 @@ class Game:
                 for i,choice in enumerate(j['choices']): d.text(60,350+i*55,f'{i+1}. {choice}')
             else: d.text(45,290,'Tasks finished. Waiting for the shift to end; payment follows automatically.')
             d.text(45,555,'You may return to the market. Shift progress pauses and is saved.')
-        d.text(45,610,f'Workshop experience: {self.p.workshop_xp} XP. J / ESC returns to market.')
+        d.text(45,610,f'Workshop experience: {self.p.workshop_xp} XP. J / ESC returns to Money.')
 
     def exchange_available(self):
         return not self.p.deep_space and PROFILES[self.p.system][0] in ('Anarchy','Feudal')
@@ -1467,7 +1467,7 @@ class Game:
         for i,line in enumerate([f'Wallet: {p.credits:,.2f} credits',f'Crymto account: {p.crymto:,} CYM',
                                  f'Bank: {p.bank_balance:,.2f} credits',f'Outstanding fines: {p.fine:,} credits']):
             d.text(45,155+i*45,line)
-        d.text(45,350,'Banking, storage, exchange, credit codes and fine payments.')
+        d.text(45,350,'Banking, exchange, codes, fines and paid station jobs.')
         d.text(45,435,'Crymto exchange: '+('available here' if self.exchange_available() else 'feudal and anarchy ports only'))
 
         d.text(45,320,f'Pay fines costs {p.fine:,} credits. Code redemption is single-use per pilot.')
@@ -1562,6 +1562,7 @@ class Game:
                 else: self.message = 'No Crymto exchange here. Visit a feudal or anarchy port.'
             elif k == ord('3'): self.mode = 'redeem'
             elif k == ord('4'): self.pay_fines()
+            elif k in (ord('5'),ord('j')): self.mode = 'jobs'; self.alert = None
             elif k == ord('0'): self.feedback_return,self.mode = 'money','feedback'
             return
         if k in (ord('9'),ord('p')) and self.mode in ('market','outfit'):
@@ -1615,7 +1616,7 @@ class Game:
             if self.p.dock_job is None and k in (UP,DOWN):
                 self.job_selected = (self.job_selected+(-1 if k == UP else 1))%3
             elif self.p.dock_job is None and k == 13: self.start_job(self.job_selected)
-            elif k in (27,ord('j')): self.mode = 'market'; self.checkpoint()
+            elif k in (27,ord('j')): self.mode = 'money'; self.checkpoint()
             elif k in (ord('1'),ord('2'),ord('3')):
                 choice = k-ord('1')
                 if self.p.dock_job is None: self.start_job(choice)
@@ -2641,17 +2642,16 @@ class Game:
                     self.mouse_row(35,130+(i-start)*37,720,37,lambda i=i:setattr(self,'shop_selected',i))
                 self.mouse_button(690,90,45,'Up',UP)
                 self.mouse_button(740,90,60,'Down',DOWN)
-                labels = [('Fit',ord('b')),('Fuel',ord('f')),('Service',ord('r')),('Market',ord('u')),('Launch',ord('l')),('Map',ord('g')),('Skills',ord('8')),('Money',ord('9'))]
+                labels = [('Fit',ord('b')),('Fuel',ord('f')),('Service',ord('r')),('Market',ord('u')),('Launch',ord('l')),('Map',ord('g')),('Skills',ord('8'))]
             for i,(label,key) in enumerate(labels): self.mouse_button(35+i*128,row_y,120,label,key)
             self.mouse_button(790,570,250,'Money 9',ord('9'))
-            self.mouse_button(790,610,250,'Station jobs J',ord('j'))
-            self.mouse_button(35,638,300,'Money 9',ord('9'))
             if self.mode == 'market':
                 self.mouse_button(350,638,300,'Negotiate payout N',ord('n'))
                 self.mouse_button(665,638,300,'Buy with Crymto C',ord('c'))
         elif self.mode == 'money':
             for i,(label,key) in enumerate([('Bank / storage',ord('1')),('Crymto exchange',ord('2')),('Redeem code',ord('3')),('Pay fines',ord('4'))]):
                 self.mouse_button(35+(i%2)*515,380+(i//2)*100,490,label,key)
+            self.mouse_button(35,535,1005,'Station jobs / earn credits',ord('5'))
             self.mouse_button(35,674,1000,'Return to market',ord('9'))
         elif self.mode == 'redeem':
             self.mouse_button(35,674,490,'Redeem code',action=self.redeem_credit_code)
@@ -2687,7 +2687,7 @@ class Game:
                 for i in range(3):
                     self.mouse_row(45,335+i*55,990,45,lambda i=i:self.answer_job(i))
                     self.mouse_button(40+i*345,674,330,'Answer '+str(i+1),ord('1')+i)
-            self.mouse_button(790,570,250,'Return to market',ord('j'))
+            self.mouse_button(790,570,250,'Return to Money',ord('j'))
         elif self.mode == 'bank':
             for i in range(len(GOODS)):
                 self.mouse_row(35,165+i*36,600,36,lambda i=i:setattr(self,'selected',i))

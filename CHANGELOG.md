@@ -1,3 +1,8 @@
+# 0.2.22 — station jobs inside Money
+
+- Remove duplicate Money buttons from station screens.
+- Put Station jobs inside Money, with key 5 or J and a clear return to Money.
+
 # 0.2.21 — repair installed updater checkout detection
 
 - Verify a real Git checkout rather than trusting the existence of a .git path.

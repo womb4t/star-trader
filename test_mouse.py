@@ -46,7 +46,10 @@ class MouseIntegrationTests(unittest.TestCase):
                         g = st.Game(d)
                         g.mode = 'market'
                         g.draw()
-                        mouse(g,915,620)
+                        mouse(g,915,585)
+                        self.assertEqual(g.mode,'money')
+                        g.draw()
+                        mouse(g,150,550)
                         self.assertEqual(g.mode,'jobs')
                         g.draw()
                         mouse(g,500,180)
