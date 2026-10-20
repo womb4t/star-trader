@@ -20,7 +20,7 @@ import tempfile
 import fcntl
 import textwrap
 
-VERSION = '0.2.25'
+VERSION = '0.2.26'
 STATION_POLICE_CAPACITY = 6
 DOCK_ROLL_TOLERANCE = math.radians(14)
 CRUISE_SECONDS_PER_LY = 45
@@ -169,7 +169,7 @@ class Pilot:
 
     def buy_equipment(self, index):
         key, label, cost, tech, _ = EQUIPMENT[index]
-        if TECH[self.system] < tech: return f'Requires technology level {tech}.'
+        if TECH[self.system] < tech: return f'Outfitting unavailable: {label} requires tech {tech}; {SYSTEMS[self.system][0]} is tech {TECH[self.system]}.'
         if key in self.equipment: return 'Already installed.'
         if key == 'mine' and self.mines >= 4: return 'Mine rack full (4).'
         if key == 'missile' and self.missiles >= 4: return 'Missile rack full (4).'
@@ -606,7 +606,7 @@ class Game:
     def message(self,text):
         old = getattr(self,'_message','')
         self._message = text
-        critical = ('thermal warning','station warning','station defence','station police','collision','breakdown','fuel exhausted','refused','seized','repair failed','mine detected','hostile contact','clearance granted','destroyed','rescued')
+        critical = ('outfitting unavailable','thermal warning','station warning','station defence','station police','collision','breakdown','fuel exhausted','refused','seized','repair failed','mine detected','hostile contact','clearance granted','destroyed','rescued')
         if text != old and any(word in text.lower() for word in critical):
             self.alert = dict(text=text,remaining=5.,elapsed=0.)
 
@@ -3093,11 +3093,13 @@ class Game:
                 start = max(0,min(self.shop_selected-4,len(EQUIPMENT)-8))
                 for i in range(start,min(start+8,len(EQUIPMENT))):
                     key,label,cost,tech,desc = EQUIPMENT[i]
-                    state = 'FITTED' if key in p.equipment else f'TECH {tech}' if tech>TECH[p.system] else 'AVAILABLE'
-                    if key in ('missile','mine'): state = f'{p.missiles if key == "missile" else p.mines}/4 ABOARD'
+                    state = 'FITTED' if key in p.equipment else f'NEEDS TECH {tech}' if tech>TECH[p.system] else 'AVAILABLE'
+                    if key in ('missile','mine'): state += f' / {p.missiles if key == "missile" else p.mines}/4 ABOARD'
                     d.text(35,135+(i-start)*37,f'{">" if i==self.shop_selected else " "} {label:<23} {cost:>4} cr  {state}',GOLD if i==self.shop_selected else GREEN)
                 d.text(35,455,EQUIPMENT[self.shop_selected][4],GOLD)
-                d.text(35,490,'UP/DOWN select; B or ENTER purchases and fits equipment.')
+                item,label,cost,required,_ = EQUIPMENT[self.shop_selected]
+                d.text(35,490,f'Selected: {label} / needs tech {required} / local tech {TECH[p.system]}',GOLD if required <= TECH[p.system] else RED)
+                d.text(35,520,'UP/DOWN select; B or ENTER buys. Mines and missiles: maximum 4 each.')
             for i,t in enumerate(['COMMANDER STATUS',f'Cargo {sum(p.cargo)}/{p.capacity} t',f'Fuel  {p.fuel:.2f}/7',f'Hull  {p.hull:.0f}%',f'Refill {p.fuel_cost()} cr',f'Service {p.service_cost()} cr',f'Mines {p.mines}/4',f'Fine {p.fine} cr',f'Wear {p.maintenance:.0f}%',f'Eng. {p.engineering_level}/5']): d.text(790,135+i*40,t)
             d.text(35,550,'Ship fuel, service, fitting and engineering: open VMS above.')
             d.text(35,590,'9 Money / station jobs   X VMS   G Nav')

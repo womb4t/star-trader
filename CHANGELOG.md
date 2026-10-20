@@ -1,3 +1,9 @@
+# 0.2.26 — clear mine and missile availability
+
+- Stop ammunition counts hiding technology restrictions in the outfitter.
+- Show selected equipment requirements and local technology, with a visible failure announcement.
+- Mines remain 75 credits at tech 4+, maximum four aboard.
+
 # 0.2.25 — clipboard code entry and separate heat instrument
 
 - Add Ctrl+V/C/X/A clipboard editing for codes, Notes and feedback.

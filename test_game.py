@@ -637,6 +637,21 @@ class GameplayTests(unittest.TestCase):
         self.assertEqual(g.mode,'map')
         self.assertEqual(g.map_return,'flight')
 
+    def test_mine_purchase_explains_tech_block_and_works_at_eligible_port(self):
+        p = self.game.p
+        p.system,p.credits = 4,1000
+        mine = next(i for i,item in enumerate(st.EQUIPMENT) if item[0] == 'mine')
+        message = p.buy_equipment(mine)
+        self.assertIn('Riedquat is tech 3',message)
+        self.assertEqual((p.mines,p.credits),(0,1000))
+        p.system = 0
+        p.buy_equipment(mine)
+        self.assertEqual((p.mines,p.credits),(1,925))
+        for _ in range(3): p.buy_equipment(mine)
+        cash = p.credits
+        self.assertIn('full',p.buy_equipment(mine))
+        self.assertEqual((p.mines,p.credits),(4,cash))
+
     def test_market_spread_and_stock(self):
         p = self.game.p
         cash, stock = p.credits, p.stock[0][0]

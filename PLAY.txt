@@ -1,4 +1,4 @@
-STAR TRADER 0.2.25 — original space trading game for Omarchy
+STAR TRADER 0.2.26 — original space trading game for Omarchy
 
 Install: bash install.sh
 Play: open your app launcher and search for Star Trader.
@@ -180,3 +180,6 @@ Code entry supports Ctrl+V paste, Ctrl+C copy, Ctrl+X cut and Ctrl+A select
 all, plus Paste/Copy/Select all buttons. Notes and feedback accept these
 shortcuts too. Heat now has its own flight instrument with shield protection
 and the 90% danger marker; VMS fuel is shown separately.
+
+Proximity mines cost 75 credits and require tech level 4; maximum four.
+Outfitting shows the local/required tech levels even for ammunition.
