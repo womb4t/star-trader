@@ -551,6 +551,46 @@ class GameplayTests(unittest.TestCase):
         self.assertEqual(len(backups),1)
         self.assertEqual(json.loads(backups[0].read_text()),before)
 
+    def test_money_code_is_single_use_and_notes_persist(self):
+        g = self.game
+        g.key(ord('9'))
+        self.assertEqual(g.mode,'money')
+        g.key(ord('3'))
+        g.text_input('star-test-100k')
+        g.key(13)
+        self.assertEqual(g.p.credits,100150)
+        g.text_input('STAR-TEST-100K')
+        g.key(13)
+        self.assertEqual(g.p.credits,100150)
+        self.assertIn('already redeemed',g.message)
+        g.key(27)
+        g.key(ord('-'))
+        g.text_input('Buy medicine on Zaonce.')
+        g.key(13)
+        g.text_input('Avoid hostile ports.')
+        g.key(27)
+        self.assertEqual(g.mode,'money')
+        restored = st.Game(None)
+        self.assertEqual(restored.p.notes,'Buy medicine on Zaonce.\nAvoid hostile ports.')
+        self.assertIn('STAR-TEST-100K',restored.p.redeemed_credit_codes)
+        self.assertEqual(restored.p.credits,100150)
+
+    def test_global_controls_open_without_triggering_context_actions(self):
+        g = self.game
+        g.mode = 'money'
+        g.open_utility('help')
+        self.assertEqual(g.mode,'help')
+        self.assertEqual(g.help_return,'money')
+        g.mouse_back()
+        self.assertEqual(g.mode,'money')
+        g.open_utility('menu')
+        g.menu_selected = 1
+        g.key(13)
+        self.assertEqual(g.mode,'notes')
+        self.assertEqual(g.notes_return,'money')
+        g.key(27)
+        self.assertEqual(g.mode,'money')
+
     def test_market_spread_and_stock(self):
         p = self.game.p
         cash, stock = p.credits, p.stock[0][0]
@@ -913,7 +953,7 @@ class GameplayTests(unittest.TestCase):
             g.dock()
         self.assertEqual(g.p.cargo[6],0)
         self.assertEqual(g.p.fine,50)
-        g.key(ord('p'))
+        g.key(ord('p')); g.key(ord('4'))
         self.assertEqual((g.p.fine,g.p.credits),(0,100))
         g.enemy_kind = 'police'; g.enemy = [0,0,500,6,0]; g.destroy_enemy()
         self.assertEqual((g.p.fine,g.p.credits),(150,100))
@@ -1427,7 +1467,7 @@ class GameplayTests(unittest.TestCase):
 
     def test_bank_money_and_station_cargo_survive_salvage(self):
         g=self.game
-        g.p.credits=1000;g.key(ord('9'))
+        g.p.credits=1000;g.key(ord('9'));g.key(ord('1'))
         self.assertEqual(g.mode,'bank')
         g.bank_amount=500;g.key(ord('d'))
         self.assertEqual((g.p.credits,g.p.bank_balance),(500,500))

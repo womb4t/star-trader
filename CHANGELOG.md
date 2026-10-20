@@ -1,10 +1,20 @@
+# 0.2.20 — clearer controls and navigation
+
+- Simplify the header to consistent Controls, Notes, Menu and Back/Save-quit actions.
+- Group utility actions in a keyboard/mouse menu with focus highlighting.
+- Keep Flight/Nav/Combat/Safety mouse controls in a separate collapsible flight panel.
+- Use 32px click targets, updated handbook cards, visible toggle states and cleaner cockpit footer spacing.
+- Global utility buttons no longer accidentally trigger job answers or Money actions.
+
 # 0.2.19 — departure access checks and finite station defences
 
 - Warn before launch about refused destination docking, hostile station guns, deep-space destinations and fuel reserves.
 - Limit each station to six police ships, with persistent reserves and defeat counts.
 - Defeating all six permits docking; station lasers warn for 15 seconds before firing within 2500m.
 - Solar shields slow heat buildup but drain above 70% heat; failed shielding exposes the hull. Disable solar-zone shield regeneration.
-- Add an explicit locked, backed-up offline testing credit-grant command.
+- Add Money for banking/storage, exchanges, fine payments and one-time code redemption (STAR-TEST-100K grants 100,000 testing credits).
+- Add a saved personal Notes notepad with mouse/keyboard scrolling.
+- Keep an explicit locked, backed-up offline testing credit-grant command for administration.
 
 # 0.2.18 — unambiguous stocktake answers
 

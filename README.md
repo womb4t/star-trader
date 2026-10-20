@@ -1,6 +1,6 @@
 # Star Trader
 
-An original Elite-inspired Python space game for **Omarchy**. Trade, mine, fight robot pirates, smuggle contraband and navigate a small wireframe universe. Current version: **0.2.19**.
+An original Elite-inspired Python space game for **Omarchy**. Trade, mine, fight robot pirates, smuggle contraband and navigate a small wireframe universe. Current version: **0.2.20**.
 
 The current game is offline single-player. Self-hosted multiplayer is a future project; see [MULTIPLAYER.md](MULTIPLAYER.md). The next offline expansion is outlined in [ROADMAP.md](ROADMAP.md).
 
@@ -275,3 +275,16 @@ move beyond 600m to cool down and recharge.
 For offline testing only, close the game then run star_trader.py
 --grant-test-credits 100000. It backs up the save and adds credits without
 altering fines, Crymto or ship position. Multiplayer grants will require server admin authority.
+
+MONEY AND NOTES: 9 opens Money for bank/storage, Crymto exchange, fine payments
+and credit codes. Select Redeem code and enter STAR-TEST-100K for a one-time
+100,000-credit grant per pilot in this offline test build. Multiplayer codes
+will require server validation. Press - or click Notes for a saved personal
+notepad; typing appends text, Enter adds a line, arrows/Earlier/Later scroll,
+and Save notes or returning records changes. Notes survive ship loss.
+
+CONTROLS: the top bar consistently offers Controls, Notes, Menu and Back/Save-quit.
+Menu groups reporting, updates, fullscreen and exit. The grave/backtick key opens
+Menu; arrows and Enter select items, Escape returns. The flight-only bottom-left
+Flight controls button opens Flight/Nav/Combat/Safety mouse controls. Buttons
+use consistent 32px targets, clear labels and context-specific actions.
