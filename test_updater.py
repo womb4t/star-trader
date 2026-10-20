@@ -15,8 +15,11 @@ class UpdaterTests(unittest.TestCase):
         (self.repo/'.git').mkdir()
         self.file = patch.object(update,'__file__',str(self.repo/'update.py'))
         self.file.start()
+        self.checkout = patch.object(update,'is_checkout',side_effect=lambda path:path == self.repo)
+        self.checkout.start()
 
     def tearDown(self):
+        self.checkout.stop()
         self.file.stop()
         self.tmp.cleanup()
 
@@ -24,6 +27,27 @@ class UpdaterTests(unittest.TestCase):
         def answer(repo,*args):
             return origin if args[0] == 'remote' else branch if args[0] == 'branch' else dirty
         return answer
+
+    def test_empty_git_placeholder_does_not_override_install_metadata(self):
+        import json
+        installed = self.repo/'installed'
+        installed.mkdir()
+        (installed/'.git').mkdir()
+        (installed/'install-info.json').write_text(json.dumps(dict(source=str(self.repo))))
+        self.assertEqual(update.resolve_checkout(installed),self.repo)
+
+    def test_real_git_probe_rejects_empty_directory(self):
+        self.checkout.stop()
+        try: self.assertFalse(update.is_checkout(self.repo))
+        finally: self.checkout.start()
+
+    def test_missing_recorded_checkout_stops_with_clear_error(self):
+        import json
+        installed = self.repo/'installed'
+        installed.mkdir()
+        (installed/'install-info.json').write_text(json.dumps(dict(source=str(self.repo/'missing'))))
+        with self.assertRaisesRegex(ValueError,'recorded source checkout'):
+            update.resolve_checkout(installed)
 
     def test_dry_run_does_not_fetch_or_install(self):
         with patch.object(update,'output',side_effect=self.answers()), patch.object(update.sys,'argv',['update.py','--dry-run']), patch.object(update.subprocess,'run') as run, contextlib.redirect_stdout(io.StringIO()):

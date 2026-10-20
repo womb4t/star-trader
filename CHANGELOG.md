@@ -1,3 +1,9 @@
+# 0.2.21 — repair installed updater checkout detection
+
+- Verify a real Git checkout rather than trusting the existence of a .git path.
+- Ignore empty placeholders in the installed game folder and follow install-info.json to the source checkout.
+- Report a missing recorded checkout clearly while retaining origin/branch/local-edit safeguards.
+
 # 0.2.20 — clearer controls and navigation
 
 - Simplify the header to consistent Controls, Notes, Menu and Back/Save-quit actions.

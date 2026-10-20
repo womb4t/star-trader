@@ -1,4 +1,4 @@
-STAR TRADER 0.2.20 — original space trading game for Omarchy
+STAR TRADER 0.2.21 — original space trading game for Omarchy
 
 Install: bash install.sh
 Play: open your app launcher and search for Star Trader.

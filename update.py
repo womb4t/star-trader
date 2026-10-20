@@ -13,16 +13,36 @@ def output(repo, *args):
     return subprocess.check_output(['git','-C',str(repo),*args],text=True).strip()
 
 
+def is_checkout(path):
+    """A .git name alone is insufficient (it can be an empty placeholder)."""
+    try:
+        result = subprocess.run(['git','-C',str(path),'rev-parse','--show-toplevel'],
+                                capture_output=True,text=True,check=False)
+        return result.returncode == 0 and Path(result.stdout.strip()).resolve() == path.resolve()
+    except OSError:
+        return False
+
+
+def resolve_checkout(here):
+    if is_checkout(here): return here
+    metadata = here/'install-info.json'
+    if metadata.is_file():
+        data = json.loads(metadata.read_text())
+        source = data.get('source')
+        if not isinstance(source,str) or not source.strip(): raise ValueError('Invalid source checkout in install-info.json.')
+        repo = Path(source).expanduser().resolve()
+        if is_checkout(repo): return repo
+        raise ValueError(f'The recorded source checkout is not a valid Git repository: {repo}')
+    raise ValueError('No valid checkout or installation metadata found. Run the installer from the official checkout.')
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--dry-run',action='store_true',help='validate and show the update without changing files')
     args = parser.parse_args()
     here = Path(__file__).resolve().parent
     try:
-        repo = here
-        if not (repo/'.git').exists():
-            data = json.loads((here/'install-info.json').read_text())
-            repo = Path(data['source'])
+        repo = resolve_checkout(here)
         remote = output(repo,'remote','get-url','origin').removesuffix('.git').rstrip('/')
         if remote not in (OFFICIAL,'git@github.com:womb4t/star-trader'):
             raise ValueError('This updater only fetches the official womb4t/star-trader repository.')
