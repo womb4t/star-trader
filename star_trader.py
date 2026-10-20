@@ -2,6 +2,7 @@
 """STAR TRADER — an original Elite-inspired game. Python 3 + system SDL2/SDL2_ttf.
 Run: python3 star_trader.py   Test: python3 star_trader.py --self-test
 """
+import argparse
 import ctypes as C
 import ctypes.util
 import json
@@ -20,7 +21,8 @@ import tempfile
 import fcntl
 import textwrap
 
-VERSION = '0.2.26'
+VERSION = '0.3.0'
+HOSTILITY_COOLDOWN_SECONDS = 30*60
 STATION_POLICE_CAPACITY = 6
 DOCK_ROLL_TOLERANCE = math.radians(14)
 CRUISE_SECONDS_PER_LY = 45
@@ -490,6 +492,7 @@ class Game:
         self.roll = self.station_angle = 0.
         self.autodock = False
         self.station_hostilities = [False]*len(SYSTEMS)
+        self.station_hostile_until = [0.]*len(SYSTEMS)
         self.security_elapsed = 0.
         self.security_warning = 0
         self.security_dispatch = 0.
@@ -622,7 +625,7 @@ class Game:
 
     def checkpoint(self):
         if getattr(self,'_restoring',False): return
-        fields = ('shield','speed','station','roll','station_angle','station_hostilities','security_elapsed','security_warning','security_dispatch','station_laser_warning','station_laser_timer','enemy_police_system','autodock','course_assist','fine_control','enemy','enemy_kind',
+        fields = ('shield','speed','station','roll','station_angle','station_hostilities','station_hostile_until','security_elapsed','security_warning','security_dispatch','station_laser_warning','station_laser_timer','enemy_police_system','autodock','course_assist','fine_control','enemy','enemy_kind',
                   'asteroids','fragments','sun','heat','nav','rear_view','planet','planet_radius',
                   'assist_speed','mine_objects','jamming','jammer_cooldown','cloaked','customs_checked',
                   'cruise','jump_warp','npc_mine_timer','spawn','cooldown','enemy_shot','broken_down','breakdown_in',
@@ -638,6 +641,7 @@ class Game:
             temp.write_text(json.dumps(data,allow_nan=False),encoding='utf-8')
             temp.replace(SAVE)
             self._save_elapsed = 0.
+            if getattr(self,'remote_save',None): self.remote_save.offer(data)
         except (OSError,ValueError,TypeError) as error:
             self.message = 'Could not save current ship state: '+str(error)
 
@@ -719,6 +723,7 @@ class Game:
         if self.enemy_shot:
             self.enemy_shot['remaining'] -= dt
             if self.enemy_shot['remaining'] <= 0: self.enemy_shot = None
+        self.refresh_station_hostility()
         self._update_simulation(dt)
         self._save_elapsed += dt
         if self._save_elapsed >= 2 or before != self.mode:
@@ -969,7 +974,29 @@ class Game:
         system = self.p.system if system is None else system
         return self.p.station_police_defeated[system] >= STATION_POLICE_CAPACITY
 
+    def refresh_station_hostility(self):
+        now = time.time()
+        near = None if self.p.deep_space or math.sqrt(sum(v*v for v in self.station)) > 10000 else self.p.system
+        for system,hostile in enumerate(self.station_hostilities):
+            if not hostile: continue
+            if not self.station_hostile_until[system] or system == near:
+                self.station_hostile_until[system] = now+HOSTILITY_COOLDOWN_SECONDS
+            elif now >= self.station_hostile_until[system]:
+                self.station_hostilities[system] = False
+                self.station_hostile_until[system] = 0.
+                if system == self.p.system and self.enemy_kind == 'police' and self.enemy_police_system == system:
+                    self.enemy,self.ship_target,self.enemy_police_system = None,None,None
+                self.message = SYSTEMS[system][0]+': station hostility has cooled. Outstanding fines still apply.'
+
+    def hostility_label(self, system):
+        self.refresh_station_hostility()
+        if not self.station_hostilities[system]: return ''
+        if not self.p.deep_space and self.p.system == system and math.sqrt(sum(v*v for v in self.station)) <= 10000:
+            return 'hostile: leave area'
+        return f'hostile: {max(0,math.ceil((self.station_hostile_until[system]-time.time())/60))}m'
+
     def station_allows(self, system=None):
+        self.refresh_station_hostility()
         system = self.p.system if system is None else system
         return self.station_overwhelmed(system) or not self.station_hostilities[system] and (self.p.fine < 100 or PROFILES[system][0] in ('Anarchy','Feudal'))
 
@@ -997,6 +1024,7 @@ class Game:
         if not self.station_hostilities[self.p.system]:
             self.p.fine += 150
         self.station_hostilities[self.p.system] = True
+        self.station_hostile_until[self.p.system] = time.time()+HOSTILITY_COOLDOWN_SECONDS
         self.dock_clearance = self.docking_pending = 0.
         self.autodock = self.course_assist = False
         self.message = 'STATION DEFENCE: '+reason+' Docking revoked; police response authorised!'
@@ -1224,6 +1252,7 @@ class Game:
             if self.enemy_police_system is not None:
                 system = self.enemy_police_system
                 self.station_hostilities[system] = True
+                self.station_hostile_until[system] = time.time()+HOSTILITY_COOLDOWN_SECONDS
                 self.p.station_police_defeated[system] = min(STATION_POLICE_CAPACITY,self.p.station_police_defeated[system]+1)
             self.enemy_police_system = None
         else: self.p.credits += 35
@@ -1612,6 +1641,9 @@ class Game:
         d = self.d
         d.text(35,85,'GAME MENU',GOLD)
         d.text(35,125,'UP / DOWN selects. ENTER opens. ESC returns to the game.')
+        remote = getattr(self,'remote_save',None)
+        status_color = RED if remote and remote.conflicted else GOLD if remote and 'unavailable' in remote.status else GREEN
+        d.text(35,155,remote.status if remote else 'Offline game: progress saved on this laptop.',status_color)
         descriptions = ['Key bindings and flight help','Your saved private notes','Bug reports and suggestions','Check for game updates','Toggle display size','Save current state and close']
         for i,description in enumerate(descriptions):
             x,y = 35+(i%2)*515,200+(i//2)*110
@@ -2218,7 +2250,7 @@ class Game:
                  f'Technology level: {TECH[i]}',
                  f'Police reserve: {self.p.station_police_remaining[i]}/{STATION_POLICE_CAPACITY}',
                  'Customs: minimal' if government in ('Anarchy','Feudal') else 'Customs: regulated; contraband can be seized',
-                 'Docking: allowed' if self.station_allows(i) else 'Docking: refused (hostile or wanted)']
+                 ('Docking: allowed' if self.station_allows(i) else 'Docking: refused')+(' / '+self.hostility_label(i) if self.station_hostilities[i] else '')]
         for row,line in enumerate(facts): d.text(35,140+row*31,line)
         d.text(35,410,'STATION FACILITIES',GOLD)
         for row,line in enumerate(['Fuel, hull service and equipment fitting',
@@ -3287,10 +3319,29 @@ def main():
     if '--self-test' in sys.argv:
         self_test()
         return
+    parser = argparse.ArgumentParser(description='Star Trader — offline game with optional private progress server')
+    parser.add_argument('--server')
+    parser.add_argument('--token-file',type=Path)
+    parser.add_argument('--allow-lan',action='store_true')
+    parser.add_argument('--import-local-save',action='store_true')
+    parser.add_argument('--restore-server-save',action='store_true')
+    parser.add_argument('--offline-if-unavailable',action='store_true')
+    options, _ = parser.parse_known_args()
     display = None
     scratch = None
     instance_file = None
+    remote = None
+    game = None
     try:
+        offline_save = SAVE
+        if options.server:
+            if not options.token_file: raise ValueError('--server requires --token-file')
+            if '--grant-test-credits' in sys.argv or '--smoke-test' in sys.argv: raise ValueError('Testing CLI tools require offline mode')
+            from save_sync import RemoteSave
+            remote = RemoteSave(options.server,options.token_file,SAVE.parent,options.allow_lan)
+            SAVE = remote.save_path
+        elif options.token_file or options.import_local_save or options.restore_server_save:
+            raise ValueError('Server options require --server')
         if '--smoke-test' in sys.argv:
             scratch = tempfile.TemporaryDirectory(prefix='star-trader-smoke-')
             SAVE = Path(scratch.name)/'save.json'
@@ -3298,6 +3349,8 @@ def main():
         instance_file = SAVE.with_suffix('.lock').open('a')
         try: fcntl.flock(instance_file,fcntl.LOCK_EX|fcntl.LOCK_NB)
         except OSError: raise RuntimeError('Star Trader is already running for this save. Close it before starting another copy.')
+        if remote:
+            remote.prepare(offline_save if options.import_local_save else None,options.restore_server_save,options.offline_if_unavailable)
         if '--grant-test-credits' in sys.argv:
             index = sys.argv.index('--grant-test-credits')
             if index+1 >= len(sys.argv): raise ValueError('Specify the testing credit amount.')
@@ -3305,6 +3358,10 @@ def main():
             return
         display = Display()
         game = Game(display)
+        if remote:
+            game.remote_save = remote
+            remote.start()
+            game.checkpoint()
         last = time.monotonic()
         frames = 0
         while game.running:
@@ -3332,6 +3389,10 @@ def main():
         print(f'Unable to start: {e}',file=sys.stderr)
         sys.exit(1)
     finally:
+        if remote:
+            if game: game.checkpoint()
+            remote.close()
+            print(remote.status)
         if display: display.quit()
         if instance_file: instance_file.close()
         if scratch: scratch.cleanup()

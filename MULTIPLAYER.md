@@ -1,3 +1,7 @@
+## Available now: private progress storage
+
+v0.3.0 provides up to eight authenticated save accounts, SQLite persistence/history, revision conflict protection and optional background client sync. See [SERVER.md](SERVER.md) for iMac setup. Saves are client supplied; the server does not yet simulate ships or enforce a shared economy. The stages below remain future work.
+
 # Self-hosted universe roadmap
 
 Status: design only. The current release is a fully offline single-player game with robot pirates. It opens no network connections and does not yet support fleets, chat, player police, transfers or bases.

@@ -13,7 +13,7 @@ def install():
     data = Path(os.environ.get('XDG_DATA_HOME') or Path.home() / '.local/share').expanduser().resolve()
     target = data / 'star-trader'
     target.mkdir(parents=True, exist_ok=True)
-    for name in ('star_trader.py', 'update.py', 'LICENSE', 'README.md'):
+    for name in ('star_trader.py', 'save_sync.py', 'update.py', 'LICENSE', 'README.md'):
         destination = target / name
         if (source / name).resolve() != destination.resolve():
             shutil.copy2(source / name, destination)

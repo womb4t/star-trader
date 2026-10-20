@@ -1,8 +1,8 @@
 # Star Trader
 
-An original Elite-inspired Python space game for **Omarchy**. Trade, mine, fight robot pirates, smuggle contraband and navigate a small wireframe universe. Current version: **0.2.26**.
+An original Elite-inspired Python space game for **Omarchy**. Trade, mine, fight robot pirates, smuggle contraband and navigate a small wireframe universe. Current version: **0.3.0**.
 
-The current game is offline single-player. Self-hosted multiplayer is a future project; see [MULTIPLAYER.md](MULTIPLAYER.md). The next offline expansion is outlined in [ROADMAP.md](ROADMAP.md).
+Play offline, or use the optional **private progress server** to save separate tester accounts on an iMac or another Python host: [SERVER.md](SERVER.md). Shared flight and combat are a future project; see [MULTIPLAYER.md](MULTIPLAYER.md). The next offline expansion is outlined in [ROADMAP.md](ROADMAP.md).
 
 ## Install on Omarchy
 
@@ -310,3 +310,7 @@ and the 90% danger marker; VMS fuel is shown separately.
 
 Proximity mines cost 75 credits and require tech level 4; maximum four.
 Outfitting shows the local/required tech levels even for ammunition.
+
+## Station hostility cooldown
+
+Station hostility cools after 30 minutes away from the station (more than 10,000 metres, deep space, or another system). Remaining nearby resets the timer; further attacks restart it. Planet profiles show the remaining wait. Outstanding fines and police reserves do not reset.
