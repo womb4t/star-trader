@@ -1,4 +1,4 @@
-STAR TRADER 0.2.18 — original space trading game for Omarchy
+STAR TRADER 0.2.19 — original space trading game for Omarchy
 
 Install: bash install.sh
 Play: open your app launcher and search for Star Trader.
@@ -135,3 +135,23 @@ anarchy ports: Crymto -> credits costs 20%; credits -> Crymto costs 10%.
 Conversion previews show net proceeds before you choose to convert. Exchange
 proceeds round down to whole units. Smuggling demand prices include room
 for these fees; route choice still matters.
+
+Departure checks warn if a locked destination will refuse docking or has no station.
+Each station has six police ships, with reserve counts in its planet profile.
+Reserves and defeats persist after reloading and do not refill automatically.
+Destroying all six permits docking despite hostility/fines, but station lasers
+warn for 15 seconds before firing within 2500m. Withdraw or dock promptly.
+Fuel scoops collect at 150-500m from the sun, speed 10-60. Shields slow heating;
+above 70% heat radiation drains them, and hull damage follows shield failure.
+90% is the thermal danger limit. Shields do not recharge inside the solar zone;
+move beyond 600m to cool down and recharge.
+For offline testing only, close the game then run star_trader.py
+--grant-test-credits 100000. It backs up the save and adds credits without
+altering fines, Crymto or ship position. Multiplayer grants will require server admin authority.
+
+MONEY AND NOTES: 9 opens Money for bank/storage, Crymto exchange, fine payments
+and credit codes. Select Redeem code and enter STAR-TEST-100K for a one-time
+100,000-credit grant per pilot in this offline test build. Multiplayer codes
+will require server validation. Press - or click Notes for a saved personal
+notepad; typing appends text, Enter adds a line, arrows/Earlier/Later scroll,
+and Save notes or returning records changes. Notes survive ship loss.

@@ -50,3 +50,7 @@ See [MULTIPLAYER.md](MULTIPLAYER.md) for the recorded exchange design questions.
 - Add local wanted and for-sale noticeboards, with searchable listings, expiry and moderation. Clarify whether a wanted notice is advertising, a bounty contract or an official police warrant.
 - Link listings to the future asset marketplace and bounty system; posting a notice alone must not transfer ownership, credits or criminal status.
 - Keep planet profiles as the entry point for local information and these future communication features. No messaging or player notices are enabled in this release.
+
+## Multiplayer test scope
+
+Keep all eight current systems and travel between stations, with the existing ship/equipment selection. Initial target: up to eight connected testers on a persistent authoritative server. Include cross-system trading, fuel, travel, docking and combat in the first playable test; do not lock everyone to one system. Offline play remains available.

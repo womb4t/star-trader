@@ -20,7 +20,8 @@ import tempfile
 import fcntl
 import textwrap
 
-VERSION = '0.2.18'
+VERSION = '0.2.19'
+STATION_POLICE_CAPACITY = 6
 DOCK_ROLL_TOLERANCE = math.radians(14)
 CRUISE_SECONDS_PER_LY = 45
 W, H = 1100, 760
@@ -111,6 +112,10 @@ class Pilot:
     def __init__(self):
         self.credits = 150
         self.crymto = 0
+        self.redeemed_credit_codes = []
+        self.notes = ""
+        self.station_police_remaining = [STATION_POLICE_CAPACITY]*len(SYSTEMS)
+        self.station_police_defeated = [0]*len(SYSTEMS)
         self.cargo = [0] * len(GOODS)
         self.system = 0
         self.fuel = 7.0
@@ -237,6 +242,10 @@ class Pilot:
 
     def validate(self):
         def integer(n): return type(n) is int and n >= 0
+        if not isinstance(self.station_police_remaining,list) or len(self.station_police_remaining) != len(SYSTEMS) or not all(integer(n) and n <= STATION_POLICE_CAPACITY for n in self.station_police_remaining): raise ValueError('police reserve')
+        if not isinstance(self.station_police_defeated,list) or len(self.station_police_defeated) != len(SYSTEMS) or not all(integer(n) and n <= STATION_POLICE_CAPACITY for n in self.station_police_defeated): raise ValueError('police defeats')
+        if type(self.notes) is not str or len(self.notes)>4000: raise ValueError('notes')
+        if not isinstance(self.redeemed_credit_codes,list) or len(self.redeemed_credit_codes)>100 or any(type(code) is not str or len(code)>80 for code in self.redeemed_credit_codes) or len(set(self.redeemed_credit_codes)) != len(self.redeemed_credit_codes): raise ValueError('credit codes')
         if not integer(self.crymto): raise ValueError('Crymto balance')
         if not integer(self.workshop_xp): raise ValueError('workshop experience')
         if not isinstance(self.job_boards,list) or len(self.job_boards) != len(SYSTEMS): raise ValueError('job boards')
@@ -471,6 +480,9 @@ class Game:
         self.security_elapsed = 0.
         self.security_warning = 0
         self.security_dispatch = 0.
+        self.station_laser_warning = False
+        self.station_laser_timer = 15.
+        self.enemy_police_system = None
         self.course_assist = False
         self.fine_control = False
         self.enemy = None
@@ -507,6 +519,8 @@ class Game:
         self.dock_clearance = self.docking_pending = 0.
         self.rescue = None
         self.rescue_cooldown = 0.
+        self.notes_scroll = 0
+        self.credit_code_text = ""
         self.exchange_amount = 50
         self.feedback_text = ''
         self.feedback_type = 'bug'
@@ -574,23 +588,23 @@ class Game:
     def message(self,text):
         old = getattr(self,'_message','')
         self._message = text
-        critical = ('station warning','station defence','station police','collision','breakdown','fuel exhausted','refused','seized','repair failed','mine detected','hostile contact','clearance granted','destroyed','rescued')
+        critical = ('thermal warning','station warning','station defence','station police','collision','breakdown','fuel exhausted','refused','seized','repair failed','mine detected','hostile contact','clearance granted','destroyed','rescued')
         if text != old and any(word in text.lower() for word in critical):
             self.alert = dict(text=text,remaining=5.,elapsed=0.)
 
     def session_mode(self):
         mode = self.mode
         for _ in range(6):
-            if mode in ('market','outfit','departure','launch_warning','bank','jobs','exchange','trade_deal'): return 'market'
+            if mode in ('market','outfit','departure','launch_warning','bank','jobs','exchange','trade_deal','money','redeem'): return 'market'
             if mode in ('flight','cruise','hyperspace','dead'): return mode
-            attr = {'help':'help_return','updates':'update_return','map':'map_return','feedback':'feedback_return','planet_profile':'map_return','engineering':'engineering_return'}.get(mode)
+            attr = {'help':'help_return','updates':'update_return','map':'map_return','notes':'notes_return','feedback':'feedback_return','planet_profile':'map_return','engineering':'engineering_return'}.get(mode)
             if not attr: return 'flight'
             mode = getattr(self,attr,'flight')
         return 'flight'
 
     def checkpoint(self):
         if getattr(self,'_restoring',False): return
-        fields = ('shield','speed','station','roll','station_angle','station_hostilities','security_elapsed','security_warning','security_dispatch','autodock','course_assist','fine_control','enemy','enemy_kind',
+        fields = ('shield','speed','station','roll','station_angle','station_hostilities','security_elapsed','security_warning','security_dispatch','station_laser_warning','station_laser_timer','enemy_police_system','autodock','course_assist','fine_control','enemy','enemy_kind',
                   'asteroids','fragments','sun','heat','nav','rear_view','planet','planet_radius',
                   'assist_speed','mine_objects','jamming','jammer_cooldown','cloaked','customs_checked',
                   'cruise','jump_warp','npc_mine_timer','spawn','cooldown','enemy_shot','broken_down','breakdown_in',
@@ -808,14 +822,30 @@ class Game:
         d.text(35,570,'Expired rentals retain cargo; retrieval is allowed, new deposits require renewal.')
         d.text(35,608,'Bank money and station cargo stay off-ship during salvage or ship destruction.')
 
+    def launch_warnings(self):
+        warnings = []
+        w = self.p.waypoint
+        distance = galactic_distance(self.p.position,w['position']) if w else 0
+        required = hyperspace_cost(distance)+(.4*self.p.mass_factor if distance > .001 else 0) if w else 0
+        if self.p.fuel < 1 or required > self.p.fuel:
+            warnings.append(f'Insufficient fuel reserve: aboard {self.p.fuel:.2f}; planned trip {required:.2f}.')
+        if w:
+            system = w['system']
+            if system is None: warnings.append('Destination is deep space: no station, landing or services.')
+            elif self.station_hostilities[system] and self.station_overwhelmed(system):
+                warnings.append(f'{SYSTEMS[system][0]} is hostile: docking possible, but station lasers may attack.')
+            elif not self.station_allows(system):
+                reason = 'station hostility' if self.station_hostilities[system] else f'wanted status / {self.p.fine} cr fines'
+                warnings.append(f'{SYSTEMS[system][0]} will REFUSE docking: {reason}.')
+        return warnings
+
     def request_launch(self):
-        distance = galactic_distance(self.p.position,self.p.waypoint['position']) if self.p.waypoint else 0
-        required = hyperspace_cost(distance)+(.4*self.p.mass_factor if distance > .001 else 0) if self.p.waypoint else None
-        if self.p.fuel < 1 or (required is not None and required > self.p.fuel):
+        if self.launch_warnings():
             self.launch_return = self.mode
             self.mode = 'launch_warning'
             self.keys.clear()
-            self.message = 'Low fuel warning. F buys fuel, L launches anyway, ESC stays docked.'
+            self.alert = None
+            self.message = 'Departure warning. Check destination access and fuel; ESC stays docked.'
         else: self.request_departure()
 
     def salvage_terms(self, percent):
@@ -886,18 +916,15 @@ class Game:
 
     def draw_launch_warning(self):
         d,p = self.d,self.p
-        lines = ['FUEL WARNING',
-                 'NO FUEL ABOARD' if p.fuel <= 0 else f'Fuel aboard: {p.fuel:.2f} / 7 units',
-                 f'Full refill costs {p.fuel_cost()} cr; you have {p.credits:.2f} cr.',
-                 'Normal flight and hyperspace both consume fuel.']
-        if p.waypoint:
-            cost = hyperspace_cost(galactic_distance(p.position,p.waypoint['position']))
-            lines += [f'Locked course: {p.waypoint["name"]}; jump requires {cost:.2f} fuel.',
-                      f'Allow another {.4*p.mass_factor:.2f} for local approach / reserve.']
-        lines += ['', 'F buys a refill. L launches despite this warning.',
-                  'ESC cancels departure. Sell cargo first if you need fuel money.',
-                  '', 'If stranded, 6 sends a distress call. Salvage fees may apply.']
-        for i,line in enumerate(lines): d.text(70,135+i*42,line,RED if i < 2 else GREEN)
+        d.text(45,100,'CHECK BEFORE DEPARTURE',RED)
+        lines = []
+        for warning in self.launch_warnings(): lines.extend(textwrap.wrap(warning,85))
+        lines += ['',f'Full fuel refill: {p.fuel_cost()} cr. Wallet: {p.credits:.2f} cr.',
+                  'A docking refusal remains even if you have enough fuel.',
+                  'Cancel to pay fines, choose an accepting port, or change your course.',
+                  '', 'F buys fuel. L requests launch despite these warnings.',
+                  'ESC stays docked. G returns to the map to choose another destination.']
+        for i,line in enumerate(lines): d.text(45,155+i*35,line,RED if i < len(self.launch_warnings()) else GREEN)
 
     def draw_distress(self):
         d,p = self.d,self.p
@@ -920,9 +947,13 @@ class Game:
         d.text(40,608,'N counters (twice per private offer). R / ESC refuses with no payment.')
         d.text(40,650,'Settlement and docking save progress. Calls have a 60s cooldown.')
 
+    def station_overwhelmed(self, system=None):
+        system = self.p.system if system is None else system
+        return self.p.station_police_defeated[system] >= STATION_POLICE_CAPACITY
+
     def station_allows(self, system=None):
         system = self.p.system if system is None else system
-        return not self.station_hostilities[system] and (self.p.fine < 100 or PROFILES[system][0] in ('Anarchy','Feudal'))
+        return self.station_overwhelmed(system) or not self.station_hostilities[system] and (self.p.fine < 100 or PROFILES[system][0] in ('Anarchy','Feudal'))
 
     def request_departure(self):
         self.departure_remaining = 2.
@@ -950,20 +981,28 @@ class Game:
         self.station_hostilities[self.p.system] = True
         self.dock_clearance = self.docking_pending = 0.
         self.autodock = self.course_assist = False
-        self.message = 'STATION DEFENCE: '+reason+' Police dispatched; docking revoked!'
+        self.message = 'STATION DEFENCE: '+reason+' Docking revoked; police response authorised!'
         self.checkpoint()
+
+    def dispatch_station_police(self):
+        if self.p.deep_space or self.enemy is not None or self.p.station_police_remaining[self.p.system] <= 0: return False
+        self.p.station_police_remaining[self.p.system] -= 1
+        self.enemy_kind = 'police'
+        self.enemy_police_system = self.p.system
+        self.enemy = [self.station[0]+90,self.station[1]+50,max(300.,self.station[2]-150),10,0.]
+        self.security_dispatch = 15.
+        remaining = self.p.station_police_remaining[self.p.system]
+        self.message = f'STATION POLICE launched. Station reserve: {remaining}/{STATION_POLICE_CAPACITY}.'
+        self.checkpoint()
+        return True
 
     def update_station_security(self, dt):
         if self.p.deep_space: return
         self.security_dispatch = max(0,self.security_dispatch-dt)
         if self.station_hostilities[self.p.system]:
+            self.update_station_lasers(dt)
             if self.enemy is None and self.security_dispatch <= 0:
-                # Existing combat simulation supports one active attacker.
-                # Queue station police while another hostile occupies that slot.
-                self.enemy_kind = 'police'
-                self.enemy = [self.station[0]+90,self.station[1]+50,max(300.,self.station[2]-150),10,0.]
-                self.security_dispatch = 15.
-                self.message = 'STATION POLICE launched: you are hostile. Leave this system!'
+                self.dispatch_station_police()
             return
         x,y,z = self.station
         restricted = -100 < z < 800 and math.hypot(x,y) < 200 and (self.speed > 0 or z < 150)
@@ -980,6 +1019,23 @@ class Game:
             self.message = 'FINAL STATION WARNING: withdraw or obtain clearance! Police in 6 seconds.'
         if self.security_elapsed >= 12:
             self.station_hostile('Unauthorised docking approach.')
+
+    def update_station_lasers(self, dt):
+        if not self.station_overwhelmed() or math.sqrt(sum(v*v for v in self.station)) > 2500:
+            self.station_laser_warning = False
+            self.station_laser_timer = 15.
+            return
+        if not self.station_laser_warning:
+            self.station_laser_warning = True
+            self.station_laser_timer = 15.
+            self.message = 'STATION WARNING: police defeated. Dock or withdraw beyond 2500m within 15 seconds; station lasers will fire!'
+            return
+        self.station_laser_timer -= dt
+        if self.station_laser_timer <= 0:
+            self.station_laser_timer += 2.
+            self.enemy_shot = dict(position=self.station[:],kind='station',remaining=.35)
+            self.damage(12)
+            self.message = 'STATION DEFENCE: station lasers firing. Dock or withdraw!'
 
     def breakdown_risk(self, next_flight=False):
         flights = self.p.flights_since_service + int(next_flight)
@@ -1145,11 +1201,18 @@ class Game:
     def destroy_enemy(self):
         self.enemy = None
         self.ship_target = None
-        if self.enemy_kind == 'police': self.p.fine += 150
+        if self.enemy_kind == 'police':
+            self.p.fine += 150
+            if self.enemy_police_system is not None:
+                system = self.enemy_police_system
+                self.station_hostilities[system] = True
+                self.p.station_police_defeated[system] = min(STATION_POLICE_CAPACITY,self.p.station_police_defeated[system]+1)
+            self.enemy_police_system = None
         else: self.p.credits += 35
         self.p.kills += 1
         self.spawn = 24
         self.message = 'Police ship destroyed. Fine increased by 150 cr.' if self.enemy_kind == 'police' else 'Hostile destroyed. Bounty: 35 credits.'
+        self.checkpoint()
 
     def station_job_board(self):
         board = self.p.job_boards[self.p.system]
@@ -1321,7 +1384,12 @@ class Game:
         d.text(45,550,'Select an amount, then choose a conversion. ESC returns to market.')
 
     def text_input(self, text):
-        if self.mode == 'feedback':
+        if self.mode == 'notes':
+            self.notes_scroll = 0
+            self.p.notes = (self.p.notes+''.join(c for c in text if c.isprintable()))[:4000]
+        elif self.mode == 'redeem':
+            self.credit_code_text = (self.credit_code_text+''.join(c for c in text if c.isprintable()))[:80]
+        elif self.mode == 'feedback':
             self.feedback_text = (self.feedback_text+''.join(c for c in text if c.isprintable()))[:1500]
 
     def feedback_body(self):
@@ -1369,7 +1437,86 @@ class Game:
         d.text(35,570,'Includes version, platform, screen and system; no save file attached.')
         if self.feedback_path: d.text(35,610,'Draft folder: '+str(SAVE.parent/'feedback'))
 
+    def redeem_credit_code(self):
+        code = self.credit_code_text.strip().upper()
+        if code != 'STAR-TEST-100K':
+            self.message = 'Code not recognised. No funds changed.'
+        elif code in self.p.redeemed_credit_codes:
+            self.message = 'This pilot has already redeemed that code.'
+        else:
+            self.p.redeemed_credit_codes.append(code)
+            self.p.credits += 100000
+            self.credit_code_text = ''
+            self.message = 'Testing code redeemed: 100,000 credits added.'
+            self.checkpoint()
+
+    def pay_fines(self):
+        if self.p.credits < self.p.fine:
+            self.message = f'Insufficient credits. Outstanding fines: {self.p.fine} cr.'
+        else:
+            amount = self.p.fine
+            self.p.credits -= amount
+            self.p.fine = 0
+            self.message = f'Paid {amount} cr in fines. Station hostility is separate.'
+            self.checkpoint()
+
+    def draw_money(self):
+        d,p = self.d,self.p
+        d.text(35,85,'MONEY',GOLD)
+        for i,line in enumerate([f'Wallet: {p.credits:,.2f} credits',f'Crymto account: {p.crymto:,} CYM',
+                                 f'Bank: {p.bank_balance:,.2f} credits',f'Outstanding fines: {p.fine:,} credits']):
+            d.text(45,155+i*45,line)
+        d.text(45,350,'Banking, storage, exchange, credit codes and fine payments.')
+        d.text(45,435,'Crymto exchange: '+('available here' if self.exchange_available() else 'feudal and anarchy ports only'))
+
+        d.text(45,320,f'Pay fines costs {p.fine:,} credits. Code redemption is single-use per pilot.')
+        d.text(45,570,'Crymto survives ship destruction. Bank funds and stored cargo are protected.')
+        d.text(45,610,'9 / ESC returns to the market.')
+
+    def draw_notepad(self):
+        d = self.d
+        d.text(35,85,'NOTES / YOUR PERSONAL NOTEPAD',GOLD)
+        d.rect(35,130,1030,465,GREEN)
+        lines = []
+        for paragraph in self.p.notes.split('\n'): lines.extend(textwrap.wrap(paragraph,89) or [''])
+        self.notes_scroll = max(0,min(self.notes_scroll,max(0,len(lines)-17)))
+        end = len(lines)-self.notes_scroll
+        for i,line in enumerate(lines[max(0,end-17):end]): d.text(45,140+i*25,line)
+        d.text(35,615,f'{len(self.p.notes)}/4000 characters. Typing appends; arrows scroll; ENTER adds a line.')
+
     def key(self, k):
+        if self.mode == 'notes':
+            if k == UP: self.notes_scroll += 5
+            elif k == DOWN: self.notes_scroll = max(0,self.notes_scroll-5)
+            elif k == 27: self.mode = self.notes_return; self.checkpoint()
+            elif k == 8: self.p.notes = self.p.notes[:-1]
+            elif k == 13: self.p.notes = (self.p.notes+'\n')[:4000]
+            return
+        if self.mode == 'redeem':
+            if k == 27: self.mode = 'money'
+            elif k == 8: self.credit_code_text = self.credit_code_text[:-1]
+            elif k == 13: self.redeem_credit_code()
+            return
+        if k == ord('-') and self.mode != 'feedback' and not (self.mode == 'map' and self.map_input):
+            self.notes_return,self.mode = self.mode,'notes'
+            self.alert = None
+            self.release_mouse()
+            self.keys.clear()
+            return
+        if self.mode == 'money':
+            if k in (27,ord('9')): self.mode = 'market'
+            elif k == ord('1'): self.mode = 'bank'
+            elif k == ord('2'):
+                if self.exchange_available(): self.mode = 'exchange'
+                else: self.message = 'No Crymto exchange here. Visit a feudal or anarchy port.'
+            elif k == ord('3'): self.mode = 'redeem'
+            elif k == ord('4'): self.pay_fines()
+            elif k == ord('0'): self.feedback_return,self.mode = 'money','feedback'
+            return
+        if k in (ord('9'),ord('p')) and self.mode in ('market','outfit'):
+            self.mode = 'money'
+            self.alert = None
+            return
         if self.mode == 'trade_deal' and k != ord('0'):
             if k == ord('y'):
                 self.message = self.p.trade(self.deal_good,False,clean_deal=True)
@@ -1378,7 +1525,7 @@ class Game:
             elif k in (27,ord('n')): self.mode = 'market'
             return
         if self.mode == 'exchange' and k != ord('0'):
-            if k in (27,ord('e')): self.mode = 'market'
+            if k in (27,ord('e')): self.mode = 'money'
             elif k == ord('l'): self.convert_crymto(True)
             elif k == ord('b'): self.convert_crymto(False)
             return
@@ -1428,7 +1575,7 @@ class Game:
             self.alert = None
             return
         if self.mode == 'bank':
-            if k in (ord('9'),27): self.mode = 'market'
+            if k in (ord('9'),27): self.mode = 'money'
             elif k == UP: self.selected = (self.selected-1)%len(GOODS)
             elif k == DOWN: self.selected = (self.selected+1)%len(GOODS)
             elif k == ord('d'): self.bank_transfer(True)
@@ -1458,11 +1605,14 @@ class Game:
             self.keys.clear()
             return
         if self.mode == 'launch_warning':
+            if k == ord('g'):
+                self.map_return,self.mode = self.launch_return,'map'
+                return
             if k == ord('l'): self.request_departure()
             elif k == ord('f'):
                 self.message = self.p.refuel()
                 self.save()
-                if self.p.fuel >= 1: self.mode = self.launch_return
+                if not self.launch_warnings(): self.mode = self.launch_return
             elif k == 27: self.mode = self.launch_return
             return
         if self.mode == 'distress':
@@ -1797,6 +1947,8 @@ class Game:
         self.p.deep_space = system is None
         if system is not None: self.p.system = system
         self.security_elapsed = self.security_dispatch = 0.
+        self.station_laser_warning,self.station_laser_timer = False,15.
+        self.enemy_police_system = None
         self.security_warning = 0
         self.launch(departure=False)
         if system is not None: self.station = [random.uniform(-80,80),random.uniform(-50,50),2200.]
@@ -1894,6 +2046,7 @@ class Game:
                  'Economy: '+economy,'Government: '+government,
                  f'Population: {population:.1f} billion',f'Diameter: {size:,} km',
                  f'Technology level: {TECH[i]}',
+                 f'Police reserve: {self.p.station_police_remaining[i]}/{STATION_POLICE_CAPACITY}',
                  'Customs: minimal' if government in ('Anarchy','Feudal') else 'Customs: regulated; contraband can be seized',
                  'Docking: allowed' if self.station_allows(i) else 'Docking: refused (hostile or wanted)']
         for row,line in enumerate(facts): d.text(35,140+row*31,line)
@@ -2290,19 +2443,25 @@ class Game:
                 star[:] = [random.uniform(-1000,1000),random.uniform(-650,650),1800 if self.speed+12 >= 0 else -1800]
         sun_range = math.sqrt(sum(v*v for v in self.sun))
         if sun_range < 600:
-            self.heat = min(120,self.heat + (6 if sun_range > 250 else 30)*dt)
+            old_heat = self.heat
+            self.heat = min(120,self.heat + (6 if sun_range > 250 else 30)*(.6 if self.shield > 0 else 1)*dt)
+            if old_heat < 70 <= self.heat: self.message = 'THERMAL WARNING: shield protection degrading. Leave the sun before shields fail!'
+            if old_heat < 90 <= self.heat: self.message = 'THERMAL WARNING: temperature tolerance exceeded! Turn away from the sun!'
             if 'scoops' in self.p.equipment and 10 <= self.speed <= 60 and 150 < sun_range <= 500:
                 self.p.fuel = min(7,self.p.fuel+0.15*dt)
                 self.message = 'Sun skimming: collecting fuel. Turn away before overheating!'
-            if self.heat > 90: self.damage(15*dt)
+            if self.heat > 70: self.damage((2+(self.heat-70)*.25)*dt)
             if self.mode == 'dead': return
         else: self.heat = max(0,self.heat-10*dt)
         self.spawn -= dt
         if self.spawn <= 0 and not self.enemy and self.station[2] > 450:
-            self.enemy_kind = 'police' if self.p.fine > 0 and random.random() < .5 else 'pirate'
-            self.enemy = [random.uniform(-120,120),random.uniform(-70,70),-850. if random.random()<.3 else 850.,6,0.]
-            self.message = 'Hostile contact! SPACE lasers; M missile; V switch laser.'
-            self.checkpoint()
+            if self.p.fine > 0 and random.random() < .5 and self.p.station_police_remaining[self.p.system] > 0 and not self.p.deep_space:
+                self.dispatch_station_police()
+            else:
+                self.enemy_kind = 'pirate'
+                self.enemy = [random.uniform(-120,120),random.uniform(-70,70),-850. if random.random()<.3 else 850.,6,0.]
+                self.message = 'Hostile contact! SPACE lasers; M missile; V switch laser.'
+                self.checkpoint()
         if self.enemy:
             e = self.enemy
             e[0] += math.sin(time.monotonic()*1.7)*25*dt
@@ -2324,7 +2483,7 @@ class Game:
         if self.mode == 'dead': return
         if 32 in self.keys and self.cooldown <= 0:
             self.fire_laser()
-        self.shield = min(100,self.shield+dt*(3 if 'energy' in self.p.equipment else 1.5)*(0.3 if self.cloaked else 1))
+        self.shield = min(100,self.shield+(0 if sun_range < 600 else dt)*(3 if 'energy' in self.p.equipment else 1.5)*(0.3 if self.cloaked else 1))
         if self.p.hull <= 0: self.mode = 'dead'
         self.update_jump_charge(dt)
 
@@ -2407,17 +2566,19 @@ class Game:
     def draw_mouse_ui(self):
         self.buttons = []
         d = self.d
-        if self.mode != 'feedback': self.mouse_button(170,18,130,'Feedback 0',ord('0'))
-        modal = self.mode in ('distress','departure','launch_warning','engineering','hyperspace','bank','jobs','planet_profile','feedback','exchange','trade_deal')
+        if self.mode not in ('feedback','notes','redeem'):
+            self.mouse_button(155,18,100,'Report 0',ord('0'))
+            self.mouse_button(260,18,90,'Notes -',ord('-'))
+        modal = self.mode in ('distress','departure','launch_warning','engineering','hyperspace','bank','jobs','planet_profile','feedback','exchange','trade_deal','money','notes','redeem')
         if self.mode == 'flight':
-            self.mouse_button(310,18,92,'Actions',action=lambda:setattr(self,'mouse_controls',not self.mouse_controls))
+            self.mouse_button(355,18,80,'Actions',action=lambda:setattr(self,'mouse_controls',not self.mouse_controls))
         if self.mode in ('market','outfit','bank'):
-            self.mouse_button(310,18,92,'Jobs J',ord('j'))
+            self.mouse_button(355,18,80,'Jobs J',ord('j'))
         if not modal:
-            self.mouse_button(408,18,50,'Help',ord('1'))
-            self.mouse_button(462,18,70,'Update',ord('2'))
-        self.mouse_button(536,18,45,'FS',action=self.mouse_fullscreen)
-        self.mouse_button(585,18,45,'<' if modal or self.mode in ('help','updates') else 'X',action=self.mouse_back)
+            self.mouse_button(440,18,45,'Help',ord('1'))
+            self.mouse_button(490,18,45,'Upd2',ord('2'))
+        self.mouse_button(540,18,35,'FS',action=self.mouse_fullscreen)
+        self.mouse_button(580,18,45,'<' if modal or self.mode in ('help','updates') else 'X',action=self.mouse_back)
         row_y = 674
         if self.mode in ('market','outfit'):
             if self.mode == 'market':
@@ -2430,14 +2591,26 @@ class Game:
                     self.mouse_row(35,130+(i-start)*37,720,37,lambda i=i:setattr(self,'shop_selected',i))
                 self.mouse_button(690,90,45,'Up',UP)
                 self.mouse_button(740,90,60,'Down',DOWN)
-                labels = [('Fit',ord('b')),('Fuel',ord('f')),('Service',ord('r')),('Market',ord('u')),('Launch',ord('l')),('Map',ord('g')),('Skills',ord('8')),('Fines',ord('p'))]
+                labels = [('Fit',ord('b')),('Fuel',ord('f')),('Service',ord('r')),('Market',ord('u')),('Launch',ord('l')),('Map',ord('g')),('Skills',ord('8')),('Money',ord('9'))]
             for i,(label,key) in enumerate(labels): self.mouse_button(35+i*128,row_y,120,label,key)
-            self.mouse_button(790,570,250,'Bank / storage 9',ord('9'))
+            self.mouse_button(790,570,250,'Money 9',ord('9'))
             self.mouse_button(790,610,250,'Station jobs J',ord('j'))
-            self.mouse_button(35,638,300,'Crymto exchange E',ord('e'))
+            self.mouse_button(35,638,300,'Money 9',ord('9'))
             if self.mode == 'market':
                 self.mouse_button(350,638,300,'Negotiate payout N',ord('n'))
                 self.mouse_button(665,638,300,'Buy with Crymto C',ord('c'))
+        elif self.mode == 'money':
+            for i,(label,key) in enumerate([('Bank / storage',ord('1')),('Crymto exchange',ord('2')),('Redeem code',ord('3')),('Pay fines',ord('4'))]):
+                self.mouse_button(35+(i%2)*515,380+(i//2)*100,490,label,key)
+            self.mouse_button(35,674,1000,'Return to market',ord('9'))
+        elif self.mode == 'redeem':
+            self.mouse_button(35,674,490,'Redeem code',action=self.redeem_credit_code)
+            self.mouse_button(550,674,490,'Return to Money',action=lambda:setattr(self,'mode','money'))
+        elif self.mode == 'notes':
+            self.mouse_button(35,674,240,'Earlier',UP)
+            self.mouse_button(290,674,240,'Later',DOWN)
+            self.mouse_button(545,674,240,'Save notes',action=self.checkpoint)
+            self.mouse_button(800,674,240,'Return',action=lambda:self.key(27))
         elif self.mode == 'trade_deal':
             self.mouse_button(35,674,490,'Accept clean-credit deal',ord('y'))
             self.mouse_button(550,674,490,'Decline',ord('n'))
@@ -2482,6 +2655,7 @@ class Game:
                 labels = [('Confirm',13,False),('Erase',8,False),('Cancel',27,False)]
             for i,(label,key,hold) in enumerate(labels): self.mouse_button(35+i*166,row_y,155,label,key,hold=hold)
         elif self.mode == 'launch_warning':
+            self.mouse_button(35,630,300,'Choose destination G',ord('g'))
             for i,(label,key) in enumerate([('Buy fuel',ord('f')),('Request launch',ord('l')),('Cancel',27)]): self.mouse_button(50+i*300,row_y,280,label,key)
         elif self.mode == 'departure':
             self.mouse_button(50,row_y,300,'Launch when cleared',ord('l'))
@@ -2594,7 +2768,18 @@ class Game:
         d.text(640,5,location+economy,GOLD)
         d.text(640,29,f'CR {p.credits:.0f}  CYM {p.crymto}  KILLS {p.kills}')
         d.line(25,52,W-25,52)
-        if self.mode == 'trade_deal':
+        if self.mode == 'money':
+            self.draw_money()
+        elif self.mode == 'notes':
+            self.draw_notepad()
+        elif self.mode == 'redeem':
+            d.text(35,85,'MONEY / REDEEM CREDIT CODE',GOLD)
+            d.text(45,180,'Enter a code and press ENTER or click Redeem.')
+            d.rect(35,245,1030,60,GREEN)
+            d.text(45,265,self.credit_code_text+'_',GOLD)
+            d.text(45,360,'Codes can only be redeemed once by this pilot.')
+            d.text(45,415,'ESC returns to Money.')
+        elif self.mode == 'trade_deal':
             good = self.deal_good
             dirty = quote(p.system,good,False)
             clean = dirty*85//100
@@ -2661,7 +2846,7 @@ class Game:
                 d.text(35,455,EQUIPMENT[self.shop_selected][4],GOLD)
                 d.text(35,490,'UP/DOWN select; B or ENTER purchases and fits equipment.')
             for i,t in enumerate(['COMMANDER STATUS',f'Cargo {sum(p.cargo)}/{p.capacity} t',f'Fuel  {p.fuel:.2f}/7',f'Hull  {p.hull:.0f}%',f'Refill {p.fuel_cost()} cr',f'Service {p.service_cost()} cr',f'Mines {p.mines}/4',f'Fine {p.fine} cr',f'Wear {p.maintenance:.0f}%',f'Eng. {p.engineering_level}/5']): d.text(790,135+i*40,t)
-            d.text(35,550,'F fuel   R repair   P pay fines   U outfitting/market   L launch')
+            d.text(35,550,'F fuel   R repair   9 Money   U outfitting/market   L launch')
             d.text(35,590,'J paid station jobs   G chart   1 manual   ESC quit')
         elif self.mode == 'planet_profile':
             self.draw_planet_profile()
@@ -2720,7 +2905,7 @@ class Game:
             d.line(940,550,550,330,color)
         if self.enemy_shot:
             shot = self.enemy_shot
-            color = RED if shot['kind'] == 'pirate' else (120,170,255)
+            color = GOLD if shot['kind'] == 'station' else RED if shot['kind'] == 'pirate' else (120,170,255)
             origin = self.project(shot['position'])
             if origin:
                 x,y,_ = origin
@@ -2749,6 +2934,8 @@ class Game:
             d.text(35,563,f'GALACTIC COURSE {w["name"]}: ({w["position"][0]:.2f}, {w["position"][1]:.2f})  {galactic_distance(p.position,w["position"]):.2f} LY')
         else:
             d.text(35,563,f'BEACON {label}: X {x*c+y*s:+.0f} Y {-x*s+y*c:+.0f} Z {z:+.0f} RANGE {math.sqrt(x*x+y*y+z*z):.0f}m')
+        if self.heat >= 70:
+            d.text(35,520,'THERMAL LIMIT 90% / SHIELDS DRAINING - TURN AWAY',RED if self.heat >= 90 else GOLD)
         d.text(35,594,f'SPEED {self.speed:.0f}  FUEL {p.fuel:.2f}  {('REAR PULSE' if 'rear' in p.equipment else 'REAR UNARMED') if self.rear_view else p.laser.upper()} LASER  MISSILES {p.missiles}  HEAT {self.heat:.0f}%')
         d.text(35,625,f'SHIELD {self.shield:.0f}%  HULL {p.hull:.0f}%  HOLD {sum(p.cargo)}/{p.capacity}t')
         error = math.degrees(self.slot_error())
@@ -2817,6 +3004,25 @@ def self_test():
     print('Economy spread, cargo capacity and navigation checks passed.')
 
 
+def grant_testing_credits(amount):
+    """Explicit offline testing tool; caller must hold the game's save lock."""
+    if type(amount) is not int or not 1 <= amount <= 1000000000:
+        raise ValueError('Testing grant must be 1 to 1,000,000,000 credits.')
+    raw = SAVE.read_bytes()
+    data = json.loads(raw)
+    pilot = Pilot()
+    for key in vars(pilot):
+        if key in data: setattr(pilot,key,data[key])
+    pilot.validate()
+    backup = SAVE.with_name('save.before-test-grant-'+uuid.uuid4().hex[:12]+'.json')
+    backup.write_bytes(raw)
+    data['credits'] = pilot.credits+amount
+    temp = SAVE.with_suffix('.grant.tmp')
+    temp.write_text(json.dumps(data,allow_nan=False,indent=2)+'\n',encoding='utf-8')
+    temp.replace(SAVE)
+    print(f'Added {amount:,} testing credits. Wallet: {data["credits"]:,.2f}. Backup: {backup}')
+
+
 def main():
     global SAVE
     if '--version' in sys.argv:
@@ -2836,6 +3042,11 @@ def main():
         instance_file = SAVE.with_suffix('.lock').open('a')
         try: fcntl.flock(instance_file,fcntl.LOCK_EX|fcntl.LOCK_NB)
         except OSError: raise RuntimeError('Star Trader is already running for this save. Close it before starting another copy.')
+        if '--grant-test-credits' in sys.argv:
+            index = sys.argv.index('--grant-test-credits')
+            if index+1 >= len(sys.argv): raise ValueError('Specify the testing credit amount.')
+            grant_testing_credits(int(sys.argv[index+1]))
+            return
         display = Display()
         game = Game(display)
         last = time.monotonic()
@@ -2860,7 +3071,7 @@ def main():
             frames += 1
             if '--smoke-test' in sys.argv and frames >= 5: break
             time.sleep(max(0,1/60-(time.monotonic()-now)))
-    except (OSError,RuntimeError) as e:
+    except (OSError,RuntimeError,ValueError) as e:
         print(f'Unable to start: {e}',file=sys.stderr)
         sys.exit(1)
     finally:

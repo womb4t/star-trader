@@ -1,3 +1,13 @@
+# 0.2.19 — departure access checks and finite station defences
+
+- Warn before launch about refused destination docking, hostile station guns, deep-space destinations and fuel reserves.
+- Limit each station to six police ships, with persistent reserves and defeat counts.
+- Defeating all six permits docking; station lasers warn for 15 seconds before firing within 2500m.
+- Solar shields slow heat buildup but drain above 70% heat; failed shielding exposes the hull. Disable solar-zone shield regeneration.
+- Add Money for banking/storage, exchanges, fine payments and one-time code redemption (STAR-TEST-100K grants 100,000 testing credits).
+- Add a saved personal Notes notepad with mouse/keyboard scrolling.
+- Keep an explicit locked, backed-up offline testing credit-grant command for administration.
+
 # 0.2.18 — unambiguous stocktake answers
 
 - Shortfall and surplus choices always use positive quantities, including when the manifest matches.

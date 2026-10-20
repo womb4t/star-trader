@@ -468,6 +468,113 @@ class GameplayTests(unittest.TestCase):
                 self.assertEqual(j['choices'][j['answer']],'Matches manifest')
         self.assertTrue(found_matching)
 
+    def test_departure_warns_for_refused_destination_even_with_fuel(self):
+        g = self.game
+        g.p.fine,g.p.fuel = 1200,7
+        g.p.waypoint = dict(name='Zaonce',position=st.coordinates(1),system=1)
+        g.key(ord('l'))
+        self.assertEqual(g.mode,'launch_warning')
+        self.assertTrue(any('REFUSE' in warning for warning in g.launch_warnings()))
+        g.key(ord('f'))
+        self.assertEqual(g.mode,'launch_warning')
+        g.key(ord('g'))
+        self.assertEqual(g.mode,'map')
+        self.assertEqual(g.map_return,'market')
+
+    def test_finite_police_reserves_persist_and_defeat_all_allows_docking(self):
+        g = self.game
+        g.mode = 'flight'
+        g.station_hostilities[0] = True
+        for _ in range(st.STATION_POLICE_CAPACITY):
+            self.assertTrue(g.dispatch_station_police())
+            g.destroy_enemy()
+        self.assertFalse(g.dispatch_station_police())
+        self.assertEqual(g.p.station_police_remaining[0],0)
+        self.assertTrue(g.station_overwhelmed())
+        self.assertTrue(g.station_allows())
+        g.checkpoint()
+        restored = st.Game(None)
+        self.assertEqual(restored.p.station_police_remaining[0],0)
+        self.assertTrue(restored.station_overwhelmed())
+        self.assertEqual(restored.p.station_police_remaining[1],st.STATION_POLICE_CAPACITY)
+
+    def test_exhausting_police_without_destroying_them_does_not_unlock_docking(self):
+        g = self.game
+        g.p.station_police_remaining[0] = 0
+        g.station_hostilities[0] = True
+        self.assertFalse(g.station_allows())
+
+    def test_station_lasers_warn_then_fire_and_stop_outside_range(self):
+        g = self.game
+        g.mode = 'flight'
+        g.p.station_police_defeated[0] = st.STATION_POLICE_CAPACITY
+        g.station = [0.,0.,1500.]
+        before = g.shield
+        g.update_station_lasers(.1)
+        self.assertIn('15 seconds',g.message)
+        g.update_station_lasers(14)
+        self.assertEqual(g.shield,before)
+        g.update_station_lasers(1)
+        self.assertLess(g.shield,before)
+        self.assertEqual(g.enemy_shot['kind'],'station')
+        g.station = [0.,0.,3000.]
+        before = g.shield
+        g.update_station_lasers(20)
+        self.assertEqual(g.shield,before)
+
+    def test_solar_radiation_drains_shields_then_hull(self):
+        g = self.game
+        g.mode = 'flight'
+        g.speed = 0
+        g.sun,g.heat = [0.,0.,400.],80.
+        g.shield,g.p.hull = 100,100
+        g.update(.1)
+        self.assertLess(g.shield,100)
+        self.assertEqual(g.p.hull,100)
+        shielded_heat = g.heat
+        g.shield,g.heat = 0,80.
+        g.update(.1)
+        self.assertGreater(g.heat,shielded_heat)
+        self.assertLess(g.p.hull,100)
+
+    def test_testing_credit_grant_preserves_snapshot_and_makes_backup(self):
+        g = self.game
+        g.p.fine = 1200
+        g.checkpoint()
+        before = json.loads(st.SAVE.read_text())
+        st.grant_testing_credits(100000)
+        after = json.loads(st.SAVE.read_text())
+        self.assertEqual(after['credits'],before['credits']+100000)
+        self.assertEqual(after['_session'],before['_session'])
+        self.assertEqual(after['fine'],1200)
+        backups = list(st.SAVE.parent.glob('save.before-test-grant-*.json'))
+        self.assertEqual(len(backups),1)
+        self.assertEqual(json.loads(backups[0].read_text()),before)
+
+    def test_money_code_is_single_use_and_notes_persist(self):
+        g = self.game
+        g.key(ord('9'))
+        self.assertEqual(g.mode,'money')
+        g.key(ord('3'))
+        g.text_input('star-test-100k')
+        g.key(13)
+        self.assertEqual(g.p.credits,100150)
+        g.text_input('STAR-TEST-100K')
+        g.key(13)
+        self.assertEqual(g.p.credits,100150)
+        self.assertIn('already redeemed',g.message)
+        g.key(27)
+        g.key(ord('-'))
+        g.text_input('Buy medicine on Zaonce.')
+        g.key(13)
+        g.text_input('Avoid hostile ports.')
+        g.key(27)
+        self.assertEqual(g.mode,'money')
+        restored = st.Game(None)
+        self.assertEqual(restored.p.notes,'Buy medicine on Zaonce.\nAvoid hostile ports.')
+        self.assertIn('STAR-TEST-100K',restored.p.redeemed_credit_codes)
+        self.assertEqual(restored.p.credits,100150)
+
     def test_market_spread_and_stock(self):
         p = self.game.p
         cash, stock = p.credits, p.stock[0][0]
@@ -830,7 +937,7 @@ class GameplayTests(unittest.TestCase):
             g.dock()
         self.assertEqual(g.p.cargo[6],0)
         self.assertEqual(g.p.fine,50)
-        g.key(ord('p'))
+        g.key(ord('p')); g.key(ord('4'))
         self.assertEqual((g.p.fine,g.p.credits),(0,100))
         g.enemy_kind = 'police'; g.enemy = [0,0,500,6,0]; g.destroy_enemy()
         self.assertEqual((g.p.fine,g.p.credits),(150,100))
@@ -1344,7 +1451,7 @@ class GameplayTests(unittest.TestCase):
 
     def test_bank_money_and_station_cargo_survive_salvage(self):
         g=self.game
-        g.p.credits=1000;g.key(ord('9'))
+        g.p.credits=1000;g.key(ord('9'));g.key(ord('1'))
         self.assertEqual(g.mode,'bank')
         g.bank_amount=500;g.key(ord('d'))
         self.assertEqual((g.p.credits,g.p.bank_balance),(500,500))

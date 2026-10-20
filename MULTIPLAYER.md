@@ -140,3 +140,11 @@ Current releases remain offline games with game-only balances. They do not accep
 ## Crymto ledger
 
 The offline game now separates clean credits from Crymto contraband proceeds. Crymto survives ship destruction. Future servers should keep the balance in an authoritative player account, with atomic commodity settlement, explicit clean-payment deals and audited port exchanges. Ship loss must not erase this account or duplicate it on reconnect.
+
+## First shared-server test
+
+Keep all eight current star systems, inter-station travel, existing ships and equipment available. Target a maximum of eight simultaneously connected players for the initial test. Each tester runs their own client over the internet; one shared server persists the universe. Testing must include trade routes, fuel use, docking, hyperspace/cruise and encounters across systems. Do not restrict the test to one star system.
+
+Extract simulation from SDL rendering. The server needs global positions/orientations rather than the present single-player cockpit-relative vectors; clients render relative views of server entities. The server owns accounts, credits, Crymto, inventories, job limits, police pools, combat outcomes and uncaptained ships. Clients submit control actions; they cannot declare balances or damage results. Persist the world and accounts, validate commands and provide audited admin-only testing grants. Preserve offline play through the same simulation. This is a design plan, not a working multiplayer server yet.
+
+Credit codes in the current offline test build are intentionally local testing grants. Replace their local lookup with server-issued vouchers and an atomic account redemption ledger before multiplayer; clients must never be able to authorise a grant. Keep private player notes account-scoped.
