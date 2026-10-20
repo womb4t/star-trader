@@ -20,7 +20,7 @@ import tempfile
 import fcntl
 import textwrap
 
-VERSION = '0.2.22'
+VERSION = '0.2.23'
 STATION_POLICE_CAPACITY = 6
 DOCK_ROLL_TOLERANCE = math.radians(14)
 CRUISE_SECONDS_PER_LY = 45
@@ -519,6 +519,8 @@ class Game:
         self.dock_clearance = self.docking_pending = 0.
         self.rescue = None
         self.rescue_cooldown = 0.
+        self.money_return = self.vms_return = 'market'
+        self.outfit_return = 'market'
         self.menu_selected = 0
         self.notes_scroll = 0
         self.credit_code_text = ""
@@ -596,9 +598,9 @@ class Game:
     def session_mode(self):
         mode = self.mode
         for _ in range(6):
-            if mode in ('market','outfit','departure','launch_warning','bank','jobs','exchange','trade_deal','money','redeem'): return 'market'
+            if mode in ('market','outfit','departure','launch_warning','bank','jobs','exchange','trade_deal','redeem'): return 'market'
             if mode in ('flight','cruise','hyperspace','dead'): return mode
-            attr = {'help':'help_return','updates':'update_return','map':'map_return','menu':'menu_return','notes':'notes_return','feedback':'feedback_return','planet_profile':'map_return','engineering':'engineering_return'}.get(mode)
+            attr = {'money':'money_return','vms':'vms_return','help':'help_return','updates':'update_return','map':'map_return','menu':'menu_return','notes':'notes_return','feedback':'feedback_return','planet_profile':'map_return','engineering':'engineering_return'}.get(mode)
             if not attr: return 'flight'
             mode = getattr(self,attr,'flight')
         return 'flight'
@@ -1071,7 +1073,7 @@ class Game:
         return max(.05,min(.85,.2+self.p.engineering_level*.12+min(.05,self.p.workshop_xp*.0005)-(100-condition)*.001))
 
     def train_engineering(self):
-        if self.engineering_return not in ('market','outfit'):
+        if self.engineering_location() not in ('market','outfit'):
             self.message = 'Engineering training is available while docked.'
             return
         if self.p.engineering_level >= 5:
@@ -1087,7 +1089,7 @@ class Game:
         self.save()
 
     def attempt_engineering(self, other=False):
-        if self.engineering_return != 'flight':
+        if self.engineering_location() != 'flight':
             self.message = 'Use station repairs while docked; field repairs are for flight.'
             return
         if self.p.engineering_ready_at > time.time():
@@ -1176,7 +1178,7 @@ class Game:
         self.autodock = False
         self.keys.clear()
         self.cloaked = False
-        self.message = ('Docked.' + inspection) if inspection else 'Docked. F fuel; R repairs; U outfitting; P pay fines.'
+        self.message = ('Docked.' + inspection) if inspection else 'Docked. X VMS for ship services; 9 Money; G Navigation.'
         self.save()
 
     def slot_error(self):
@@ -1472,7 +1474,7 @@ class Game:
 
         d.text(45,320,f'Pay fines costs {p.fine:,} credits. Code redemption is single-use per pilot.')
         d.text(45,570,'Crymto survives ship destruction. Bank funds and stored cargo are protected.')
-        d.text(45,610,'9 / ESC returns to the market.')
+        d.text(45,610,'9 / ESC returns. Docking is required for financial services.' if self.money_return != 'market' else '9 / ESC returns to the market.')
 
     def draw_notepad(self):
         d = self.d
@@ -1484,6 +1486,55 @@ class Game:
         end = len(lines)-self.notes_scroll
         for i,line in enumerate(lines[max(0,end-17):end]): d.text(45,140+i*25,line)
         d.text(35,615,f'{len(self.p.notes)}/4000 characters. Typing appends; arrows scroll; ENTER adds a line.')
+
+    def open_hub(self, target):
+        base = self.session_mode()
+        if base not in ('market','flight','cruise','dead'):
+            self.message = 'Wait until transit finishes before opening ship services.'
+            return
+        if self.mode == target:
+            self.mode = getattr(self,target+'_return')
+            return
+        setattr(self,target+'_return',base)
+        self.mode = target
+        self.keys.clear()
+        self.release_mouse()
+        self.alert = None
+
+    def open_navigation(self):
+        if self.mode == 'map':
+            self.mode = self.map_return
+            self.map_input = ''
+            return
+        base = self.session_mode()
+        if base not in ('market','flight','cruise'):
+            self.message = 'Navigation is available while docked or flying.'
+            return
+        self.mode = base
+        self.key(ord('g'))
+
+    def engineering_location(self):
+        return self.vms_return if self.engineering_return == 'vms' else self.engineering_return
+
+    def draw_vms(self):
+        d,p = self.d,self.p
+        d.text(35,85,'VMS / VESSEL MANAGEMENT SYSTEM',GOLD)
+        for i,line in enumerate([f'Hull {p.hull:.0f}% / Shields {self.shield:.0f}%',
+                                 f'Fuel {p.fuel:.2f}/7 / Heat {self.heat:.0f}%',
+                                 f'Cargo {sum(p.cargo)}/{p.capacity} tonnes / Mass {p.mass_factor:.2f}',
+                                 f'Maintenance wear {p.maintenance:.0f}% / Flights since service {p.flights_since_service}',
+                                 f'Front laser: {p.laser} / Rear: '+('pulse' if 'rear' in p.equipment else 'not fitted'),
+                                 f'Missiles {p.missiles}/4 / Mines {p.mines}/4',
+                                 f'Engineering level {p.engineering_level}/5 / Workshop XP {p.workshop_xp}']):
+            d.text(45,145+i*35,line)
+        modules = ', '.join(label for key,label,*_ in EQUIPMENT if key in p.equipment) or 'Standard starter equipment'
+        d.text(45,405,'FITTED EQUIPMENT',GOLD)
+        for i,line in enumerate(textwrap.wrap(modules,90)[:3]): d.text(45,440+i*25,line)
+        if self.vms_return == 'market':
+            d.text(45,535,f'Fuel refill: {p.fuel_cost()} cr / Service: {p.service_cost()} cr')
+        else:
+            d.text(45,535,'Fuel, station repairs and fitting require docking. Field engineering remains available.')
+        d.text(45,625,'X / ESC returns. G opens Navigation. 8 opens engineering.')
 
     def open_utility(self, target):
         if target == 'help':
@@ -1554,8 +1605,27 @@ class Game:
             self.release_mouse()
             self.keys.clear()
             return
+        if k == ord('x') and self.mode != 'feedback' and not (self.mode == 'map' and self.map_input):
+            self.open_hub('vms')
+            return
+        if k == ord('g') and self.mode in ('money','vms'):
+            self.open_navigation()
+            return
+        if self.mode == 'vms':
+            if k == 27: self.mode = self.vms_return
+            elif k == ord('9'): self.open_hub('money')
+            elif k == ord('8'):
+                self.engineering_return,self.mode = 'vms','engineering'
+            elif k in (ord('f'),ord('r'),ord('u'),ord('l')):
+                if self.vms_return != 'market': self.message = 'Dock before using station vessel services.'
+                elif k == ord('f'): self.message = self.p.refuel(); self.checkpoint()
+                elif k == ord('r'): self.message = self.p.repair(); self.checkpoint()
+                elif k == ord('u'): self.outfit_return,self.mode = 'vms','outfit'
+                elif k == ord('l'): self.mode = 'market'; self.request_launch()
+            return
         if self.mode == 'money':
-            if k in (27,ord('9')): self.mode = 'market'
+            if k in (27,ord('9')): self.mode = self.money_return
+            elif self.money_return != 'market' and k != ord('0'): self.message = 'Dock at a station to use Money services.'
             elif k == ord('1'): self.mode = 'bank'
             elif k == ord('2'):
                 if self.exchange_available(): self.mode = 'exchange'
@@ -1565,9 +1635,8 @@ class Game:
             elif k in (ord('5'),ord('j')): self.mode = 'jobs'; self.alert = None
             elif k == ord('0'): self.feedback_return,self.mode = 'money','feedback'
             return
-        if k in (ord('9'),ord('p')) and self.mode in ('market','outfit'):
-            self.mode = 'money'
-            self.alert = None
+        if (k == ord('9') and self.mode != 'feedback' and not (self.mode == 'map' and self.map_input)) or (k == ord('p') and self.mode in ('market','outfit')):
+            self.open_hub('money')
             return
         if self.mode == 'trade_deal' and k != ord('0'):
             if k == ord('y'):
@@ -1765,7 +1834,8 @@ class Game:
             return
         if self.mode in ('market', 'outfit'):
             if k == ord('u'):
-                self.mode = 'market' if self.mode == 'outfit' else 'outfit'
+                if self.mode == 'outfit': self.mode = self.outfit_return
+                else: self.outfit_return,self.mode = 'market','outfit'
                 return
             if k == ord('l'): self.request_launch(); return
             if k == ord('f'):
@@ -1963,7 +2033,7 @@ class Game:
             self.message = 'Launch before beginning interstellar cruise.'
             return
         w = self.p.waypoint
-        if not w: self.message = 'Lock a course on the galaxy map first.'; return
+        if not w: self.message = 'Lock a course in Navigation first.'; return
         dist = galactic_distance(self.p.position,w['position'])
         cost = dist*.25*self.p.mass_factor
         if dist < .001: self.message = 'Already at that coordinate.'; return
@@ -2042,7 +2112,7 @@ class Game:
 
     def draw_map(self):
         d,p = self.d,self.p
-        d.text(30,75,'GALAXY / arrows select / TAB free cursor / ENTER lock')
+        d.text(30,75,'NAVIGATION / arrows select / TAB cursor / ENTER lock')
         d.text(30,105,'/ search  C coordinates  HOLD H jump  T cruise  G return')
         for n in range(11):
             x,y = 60+n*60,155+n*39
@@ -2619,11 +2689,16 @@ class Game:
         self.buttons = []
         d = self.d
         if self.mode not in ('feedback','notes','redeem','menu'):
-            if self.mode != 'help': self.mouse_button(160,18,130,'Controls',action=lambda:self.open_utility('help'))
-            self.mouse_button(300,18,100,'Notes',action=lambda:self.open_utility('notes'))
-            self.mouse_button(410,18,100,'Menu',action=lambda:self.open_utility('menu'))
-        modal = self.mode in ('distress','departure','launch_warning','engineering','hyperspace','bank','jobs','planet_profile','feedback','exchange','trade_deal','money','notes','redeem','menu')
-        self.mouse_button(520,18,110,'Back' if modal or self.mode in ('help','updates','map') else 'Save/quit',action=self.mouse_back)
+            self.mouse_button(155,18,95,'Money',action=lambda:self.open_hub('money'))
+            self.mouse_button(260,18,75,'VMS',action=lambda:self.open_hub('vms'))
+            self.mouse_button(345,18,130,'Navigation',action=self.open_navigation)
+            self.mouse_button(485,18,65,'Menu',action=lambda:self.open_utility('menu'))
+            section = 'money' if self.mode in ('money','bank','jobs','exchange') else 'vms' if self.mode in ('vms','outfit','engineering') else 'map' if self.mode in ('map','planet_profile') else None
+            if section:
+                x,w = {'money':(155,95),'vms':(260,75),'map':(345,130)}[section]
+                d.rect(x,18,w,32,GOLD)
+        modal = self.mode not in ('market','flight','cruise','dead')
+        self.mouse_button(560,18,70,'Back' if modal else 'Quit',action=self.mouse_back)
         row_y = 674
         if self.mode == 'menu':
             for i,(label,_) in enumerate(self.menu_actions()):
@@ -2635,24 +2710,31 @@ class Game:
             if self.mode == 'market':
                 for i in range(len(GOODS)):
                     self.mouse_row(35,165+i*35,610,35,lambda i=i:setattr(self,'selected',i))
-                labels = [('Buy',ord('b')),('Sell',ord('s')),('Fuel',ord('f')),('Service',ord('r')),('Outfit',ord('u')),('Launch',ord('l')),('Map',ord('g')),('Skills',ord('8'))]
+                labels = [('Buy',ord('b')),('Sell',ord('s'))]
             else:
                 start = max(0,min(self.shop_selected-4,len(EQUIPMENT)-8))
                 for i in range(start,min(start+8,len(EQUIPMENT))):
                     self.mouse_row(35,130+(i-start)*37,720,37,lambda i=i:setattr(self,'shop_selected',i))
                 self.mouse_button(690,90,45,'Up',UP)
                 self.mouse_button(740,90,60,'Down',DOWN)
-                labels = [('Fit',ord('b')),('Fuel',ord('f')),('Service',ord('r')),('Market',ord('u')),('Launch',ord('l')),('Map',ord('g')),('Skills',ord('8'))]
-            for i,(label,key) in enumerate(labels): self.mouse_button(35+i*128,row_y,120,label,key)
-            self.mouse_button(790,570,250,'Money 9',ord('9'))
+                labels = [('Fit',ord('b')),('Return to VMS' if self.outfit_return == 'vms' else 'Return to market',ord('u'))]
+            for i,(label,key) in enumerate(labels): self.mouse_button(35+i*220,row_y,210,label,key)
             if self.mode == 'market':
                 self.mouse_button(350,638,300,'Negotiate payout N',ord('n'))
                 self.mouse_button(665,638,300,'Buy with Crymto C',ord('c'))
-        elif self.mode == 'money':
+        elif self.mode == 'vms':
+            if self.vms_return == 'market':
+                for i,(label,key) in enumerate([('Buy fuel F',ord('f')),('Service R',ord('r')),('Outfit U',ord('u')),('Engineering 8',ord('8')),('Launch L',ord('l'))]):
+                    self.mouse_button(35+i*205,575,195,label,key)
+            else: self.mouse_button(35,575,300,'Engineering 8',ord('8'))
+            self.mouse_button(35,674,1000,'Return',action=lambda:self.key(27))
+        elif self.mode == 'money' and self.money_return == 'market':
             for i,(label,key) in enumerate([('Bank / storage',ord('1')),('Crymto exchange',ord('2')),('Redeem code',ord('3')),('Pay fines',ord('4'))]):
                 self.mouse_button(35+(i%2)*515,380+(i//2)*100,490,label,key)
             self.mouse_button(35,535,1005,'Station jobs / earn credits',ord('5'))
             self.mouse_button(35,674,1000,'Return to market',ord('9'))
+        elif self.mode == 'money':
+            self.mouse_button(35,674,1000,'Return',ord('9'))
         elif self.mode == 'redeem':
             self.mouse_button(35,674,490,'Redeem code',action=self.redeem_credit_code)
             self.mouse_button(550,674,490,'Return to Money',action=lambda:setattr(self,'mode','money'))
@@ -2723,7 +2805,7 @@ class Game:
                     if i == self.help_page: self.d.rect(35+i*172,137,165,28,GOLD)
             self.mouse_button(40,row_y,160,'Return',ord('1') if self.mode == 'help' else ord('2'))
         elif self.mode == 'cruise':
-            for i,(label,key) in enumerate([('Cancel cruise',ord('t')),('Map',ord('g')),('Distress',ord('6'))]): self.mouse_button(50+i*300,row_y,280,label,key)
+            for i,(label,key) in enumerate([('Cancel cruise',ord('t')),('Navigation',ord('g')),('Distress',ord('6'))]): self.mouse_button(50+i*300,row_y,280,label,key)
         elif self.mode == 'dead':
             self.mouse_button(50,row_y,350,'Recover starter ship',ord('r'))
             self.mouse_button(440,row_y,300,'New pilot / reset',ord('n'))
@@ -2731,7 +2813,7 @@ class Game:
             self.mouse_button(35,674,190,'Flight controls',action=lambda:setattr(self,'mouse_controls',not self.mouse_controls))
         if self.mode == 'flight' and self.mouse_controls:
             groups=[('Flight', [('Thrust W',ord('w'),True),('Brake S',ord('s'),True),('Fire Spc',32,True),('Left',LEFT,True),('Up',UP,True),('Right',RIGHT,True),('Roll Q',ord('q'),True),('Down',DOWN,True),('Roll E',ord('e'),True)]),
-                ('Nav',[('Map',ord('g'),False),('Hold jump',ord('h'),True),('Cruise',ord('t'),False),('Station',ord('d'),False),('Planet',ord('p'),False),('Rocks',ord('a'),False),('Sun',ord('j'),False),('Scoop',ord('o'),False),('Guide ON' if self.course_assist else 'Guide Y',ord('y'),False)]),
+                ('Nav',[('Nav G',ord('g'),False),('Hold jump',ord('h'),True),('Cruise',ord('t'),False),('Station',ord('d'),False),('Planet',ord('p'),False),('Rocks',ord('a'),False),('Sun',ord('j'),False),('Scoop',ord('o'),False),('Guide ON' if self.course_assist else 'Guide Y',ord('y'),False)]),
                 ('Combat',[('Fire',32,True),('View 4',ord('4'),False),('Laser',ord('v'),False),('Missile',ord('m'),False),('Mine',ord('b'),False),('Jammer',ord('z'),False),('Cloak',ord('k'),False),('Target',ord('5'),False)]),
                 ('Safety',[('Radio 7',ord('7'),False),('Autodock',ord('c'),False),('Skills',ord('8'),False),('Distress',ord('6'),False),('Fine ON' if self.fine_control else 'Fine I',ord('i'),False)])]
             d.fill(30,105,350,270,(5,16,27));d.rect(30,105,350,270,GREEN)
@@ -2769,7 +2851,7 @@ class Game:
                 ('Local navigation','D / P / A / J','Select station, planet, rocks or sun. Gold dots and arrows show the bearing.'),
                 ('Pick up ore','O','Fit scoops. Get within 260m of a fragment at speed 50 or below.')]),
             ('Navigation',[
-                ('Galaxy map','G','Click a planet or empty point. Planet profiles show coordinates and services.'),
+                ('Navigation','G','Click a planet or empty point. Planet profiles show coordinates and services.'),
                 ('Search and lock','/  C  ENTER','Search by name, enter coordinates, then lock. Mouse map clicks also lock.'),
                 ('Fast travel','HOLD H','Keep holding for the 3-second countdown. Release early to cancel the jump.'),
                 ('Economical travel','T','Cruise uses less fuel but takes time. T cancels at your current coordinates.'),
@@ -2821,7 +2903,9 @@ class Game:
         d.text(640,5,location+economy,GOLD)
         d.text(640,29,f'CR {p.credits:.0f}  CYM {p.crymto}  KILLS {p.kills}')
         d.line(25,52,W-25,52)
-        if self.mode == 'menu':
+        if self.mode == 'vms':
+            self.draw_vms()
+        elif self.mode == 'menu':
             self.draw_menu()
         elif self.mode == 'money':
             self.draw_money()
@@ -2901,8 +2985,8 @@ class Game:
                 d.text(35,455,EQUIPMENT[self.shop_selected][4],GOLD)
                 d.text(35,490,'UP/DOWN select; B or ENTER purchases and fits equipment.')
             for i,t in enumerate(['COMMANDER STATUS',f'Cargo {sum(p.cargo)}/{p.capacity} t',f'Fuel  {p.fuel:.2f}/7',f'Hull  {p.hull:.0f}%',f'Refill {p.fuel_cost()} cr',f'Service {p.service_cost()} cr',f'Mines {p.mines}/4',f'Fine {p.fine} cr',f'Wear {p.maintenance:.0f}%',f'Eng. {p.engineering_level}/5']): d.text(790,135+i*40,t)
-            d.text(35,550,'F fuel   R repair   9 Money   U outfitting/market   L launch')
-            d.text(35,590,'J paid station jobs   G chart   1 manual   ESC quit')
+            d.text(35,550,'Ship fuel, service, fitting and engineering: open VMS above.')
+            d.text(35,590,'9 Money / station jobs   X VMS   G Navigation')
         elif self.mode == 'planet_profile':
             self.draw_planet_profile()
         elif self.mode == 'map':

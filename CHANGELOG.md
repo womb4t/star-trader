@@ -1,3 +1,11 @@
+# 0.2.23 — top-level Money, VMS and Navigation
+
+- Put Money, VMS, Navigation and Menu in the consistent top navigation bar.
+- Add Vessel Management System for status, equipment, fuel, servicing, outfitting, engineering and launch.
+- Remove scattered ship-service controls from trading; retain keyboard shortcuts.
+- Rename G to Navigation and keep map/search/profile features.
+- Preserve in-flight context when browsing hubs and prevent station services being used remotely.
+
 # 0.2.22 — station jobs inside Money
 
 - Remove duplicate Money buttons from station screens.

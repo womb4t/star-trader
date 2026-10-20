@@ -593,6 +593,50 @@ class GameplayTests(unittest.TestCase):
         g.key(27)
         self.assertEqual(g.mode,'money')
 
+    def test_vms_docked_services_and_outfit_return_to_vms(self):
+        g = self.game
+        g.p.credits,g.p.fuel,g.p.hull = 1000,2,80
+        g.open_hub('vms')
+        self.assertEqual(g.session_mode(),'market')
+        g.key(ord('f'))
+        self.assertEqual(g.p.fuel,7)
+        self.assertEqual(g.mode,'vms')
+        g.key(ord('r'))
+        self.assertEqual(g.p.hull,100)
+        g.key(ord('u'))
+        self.assertEqual(g.mode,'outfit')
+        g.key(ord('u'))
+        self.assertEqual(g.mode,'vms')
+        g.key(ord('8'))
+        self.assertEqual(g.engineering_location(),'market')
+        g.key(27)
+        self.assertEqual(g.mode,'vms')
+        g.key(27)
+        self.assertEqual(g.mode,'market')
+
+    def test_inflight_hubs_preserve_flight_and_block_station_services(self):
+        g = self.game
+        g.mode = 'flight'
+        g.p.fuel = 2
+        g.open_hub('vms')
+        self.assertEqual(g.session_mode(),'flight')
+        g.key(ord('f'))
+        self.assertEqual(g.p.fuel,2)
+        g.key(ord('8'))
+        self.assertEqual(g.engineering_location(),'flight')
+        g.key(27)
+        g.key(ord('9'))
+        self.assertEqual(g.mode,'money')
+        self.assertEqual(g.session_mode(),'flight')
+        g.key(ord('3'))
+        self.assertEqual(g.mode,'money')
+        g.key(27)
+        self.assertEqual(g.mode,'flight')
+        g.open_hub('vms')
+        g.open_navigation()
+        self.assertEqual(g.mode,'map')
+        self.assertEqual(g.map_return,'flight')
+
     def test_market_spread_and_stock(self):
         p = self.game.p
         cash, stock = p.credits, p.stock[0][0]

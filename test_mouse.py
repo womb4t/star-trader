@@ -46,7 +46,7 @@ class MouseIntegrationTests(unittest.TestCase):
                         g = st.Game(d)
                         g.mode = 'market'
                         g.draw()
-                        mouse(g,915,585)
+                        mouse(g,200,30)
                         self.assertEqual(g.mode,'money')
                         g.draw()
                         mouse(g,150,550)
@@ -67,7 +67,7 @@ class MouseIntegrationTests(unittest.TestCase):
                         self.assertNotIn(ord('w'),g.keys)
                         g.mode = 'market'
                         g.draw()
-                        mouse(g,450,30)
+                        mouse(g,515,30)
                         self.assertEqual(g.mode,'menu')
                         g.draw()
                         mouse(g,100,325)
@@ -91,6 +91,15 @@ class MouseIntegrationTests(unittest.TestCase):
                         g.draw()
                         mouse(g,100,688)
                         self.assertTrue(Path(g.feedback_path).exists())
+                        g.key(27)
+                        g.draw()
+                        mouse(g,290,30)
+                        self.assertEqual(g.mode,'vms')
+                        g.draw()
+                        mouse(g,410,30)
+                        self.assertEqual(g.mode,'map')
+                        self.assertEqual(g.map_return,'market')
+
 
             finally:
                 d.quit()
