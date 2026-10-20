@@ -3309,7 +3309,7 @@ class Game:
             d.text(35,563,f'BEACON {label}: X {x*c+y*s:+.0f} Y {-x*s+y*c:+.0f} Z {z:+.0f} RANGE {math.sqrt(x*x+y*y+z*z):.0f}m')
         if self.heat >= 70:
             d.text(35,520,'THERMAL LIMIT 90% / SHIELDS DRAINING - TURN AWAY',RED if self.heat >= 90 else GOLD)
-        d.text(35,594,f'SPEED {self.speed:.0f}  FUEL {p.fuel:.2f}  {('REAR PULSE' if 'rear' in p.equipment else 'REAR UNARMED') if self.rear_view else p.laser.upper()} LASER  MISSILES {p.missiles}')
+        d.text(35,594,f'SPEED {self.speed:.0f}  FUEL {p.fuel:.2f}  {("REAR PULSE" if "rear" in p.equipment else "REAR UNARMED") if self.rear_view else p.laser.upper()} LASER  MISSILES {p.missiles}')
         d.text(35,625,f'SHIELD {self.shield:.0f}%  HULL {p.hull:.0f}%  HOLD {sum(p.cargo)}/{p.capacity}t')
         error = math.degrees(self.slot_error())
         d.text(650,598,('GUIDANCE Y  ' if self.course_assist else '')+('FINE I' if self.fine_control else ''),GOLD)
