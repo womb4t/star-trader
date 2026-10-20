@@ -17,6 +17,40 @@ class GameplayTests(unittest.TestCase):
         self.game = st.Game(None)
         self.game.spawn = 10000
 
+    def test_escape_emergency_close_from_every_screen_preserves_progress(self):
+        modes = ('market','flight','cruise','hyperspace','dead','menu','notes','redeem',
+                 'money','vms','outfit','help','updates','map','planet_profile','jobs',
+                 'bank','exchange','trade_deal','departure','engineering','launch_warning',
+                 'distress','feedback')
+        for mode in modes:
+            with self.subTest(mode=mode):
+                st.SAVE.unlink(missing_ok=True)
+                g = st.Game(None)
+                g.mode = mode
+                g.p.credits = 12345
+                g.p.notes = 'Keep my testing notes'
+                if mode == 'map': g.map_input = 'coordinates'
+                g.key(27)
+                self.assertFalse(g.running)
+                saved = json.loads(st.SAVE.read_text())
+                self.assertEqual(saved['credits'],12345)
+                self.assertEqual(saved['notes'],'Keep my testing notes')
+                self.assertIn('_session',saved)
+
+    def test_cancel_mouse_button_navigates_without_triggering_escape(self):
+        g = self.game
+        g.mode,g.launch_return = 'launch_warning','market'
+        g.footer_actions = []
+        g.mouse_button(35,674,200,'Cancel',27)
+        self.assertIsNone(g.footer_actions[0][1])
+        g.footer_actions[0][2]()
+        self.assertTrue(g.running)
+        self.assertEqual(g.mode,'market')
+        g.mode,g.outfit_return = 'outfit','vms'
+        g.mouse_back()
+        self.assertTrue(g.running)
+        self.assertEqual(g.mode,'vms')
+
     def finish_jump(self,game):
         game.speed = 0
         game.keys = {ord('h')}
@@ -191,7 +225,7 @@ class GameplayTests(unittest.TestCase):
         g.start_job(1)
         g.update_job(20)
         g.answer_job(g.p.dock_job['answer'])
-        g.key(27)
+        g.mouse_back()
         g.update_job(80)
         self.assertEqual(g.p.dock_job['elapsed'],20)
         restored = st.Game(None)
@@ -353,7 +387,7 @@ class GameplayTests(unittest.TestCase):
         g.key(st.RIGHT)
         self.assertEqual(g.profile_system,2)
         self.assertEqual(g.target,1)
-        g.key(27)
+        g.mouse_back()
         self.assertEqual(g.mode,'map')
         g.cursor_mode = True
         g.map_cursor = [5.,5.]
@@ -373,7 +407,7 @@ class GameplayTests(unittest.TestCase):
         self.assertIn(st.VERSION,body)
         self.assertIn('Café',body)
         self.assertNotIn(g.p.commander_id,body)
-        g.key(27)
+        g.mouse_back()
         self.assertEqual(g.mode,'market')
 
     def test_feedback_browser_opens_prefilled_issue_and_preserves_local_copy(self):
@@ -565,12 +599,12 @@ class GameplayTests(unittest.TestCase):
         g.key(13)
         self.assertEqual(g.p.credits,100150)
         self.assertIn('already redeemed',g.message)
-        g.key(27)
+        g.mouse_back()
         g.key(ord('-'))
         g.text_input('Buy medicine on Zaonce.')
         g.key(13)
         g.text_input('Avoid hostile ports.')
-        g.key(27)
+        g.mouse_back()
         self.assertEqual(g.mode,'money')
         restored = st.Game(None)
         self.assertEqual(restored.p.notes,'Buy medicine on Zaonce.\nAvoid hostile ports.')
@@ -590,7 +624,7 @@ class GameplayTests(unittest.TestCase):
         g.key(13)
         self.assertEqual(g.mode,'notes')
         self.assertEqual(g.notes_return,'money')
-        g.key(27)
+        g.mouse_back()
         self.assertEqual(g.mode,'money')
 
     def test_vms_docked_services_and_outfit_return_to_vms(self):
@@ -609,9 +643,9 @@ class GameplayTests(unittest.TestCase):
         self.assertEqual(g.mode,'vms')
         g.key(ord('8'))
         self.assertEqual(g.engineering_location(),'market')
-        g.key(27)
+        g.mouse_back()
         self.assertEqual(g.mode,'vms')
-        g.key(27)
+        g.mouse_back()
         self.assertEqual(g.mode,'market')
 
     def test_inflight_hubs_preserve_flight_and_block_station_services(self):
@@ -624,13 +658,13 @@ class GameplayTests(unittest.TestCase):
         self.assertEqual(g.p.fuel,2)
         g.key(ord('8'))
         self.assertEqual(g.engineering_location(),'flight')
-        g.key(27)
+        g.mouse_back()
         g.key(ord('9'))
         self.assertEqual(g.mode,'money')
         self.assertEqual(g.session_mode(),'flight')
         g.key(ord('3'))
         self.assertEqual(g.mode,'money')
-        g.key(27)
+        g.mouse_back()
         self.assertEqual(g.mode,'flight')
         g.open_hub('vms')
         g.open_navigation()
@@ -899,7 +933,7 @@ class GameplayTests(unittest.TestCase):
         g.key(13)
         self.assertEqual(g.p.waypoint,original)
         self.assertEqual(g.map_input,'coordinates')
-        g.key(27)
+        g.mouse_back()
         self.assertIsNone(g.map_input)
         self.assertTrue(g.running)
 
@@ -1247,7 +1281,7 @@ class GameplayTests(unittest.TestCase):
         g = self.game
         g.p.fuel = 0; g.key(ord('l'))
         self.assertEqual(g.mode,'launch_warning')
-        g.key(27); self.assertEqual(g.mode,'market')
+        g.mouse_back(); self.assertEqual(g.mode,'market')
         g.p.fuel = 2
         g.p.waypoint = dict(name='Zaonce',position=st.coordinates(1),system=1)
         g.key(ord('l')); self.assertEqual(g.mode,'launch_warning')
@@ -1381,7 +1415,7 @@ class GameplayTests(unittest.TestCase):
         # Test public mouse dispatch independently of rendering.
         g.buttons = [(0,0,80,30,lambda:g.mouse_key(ord('l')))]
         g.click(20,15); self.assertEqual(g.mode,'departure')
-        g.key(27); g.key(ord('g')); g.buttons = []
+        g.mouse_back(); g.key(ord('g')); g.buttons = []
         x,y = st.coordinates(1)
         g.click(60+x*60,155+y*39)
         self.assertEqual(g.p.waypoint['system'],1)
@@ -1438,7 +1472,7 @@ class GameplayTests(unittest.TestCase):
         g.p.waypoint = dict(name='Zaonce',position=st.coordinates(1),system=1)
         g.p.fuel = st.hyperspace_cost(st.distance(0,1))+.1
         g.request_launch(); self.assertEqual(g.mode,'launch_warning')
-        g.key(27); g.p.fuel = 7; g.launch(); g.speed = 0
+        g.mouse_back(); g.p.fuel = 7; g.launch(); g.speed = 0
         g.mouse_key(ord('w'),True); g.update(.1)
         self.assertGreater(g.speed,0)
         g.release_mouse(); self.assertNotIn(ord('w'),g.keys)

@@ -1,6 +1,6 @@
 # Star Trader
 
-An original Elite-inspired Python space game for **Omarchy**. Trade, mine, fight robot pirates, smuggle contraband and navigate a small wireframe universe. Current version: **0.3.0**.
+An original Elite-inspired Python space game for **Omarchy**. Trade, mine, fight robot pirates, smuggle contraband and navigate a small wireframe universe. Current version: **0.3.1**.
 
 Play offline, or use the optional **private progress server** to save separate tester accounts on an iMac or another Python host: [SERVER.md](SERVER.md). Shared flight and combat are a future project; see [MULTIPLAYER.md](MULTIPLAYER.md). The next offline expansion is outlined in [ROADMAP.md](ROADMAP.md).
 
@@ -243,7 +243,7 @@ Detailed planet profiles: G opens the map; select a named planet and press I
 or click Planet profile. View coordinates, government, population, size, tech,
 customs, docking access, station services and all commodity buy/sell prices.
 Left/Right or Previous/Next browses profiles without changing your waypoint.
-I or Escape returns to the map. The main header shows your current system
+I or the Back button returns to the map. The main header shows your current system
 name, economy and technology level, with credits/kills below.
 
 FEEDBACK: click Feedback 0 or press 0, choose Bug report or Suggestion,
@@ -285,7 +285,7 @@ and Save notes or returning records changes. Notes survive ship loss.
 
 CONTROLS: the top bar offers Money, Nav, VMS, Menu and Back/Quit.
 Menu groups Controls, Notes, reporting, updates, fullscreen and exit. The grave/backtick key opens
-Menu; arrows and Enter select items, Escape returns. The flight-only bottom-left
+Menu; arrows and Enter select items, Back returns. Escape always saves and closes. The flight-only bottom-left
 Flight controls button opens Flight/Nav/Combat/Safety mouse controls. Buttons
 use consistent 32px targets, clear labels and context-specific actions.
 
@@ -314,3 +314,7 @@ Outfitting shows the local/required tech levels even for ammunition.
 ## Station hostility cooldown
 
 Station hostility cools after 30 minutes away from the station (more than 10,000 metres, deep space, or another system). Remaining nearby resets the timer; further attacks restart it. Planet profiles show the remaining wait. Outstanding fines and police reserves do not reset.
+
+## Emergency close
+
+Escape always saves and closes the game immediately, from every screen, including text entry and hyperspace. Click Back, Return or Cancel to navigate without quitting. In-flight logout still preserves your position and unattended recovery rules.

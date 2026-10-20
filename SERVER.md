@@ -1,4 +1,4 @@
-# Private progress server (v0.3.0)
+# Private progress server (v0.3.1)
 
 The iMac stores separate progress for up to eight testers. All eight star systems remain available. The game still runs on each laptop, with robot ships and offline flight. This release synchronises saves; it does **not** make players visible to one another or share combat, markets or credits. The client is trusted to supply its own progress, so this is not yet a competitive multiplayer economy.
 

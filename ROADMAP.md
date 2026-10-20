@@ -1,6 +1,6 @@
 # Next offline expansion
 
-These are planned features, not claims about the current release. Finish and stabilise 0.2.0 before expanding the game further. Working names below give the next systems their own identity.
+These are planned features, not claims about the current release. The current release is 0.3.1; stabilise existing gameplay and private save synchronisation before expanding the game further. Working names below give the next systems their own identity.
 
 1. **Seeded star atlas:** deterministic sectors, hundreds of generated systems, persistent coordinates, searchable descriptions and distinct local economies. Expand beyond the current eight planets; consider multiple sectors linked by a rare single-use “Fold key”. Keep old saves and routes migratable.
 2. **Orbit Wardens:** more complete police and legal rules, security levels, self-defence and reputation. Expand current customs/fines into justified pursuits and bounty work. A clean trader should not be treated as a criminal for defending against pirates.
@@ -15,7 +15,7 @@ Build these around a deterministic simulation, stable entity IDs, versioned ship
 
 ## Later self-hosted universe
 
-Players may be traders, miners, pirates, police, or combine activities; hosts choose universe policy. Planned fleets, communication, credit transfers, constrained ship customisation and player bases require authoritative server rules and persistence. See [MULTIPLAYER.md](MULTIPLAYER.md) for stages, permissions and acceptance checks. None of these networking features is enabled in 0.2.0.
+Players may be traders, miners, pirates, police, or combine activities; hosts choose universe policy. Planned fleets, communication, credit transfers, constrained ship customisation and player bases require authoritative server rules and persistence. See [MULTIPLAYER.md](MULTIPLAYER.md) for stages, permissions and acceptance checks. Private account save synchronisation is available; the shared simulation and social features below remain future work.
 
 
 ## Requested owner/fleet economy (future)

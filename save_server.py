@@ -13,6 +13,7 @@ import sqlite3
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import ssl
 import time
+from star_trader import VERSION
 
 MAX_SAVE = 256 * 1024
 
@@ -131,7 +132,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         try:
-            if self.path == '/health': return self.reply(200,dict(service='star-trader-saves',protocol=1))
+            if self.path == '/health': return self.reply(200,dict(service='star-trader-saves',protocol=1,version=VERSION))
             if self.path != '/v1/save': return self.reply(404,dict(error='Not found'))
             self.reply(200,self.server.store.read(self.token()))
         except PermissionError: self.reply(401,dict(error='Invalid or missing player token'))
@@ -162,6 +163,7 @@ def make_server(store, host='127.0.0.1', port=8765):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--version',action='version',version=VERSION)
     parser.add_argument('--db',type=Path,default=Path.home()/'.star-trader-server/progress.sqlite3')
     sub = parser.add_subparsers(dest='command',required=True)
     create = sub.add_parser('create-player')

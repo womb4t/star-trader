@@ -21,7 +21,7 @@ import tempfile
 import fcntl
 import textwrap
 
-VERSION = '0.3.0'
+VERSION = '0.3.1'
 HOSTILITY_COOLDOWN_SECONDS = 30*60
 STATION_POLICE_CAPACITY = 6
 DOCK_ROLL_TOLERANCE = math.radians(14)
@@ -868,7 +868,7 @@ class Game:
             self.mode = 'launch_warning'
             self.keys.clear()
             self.alert = None
-            self.message = 'Departure warning. Check destination access and fuel; ESC stays docked.'
+            self.message = 'Departure warning. Check destination access and fuel; Cancel stays docked.'
         else: self.request_departure()
 
     def salvage_terms(self, percent):
@@ -946,7 +946,7 @@ class Game:
                   'A docking refusal remains even if you have enough fuel.',
                   'Cancel to pay fines, choose an accepting port, or change your course.',
                   '', 'F buys fuel. L requests launch despite these warnings.',
-                  'ESC stays docked. G returns to the map to choose another destination.']
+                  'Cancel stays docked. G opens the map. ESC saves and closes.']
         for i,line in enumerate(lines): d.text(45,155+i*35,line,RED if i < len(self.launch_warnings()) else GREEN)
 
     def draw_distress(self):
@@ -967,7 +967,7 @@ class Game:
         d.text(40,478,'Includes full fuel refill and emergency hull stabilisation to 25%.')
         d.text(40,516,'Equipment is preserved. Customs still apply on station arrival.')
         d.text(40,570,'UP/DOWN choose rescuer. A accepts the displayed claim.')
-        d.text(40,608,'N counters (twice per private offer). R / ESC refuses with no payment.')
+        d.text(40,608,'N counters (twice per private offer). R refuses with no payment. ESC saves and closes.')
         d.text(40,650,'Settlement and docking save progress. Calls have a 60s cooldown.')
 
     def station_overwhelmed(self, system=None):
@@ -1196,7 +1196,7 @@ class Game:
                  'Successful assistance earns credits; failures share your cooldown.',
                  'Station R repairs hull AND resets maintenance and flight count.',
                  'Field repair progress saves at your next station; cooldown saves now.',
-                 '', '8 / ESC returns. Distress 6 is available from the cockpit.']
+                 '', '8 returns. Distress 6 is available from the cockpit.']
         for i,line in enumerate(lines): d.text(35,85+i*34,line,GOLD if i==0 else GREEN)
 
     def inspect_cargo(self):
@@ -1392,7 +1392,7 @@ class Game:
                 for i,choice in enumerate(j['choices']): d.text(60,350+i*55,f'{i+1}. {choice}')
             else: d.text(45,290,'Tasks finished. Waiting for the shift to end; payment follows automatically.')
             d.text(45,555,'You may return to the market. Shift progress pauses and is saved.')
-        d.text(45,610,f'Workshop experience: {self.p.workshop_xp} XP. J / ESC returns to Money.')
+        d.text(45,610,f'Workshop experience: {self.p.workshop_xp} XP. J returns to Money.')
 
     def exchange_available(self):
         return not self.p.deep_space and PROFILES[self.p.system][0] in ('Anarchy','Feudal')
@@ -1428,7 +1428,7 @@ class Game:
             amount = math.floor(balance if self.exchange_amount is None else min(balance,self.exchange_amount))
             net = amount*(80 if launder else 90)//100
             d.text(45,425+i*45,f'{amount} '+('Crymto -> ' if launder else 'credits -> ')+str(net)+(' credits' if launder else ' Crymto'))
-        d.text(45,550,'Select an amount, then choose a conversion. ESC returns to market.')
+        d.text(45,550,'Select an amount, then choose a conversion. E returns to Money.')
 
     def active_text_field(self):
         if self.mode == 'redeem': return self,'credit_code_text',80
@@ -1546,7 +1546,7 @@ class Game:
 
         d.text(45,320,f'Pay fines costs {p.fine:,} credits. Code redemption is single-use per pilot.')
         d.text(45,570,'Crymto survives ship destruction. Bank funds and stored cargo are protected.')
-        d.text(45,610,'9 / ESC returns. Docking is required for financial services.' if self.money_return != 'market' else '9 / ESC returns to the market.')
+        d.text(45,610,'9 returns. Docking is required for financial services.' if self.money_return != 'market' else '9 returns to the market.')
 
     def draw_notepad(self):
         d = self.d
@@ -1606,7 +1606,7 @@ class Game:
             d.text(45,535,f'Fuel refill: {p.fuel_cost()} cr / Service: {p.service_cost()} cr')
         else:
             d.text(45,535,'Fuel, station repairs and fitting require docking. Field engineering remains available.')
-        d.text(45,625,'X / ESC returns. G opens Nav. 8 opens engineering.')
+        d.text(45,625,'X returns. G opens Nav. 8 opens engineering.')
 
     def open_utility(self, target):
         if target == 'help':
@@ -1640,7 +1640,7 @@ class Game:
     def draw_menu(self):
         d = self.d
         d.text(35,85,'GAME MENU',GOLD)
-        d.text(35,125,'UP / DOWN selects. ENTER opens. ESC returns to the game.')
+        d.text(35,125,'UP / DOWN selects. ENTER opens. ESC saves and closes the game.')
         remote = getattr(self,'remote_save',None)
         status_color = RED if remote and remote.conflicted else GOLD if remote and 'unavailable' in remote.status else GREEN
         d.text(35,155,remote.status if remote else 'Offline game: progress saved on this laptop.',status_color)
@@ -1650,6 +1650,10 @@ class Game:
             d.text(x+10,y+42,description,(135,175,185))
 
     def key(self, k):
+        # Escape is a global emergency save-and-close, even inside text fields.
+        if k == 27:
+            self.request_exit()
+            return
         if k == 8 and self.text_selection_all and self.text_selection_mode == self.mode and self.active_text_field():
             owner,name,_ = self.active_text_field()
             setattr(owner,name,'')
@@ -2233,7 +2237,7 @@ class Game:
             if self.map_input == 'search':
                 matches = [s[0] for s in SYSTEMS if self.map_text.casefold() in s[0].casefold()]
                 d.text(30,645,'Matches: '+', '.join(matches),GREEN)
-            else: d.text(30,645,'Range 0..10 on both axes. ENTER locks; ESC cancels.')
+            else: d.text(30,645,'Range 0..10 on both axes. ENTER locks; click Back to cancel.')
         else:
             d.text(30,610,'Selection: '+('free coordinate cursor' if self.cursor_mode else 'planet list'))
             d.text(30,645,'Locked: '+(p.waypoint['name'] if p.waypoint else 'none'))
@@ -2266,7 +2270,7 @@ class Game:
                   'Agricultural':'Food / ore exports; narcotics demand',
                   'Frontier':'Strong arms demand; mixed exports'}[economy]
         for row,line in enumerate(textwrap.wrap(demand,42)): d.text(610,500+row*27,line)
-        d.text(35,595,'I / ESC: map     LEFT / RIGHT: browse planets')
+        d.text(35,595,'I: map     LEFT / RIGHT: browse planets')
 
     def camera_vector(self, obj):
         x,y,z = obj[:3]
@@ -2516,7 +2520,7 @@ class Game:
     def _update_simulation(self, dt):
         if self.mode == 'departure':
             self.departure_remaining = max(0,self.departure_remaining-dt)
-            if self.departure_remaining == 0: self.message = 'Departure clearance granted. L launches; ESC stays docked.'
+            if self.departure_remaining == 0: self.message = 'Departure clearance granted. L launches; Cancel stays docked.'
             return
         if self.mode in ('flight','cruise'): self.rescue_cooldown = max(0,self.rescue_cooldown-dt)
         if self.arrival:
@@ -2766,6 +2770,8 @@ class Game:
         self.key(key)
 
     def mouse_button(self, x,y,w,label,key=None,action=None,hold=False):
+        if key == 27 and action is None:
+            key,action = None,self.mouse_back
         if y >= 638:
             callback = action if action is not None else lambda:self.mouse_key(key,hold)
             self.footer_actions.append((label,key,callback,hold))
@@ -2837,7 +2843,7 @@ class Game:
             if section:
                 x,w = {'money':(155,95),'vms':(365,75),'map':(260,95)}[section]
                 d.rect(x,18,w,32,GOLD)
-        modal = self.mode not in ('market','flight','cruise','dead')
+        modal = self.mode not in ('market','flight','cruise','hyperspace','dead')
         self.mouse_button(545,18,85,'Back' if modal else 'Quit',action=self.mouse_back)
         row_y = 674
         if self.mode == 'menu':
@@ -2845,7 +2851,7 @@ class Game:
                 x,y = 35+(i%2)*515,200+(i//2)*110
                 self.mouse_button(x,y,490,label,action=lambda i=i:self.choose_menu_action(i))
                 if i == self.menu_selected: d.rect(x-3,y-3,496,38,GOLD)
-            self.mouse_button(35,674,1000,'Return to game',action=lambda:self.key(27))
+            self.mouse_button(35,674,1000,'Return to game',action=self.mouse_back)
         elif self.mode in ('market','outfit'):
             if self.mode == 'market':
                 for i in range(len(GOODS)):
@@ -2867,7 +2873,7 @@ class Game:
                 for i,(label,key) in enumerate([('Buy fuel F',ord('f')),('Service R',ord('r')),('Outfit U',ord('u')),('Engineering 8',ord('8')),('Launch L',ord('l'))]):
                     self.mouse_button(35+i*205,575,195,label,key)
             else: self.mouse_button(35,575,300,'Engineering 8',ord('8'))
-            self.mouse_button(35,674,1000,'Return',action=lambda:self.key(27))
+            self.mouse_button(35,674,1000,'Return',action=self.mouse_back)
         elif self.mode == 'money' and self.money_return == 'market':
             for i,(label,key) in enumerate([('Bank / storage',ord('1')),('Crymto exchange',ord('2')),('Redeem code',ord('3')),('Pay fines',ord('4'))]):
                 self.mouse_button(35+(i%2)*515,380+(i//2)*100,490,label,key)
@@ -2885,7 +2891,7 @@ class Game:
             self.mouse_button(35,674,240,'Earlier',UP)
             self.mouse_button(290,674,240,'Later',DOWN)
             self.mouse_button(545,674,240,'Save notes',action=self.checkpoint)
-            self.mouse_button(800,674,240,'Return',action=lambda:self.key(27))
+            self.mouse_button(800,674,240,'Return',action=self.mouse_back)
         elif self.mode == 'trade_deal':
             self.mouse_button(35,674,490,'Accept clean-credit deal',ord('y'))
             self.mouse_button(550,674,490,'Decline',ord('n'))
@@ -2974,10 +2980,29 @@ class Game:
         self.d.fullscreen(self.d.win,0x1001 if self.d.is_fullscreen else 0)
 
     def mouse_back(self):
-        if self.mode == 'map': self.key(ord('g'))
-        elif self.mode == 'help': self.mode = self.help_return
-        elif self.mode == 'updates': self.key(ord('2'))
-        else: self.key(27)
+        """Navigate back independently of the Escape emergency close shortcut."""
+        if self.mode == 'map' and self.map_input:
+            self.map_input = None
+            return
+        if self.mode == 'distress':
+            self.rescue = None
+            self.mode = 'flight'
+            self.message = 'Recovery offers declined. No salvage payment made.'
+        else:
+            returns = {'map':'map_return','help':'help_return','updates':'update_return',
+                       'menu':'menu_return','notes':'notes_return','feedback':'feedback_return',
+                       'money':'money_return','vms':'vms_return','outfit':'outfit_return',
+                       'engineering':'engineering_return','launch_warning':'launch_return'}
+            fixed = {'planet_profile':'map','redeem':'money','bank':'money','jobs':'money',
+                     'exchange':'money','trade_deal':'market','departure':'market'}
+            if self.mode in returns: self.mode = getattr(self,returns[self.mode],'market')
+            elif self.mode in fixed: self.mode = fixed[self.mode]
+            else:
+                self.request_exit()
+                return
+        self.keys.clear()
+        self.release_mouse()
+        self.checkpoint()
 
     def help_sections(self):
         return [
@@ -2987,7 +3012,7 @@ class Game:
                 ('Plan a trip','G / ENTER','Choose a planet or coordinate, check fuel, then lock your course.'),
                 ('Leaving the station','L','Request clearance, wait for approval, then launch. Read fuel warnings.'),
                 ('Keep a reserve','F / R','Buy fuel and service the hull while docked. Cargo adds weight and inertia.'),
-                ('Leaving the game','ESC / Save/quit','Dock for a safe logout. In space your saved ship continues unattended.')]),
+                ('Emergency close','ESC / Save/quit','Saves and closes from every screen. In space your saved ship continues unattended.')]),
             ('Flight',[
                 ('Throttle and braking','HOLD W / S','W accelerates. S brakes, then reverses. Heavy cargo makes stopping slower.'),
                 ('Fine steering','I + ARROWS','Arrows turn. I toggles 20% turning and Q/E roll. Safety tab has a mouse toggle.'),
@@ -3063,7 +3088,7 @@ class Game:
             if self.text_selection_all and self.text_selection_mode == 'redeem': d.fill(40,250,max(20,len(self.credit_code_text)*11+20),42,(20,65,70))
             d.text(45,265,self.credit_code_text+'_',GOLD)
             d.text(45,360,'Codes can only be redeemed once by this pilot.')
-            d.text(45,415,'ESC returns to Money.')
+            d.text(45,415,'Click Return to Money. ESC saves and closes.')
         elif self.mode == 'trade_deal':
             good = self.deal_good
             dirty = quote(p.system,good,False)
@@ -3071,7 +3096,7 @@ class Game:
             d.text(35,85,'NEGOTIATE CLEAN PAYMENT',GOLD)
             d.text(45,180,f'Buyer offers {clean} clean credits for 1 tonne of {GOODS[good]}.')
             d.text(45,240,f'Normal sale pays {dirty} Crymto. This deal takes a 15% discount.')
-            d.text(45,300,'Y accepts and sells one tonne. N or ESC declines without selling.')
+            d.text(45,300,'Y accepts and sells one tonne. N declines without selling.')
             d.text(45,360,'Crymto is retained after ship destruction; shipboard credits are lost.')
         elif self.mode == 'exchange':
             self.draw_exchange()
@@ -3084,7 +3109,7 @@ class Game:
         elif self.mode == 'departure':
             d.text(80,150,'STATION TRAFFIC CONTROL',GOLD)
             d.text(80,220,f'Requesting departure: {self.departure_remaining:.1f}s' if self.departure_remaining else 'Departure clearance GRANTED.')
-            d.text(80,290,'L launches when cleared. ESC cancels and stays docked.')
+            d.text(80,290,'L launches when cleared. Click Cancel to stay docked.')
             d.text(80,345,f'Next flight breakdown risk: {self.breakdown_risk(True)*100:.1f}%. Station R services your ship.')
         elif self.mode == 'launch_warning':
             self.draw_launch_warning()
@@ -3107,7 +3132,7 @@ class Game:
                 'It fetches the official repository, then reruns the installer.',
                 'Release notes: github.com/womb4t/star-trader/releases',
                 '', 'Daily update checks run in the background and fail silently offline.',
-                'Use --no-update-check to disable network checks.', '', '2 or ESC returns to the game.']
+                'Use --no-update-check to disable network checks.', '', '2 returns. ESC saves and closes the game.']
             for i,line in enumerate(lines): d.text(30,80+i*31,line,GOLD if i==2 else GREEN)
         elif self.mode in ('market','outfit'):
             if self.mode == 'market':
@@ -3389,11 +3414,11 @@ def main():
         print(f'Unable to start: {e}',file=sys.stderr)
         sys.exit(1)
     finally:
+        if remote and game: game.checkpoint()
+        if display: display.quit()
         if remote:
-            if game: game.checkpoint()
             remote.close()
             print(remote.status)
-        if display: display.quit()
         if instance_file: instance_file.close()
         if scratch: scratch.cleanup()
 

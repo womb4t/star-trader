@@ -9,3 +9,5 @@ On this iMac, inspect Python (3.9+) and Git, clone/update this repository under 
 The laptop source checkout is /home/kenton/Documents/Codex/2026-10-16/coul/outputs/star-trader. Installed game: /home/kenton/.local/share/star-trader/star_trader.py. Always give Kenton full Bash commands usable from a fresh terminal. The standard game launcher remains offline; server play uses explicit --server, --token-file and --allow-lan options. Preserve existing saves. SERVER.md gives import, offline fallback, conflict recovery and backup instructions.
 
 This file is project context for another Codex chat, not a live transfer of the original session. Follow Kenton's latest instructions in the new chat.
+
+Current release: v0.3.1. Escape is a global emergency save-and-close on every screen; mouse Back/Return/Cancel navigates separately. Both the game and save server support --version; /health reports the server version. Update both checkouts from main before testing.

@@ -91,7 +91,7 @@ class MouseIntegrationTests(unittest.TestCase):
                         g.draw()
                         mouse(g,100,688)
                         self.assertTrue(Path(g.feedback_path).exists())
-                        g.key(27)
+                        g.mouse_back()
                         g.draw()
                         mouse(g,400,30)
                         self.assertEqual(g.mode,'vms')
