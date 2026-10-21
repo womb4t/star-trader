@@ -1775,6 +1775,8 @@ class CommanderStatusTests(unittest.TestCase):
         self.assertEqual(json.loads(st.SAVE.read_text())['name'],'KestrelOne')
         self.assertEqual(g.commander_name(),'KestrelOne')
         g.remote_save = type('Remote',(),dict(player_name='iMacPilot'))()
+        self.assertEqual(g.commander_name(),'KestrelOne')
+        g.p.name = ''
         self.assertEqual(g.commander_name(),'iMacPilot')
 
     def test_older_saves_load_with_new_career_fields(self):

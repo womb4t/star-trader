@@ -1129,9 +1129,9 @@ class Game:
         return min(5,sum(self.p.fine >= n for n in WANTED_FINES)+sum(map(bool,self.station_hostilities)))
 
     def commander_name(self):
-        # Online, other players see the server account name, so show that here too.
+        # The name you chose wins; online accounts fall back to their server name.
         remote = getattr(self,'remote_save',None)
-        return (remote and remote.player_name) or self.p.name or 'Unnamed'
+        return self.p.name or (remote and remote.player_name) or 'Unnamed'
 
     def station_allows(self, system=None):
         self.refresh_station_hostility()
@@ -3419,7 +3419,7 @@ class Game:
             if self.text_selection_all and self.text_selection_mode == 'rename': d.fill(40,250,max(20,len(p.name)*11+20),42,(20,65,70))
             d.text(45,265,p.name+'_',GOLD)
             remote = getattr(self,'remote_save',None)
-            if remote and remote.player_name: d.text(45,360,f'Online, other pilots see your server account name: {remote.player_name}.')
+            if remote and remote.player_name: d.text(45,360,f'Shown on your status panel. Other pilots online see your account name: {remote.player_name}.')
             d.text(45,415,'ESC saves and closes.')
         elif self.mode == 'redeem':
             d.text(35,85,'MONEY / REDEEM CREDIT CODE',GOLD)
