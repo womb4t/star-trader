@@ -1,3 +1,7 @@
+# 0.6.2 — fallback server addresses
+
+- Online play tries each address in `fallback_servers` (Connection settings file) when the main server address does not answer, so a host's home-network name keeps working when the public link is down.
+
 # 0.6.1 — online settings that work from anywhere
 
 - New installs point at the community server's public address (https://kentons-imac.tail8cde7d.ts.net), so online play works away from the host's home network.

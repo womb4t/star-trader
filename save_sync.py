@@ -49,6 +49,21 @@ def check_server(url, allow_lan=False):
     return url.rstrip('/')
 
 
+def reachable(url, allow_lan=False, timeout=4):
+    try:
+        url = check_server(url,allow_lan)
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}),NoRedirect())
+        with opener.open(url+'/health',timeout=timeout) as response:
+            return json.loads(response.read(4096)).get('service') == 'star-trader-saves'
+    except (OSError,ValueError,AttributeError): return False
+
+
+def pick_server(servers, allow_lan=False):
+    """The first server that answers, in order; the first one if none do, so its error is shown."""
+    servers = [s for s in servers if s]
+    return next((s for s in servers if reachable(s,allow_lan)),servers[0] if servers else '')
+
+
 def signup(url, name, email='', allow_lan=False):
     """Create a pilot account on the server and return its new private token."""
     url = check_server(url,allow_lan)

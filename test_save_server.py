@@ -317,6 +317,21 @@ class FeedbackTests(unittest.TestCase):
             with self.subTest(bad=bad), self.assertRaises(ValueError): self.store.add_feedback('Frank',bad)
 
 
+class FallbackServerTests(unittest.TestCase):
+    def test_first_answering_server_is_used(self):
+        from save_sync import pick_server
+        with tempfile.TemporaryDirectory() as tmp:
+            server = make_server(Store(Path(tmp)/'p.sqlite3'),port=0)
+            worker = threading.Thread(target=server.serve_forever,daemon=True); worker.start()
+            try:
+                live = 'http://127.0.0.1:'+str(server.server_port)
+                self.assertEqual(pick_server(['http://127.0.0.1:9',live]),live)
+                self.assertEqual(pick_server([live,'http://127.0.0.1:9']),live)
+                self.assertEqual(pick_server(['http://127.0.0.1:9','http://127.0.0.1:10']),'http://127.0.0.1:9')
+            finally:
+                server.shutdown(); server.server_close(); worker.join()
+
+
 class InviteCommandTests(unittest.TestCase):
     def test_invite_file_holds_server_name_and_token(self):
         import subprocess, sys, startup

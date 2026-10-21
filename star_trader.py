@@ -22,7 +22,7 @@ import shutil
 import subprocess
 import textwrap
 
-VERSION = '0.6.1'
+VERSION = '0.6.2'
 HOSTILITY_COOLDOWN_SECONDS = 30*60
 STATION_POLICE_CAPACITY = 6
 # Career points needed for each commander rank: kills, trade profit and hyperspace jumps all count.
@@ -3782,9 +3782,13 @@ def main():
                     remote = None
                     try:
                         if choice == 'online':
-                            from save_sync import RemoteSave
+                            from save_sync import RemoteSave,pick_server
                             config = screen.config
-                            remote = RemoteSave(config['server'],config['token_file'],offline_save.parent,config['allow_lan'])
+                            screen.error = 'Connecting to your progress server...'
+                            screen.draw()
+                            # Fallback addresses (for example the host's home-network name) cover a public link that is down.
+                            server = pick_server([config['server']]+config.get('fallback_servers',[]),config['allow_lan'])
+                            remote = RemoteSave(server,config['token_file'],offline_save.parent,config['allow_lan'])
                             SAVE = remote.save_path
                             screen.error = 'Connecting to your progress server...'
                             screen.draw()

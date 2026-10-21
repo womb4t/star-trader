@@ -20,11 +20,12 @@ def config_path():
 
 
 def load_connection():
-    defaults = dict(server=DEFAULT_SERVER,token_file=str(config_path().with_name('player.token')),allow_lan=True,import_local_save=True,last_mode='')
+    defaults = dict(server=DEFAULT_SERVER,token_file=str(config_path().with_name('player.token')),allow_lan=True,import_local_save=True,last_mode='',fallback_servers=[])
     try:
         saved = json.loads(config_path().read_text())
         for key in defaults:
             if type(saved.get(key)) is type(defaults[key]): defaults[key] = saved[key]
+        defaults['fallback_servers'] = [s for s in defaults['fallback_servers'] if type(s) is str][:4]
     except (OSError,ValueError,AttributeError): pass
     return defaults
 
