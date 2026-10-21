@@ -341,6 +341,17 @@ class SaveCompatibilityTests(unittest.TestCase):
         validate_save(json.loads(json.dumps(old)))
 
 
+class ContainerSettingsTests(unittest.TestCase):
+    def test_database_path_and_signup_mode_come_from_the_environment(self):
+        import os, subprocess, sys
+        with tempfile.TemporaryDirectory() as tmp:
+            env = dict(os.environ,STAR_TRADER_DB=str(Path(tmp)/'data'/'p.sqlite3'),STAR_TRADER_SIGNUP='off')
+            subprocess.run([sys.executable,'save_server.py','create-player','Docker','--token-file',str(Path(tmp)/'t.token')],env=env,check=True,capture_output=True)
+            self.assertTrue((Path(tmp)/'data'/'p.sqlite3').exists())
+            bad = subprocess.run([sys.executable,'save_server.py','serve','--signup','sometimes'],env=env,capture_output=True)
+            self.assertNotEqual(bad.returncode,0)
+
+
 class InviteCommandTests(unittest.TestCase):
     def test_invite_file_holds_server_name_and_token(self):
         import subprocess, sys, startup

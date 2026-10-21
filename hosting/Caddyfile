@@ -1,0 +1,4 @@
+# Caddy obtains and renews the HTTPS certificate for this name automatically.
+{$STAR_TRADER_DOMAIN} {
+	reverse_proxy server:8766
+}

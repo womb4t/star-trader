@@ -1,0 +1,25 @@
+# Star Trader server with automatic HTTPS. On the host:
+#   STAR_TRADER_DOMAIN=play.example.com docker compose up -d
+# See HOSTING.md.
+services:
+  server:
+    build: .
+    restart: unless-stopped
+    environment:
+      # off = invite codes only (safe on the internet); open = anyone can sign up in the game.
+      STAR_TRADER_SIGNUP: ${STAR_TRADER_SIGNUP:-off}
+    volumes:
+      - star-trader-data:/data
+  https:
+    image: caddy:2.8.4
+    restart: unless-stopped
+    depends_on: [server]
+    ports: ["80:80", "443:443"]
+    environment:
+      STAR_TRADER_DOMAIN: ${STAR_TRADER_DOMAIN:?Set STAR_TRADER_DOMAIN to the server's public name}
+    volumes:
+      - ./hosting/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+volumes:
+  star-trader-data:
+  caddy-data:

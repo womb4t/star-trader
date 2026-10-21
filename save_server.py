@@ -286,7 +286,7 @@ def make_server(store, host='127.0.0.1', port=8765, signup='lan'):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--version',action='version',version=VERSION)
-    parser.add_argument('--db',type=Path,default=Path.home()/'.star-trader-server/progress.sqlite3')
+    parser.add_argument('--db',type=Path,default=Path(os.environ.get('STAR_TRADER_DB') or Path.home()/'.star-trader-server/progress.sqlite3'))
     sub = parser.add_subparsers(dest='command',required=True)
     create = sub.add_parser('create-player')
     create.add_argument('name')
@@ -299,6 +299,8 @@ def main():
     serve.add_argument('--key',type=Path)
     serve.add_argument('--no-signup',action='store_true',help='Only admin-created players and invites; no in-game sign-up')
     serve.add_argument('--public-signup',action='store_true',help='Allow in-game sign-up from the internet too (default: home network only)')
+    serve.add_argument('--signup',choices=('off','home','open'),default=os.environ.get('STAR_TRADER_SIGNUP'),
+                       help='In-game sign-up: off (invites only), home (private network), open (anyone)')
     sub.add_parser('news-list',help='Print name and email of players who asked for game news')
     listing = sub.add_parser('feedback-list',help='Print bug reports and suggestions')
     listing.add_argument('--status',choices=('new','seen','done'))
@@ -364,8 +366,9 @@ def main():
     else:
         if bool(args.cert) != bool(args.key): parser.error('--cert and --key must be used together')
         if args.host not in ('127.0.0.1','localhost','::1') and not (args.lan or args.cert): parser.error('Use --lan for private network testing or configure --cert and --key')
-        if args.no_signup and args.public_signup: parser.error('Choose --no-signup or --public-signup')
-        server = make_server(store,args.host,args.port,signup=False if args.no_signup else True if args.public_signup else 'lan')
+        if sum((args.no_signup,args.public_signup,args.signup is not None)) > 1: parser.error('Choose one of --no-signup, --public-signup or --signup')
+        mode = {'off':False,'home':'lan','open':True}[args.signup] if args.signup else False if args.no_signup else True if args.public_signup else 'lan'
+        server = make_server(store,args.host,args.port,signup=mode)
         if args.cert:
             context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
             context.load_cert_chain(args.cert,args.key)
