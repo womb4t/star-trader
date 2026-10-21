@@ -19,6 +19,8 @@ import webbrowser
 import uuid
 import tempfile
 import fcntl
+import shutil
+import subprocess
 import textwrap
 
 VERSION = '0.5.0'
@@ -484,6 +486,14 @@ class UpdateNotice:
             return len(parts) == 3 and parts > tuple(map(int,VERSION.split('.')))
         except (ValueError,AttributeError): return False
 
+    @staticmethod
+    def fetch_latest():
+        try:
+            req = urllib.request.Request('https://api.github.com/repos/womb4t/star-trader/releases/latest',headers={'User-Agent':f'StarTrader/{VERSION}','Accept':'application/vnd.github+json'})
+            with urllib.request.urlopen(req,timeout=2) as response:
+                return json.loads(response.read(65536)).get('tag_name')
+        except (OSError,ValueError,TypeError,AttributeError): return None
+
     def start(self):
         if os.environ.get('STAR_TRADER_NO_UPDATE_CHECK') == '1' or '--no-update-check' in sys.argv or '--self-test' in sys.argv or '--smoke-test' in sys.argv:
             return
@@ -499,14 +509,8 @@ class UpdateNotice:
                 self.checked = True
                 return
         except (OSError,ValueError,TypeError,AttributeError): pass
-        latest = None
-        try:
-            req = urllib.request.Request('https://api.github.com/repos/womb4t/star-trader/releases/latest',headers={'User-Agent':f'StarTrader/{VERSION}','Accept':'application/vnd.github+json'})
-            with urllib.request.urlopen(req,timeout=2) as response:
-                data = json.loads(response.read(65536))
-            latest = data.get('tag_name')
-            if self.newer(latest): self.latest = latest
-        except (OSError,ValueError,TypeError,AttributeError): pass
+        latest = self.fetch_latest()
+        if self.newer(latest): self.latest = latest
         self.checked = True
         try:
             cache.parent.mkdir(parents=True,exist_ok=True)
@@ -3393,15 +3397,15 @@ class Game:
             latest = self.updates.latest
             lines = ['STAR TRADER / UPDATES',f'Installed version: {VERSION}',
                 'New release: '+latest if latest else ('No newer release detected.' if self.updates.checked else 'Offline, disabled, or check still pending.'),
-                '', 'Updates are optional. Saved games are preserved.',
-                'In a terminal, from your game checkout:',
+                '', 'New releases install automatically when Star Trader starts.',
+                'Saved games are preserved. To update by hand, in a terminal:',
                 '    python3 update.py', '',
                 'Or run the installed updater:',
                 '    python3 "${XDG_DATA_HOME:-$HOME/.local/share}/star-trader/update.py"',
                 '', 'The updater requires a clean main branch and stops on local edits.',
                 'It fetches the official repository, then reruns the installer.',
                 'Release notes: github.com/womb4t/star-trader/releases',
-                '', 'Daily update checks run in the background and fail silently offline.',
+                '', 'If an automatic update fails, details are in update.log.',
                 'Use --no-update-check to disable network checks.', '', '2 returns. ESC saves and closes the game.']
             for i,line in enumerate(lines): d.text(30,80+i*31,line,GOLD if i==2 else GREEN)
         elif self.mode in ('market','outfit'):
@@ -3612,6 +3616,36 @@ def grant_testing_credits(amount):
     print(f'Added {amount:,} testing credits. Wallet: {data["credits"]:,.2f}. Backup: {backup}')
 
 
+def notify(text):
+    if shutil.which('notify-send'): subprocess.run(['notify-send','Star Trader',text],check=False)
+
+
+def auto_update():
+    """Install a newer published release before the game opens, then restart into it."""
+    here = Path(__file__).resolve().parent
+    # Only installed copies update themselves; source checkouts are left to Git.
+    if not (here/'install-info.json').is_file() or not (here/'update.py').is_file(): return
+    if os.environ.get('STAR_TRADER_NO_UPDATE_CHECK') == '1' or '--no-update-check' in sys.argv: return
+    latest = UpdateNotice.fetch_latest()
+    if not UpdateNotice.newer(latest): return
+    notify(f'Installing update {latest}. Your saved game is preserved.')
+    try:
+        result = subprocess.run([sys.executable,str(here/'update.py')],stdin=subprocess.DEVNULL,capture_output=True,text=True,timeout=300)
+        ok = result.returncode == 0
+        log = result.stdout+result.stderr
+    except (OSError,subprocess.TimeoutExpired) as error:
+        ok,log = False,str(error)
+    try:
+        SAVE.parent.mkdir(parents=True,exist_ok=True)
+        (SAVE.parent/'update.log').write_text(f'{time.ctime()} update to {latest}\n{log}',encoding='utf-8')
+    except OSError: pass
+    if not ok:
+        notify(f'Update {latest} could not be installed; starting {VERSION}. Details: {SAVE.parent/"update.log"}')
+        return
+    notify(f'Updated to {latest}.')
+    os.execv(sys.executable,[sys.executable,str(here/'star_trader.py'),*sys.argv[1:],'--no-update-check'])
+
+
 def main():
     global SAVE
     if '--version' in sys.argv:
@@ -3642,6 +3676,7 @@ def main():
         if not options.server and (options.token_file or options.import_local_save or options.restore_server_save):
             raise ValueError('Server options require --server')
         testing = '--smoke-test' in sys.argv or '--grant-test-credits' in sys.argv
+        if not testing: auto_update()
         if testing and options.server: raise ValueError('Testing CLI tools require offline mode')
         if '--smoke-test' in sys.argv:
             scratch = tempfile.TemporaryDirectory(prefix='star-trader-smoke-')
