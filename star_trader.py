@@ -1871,7 +1871,7 @@ class Game:
         ('HOW TO PLAY',[
             'Docked: select cargo with UP / DOWN, then B buys and S sells. Food is cheap on agricultural worlds and sells well at industrial ones.',
             'Money (9), Nav (G), VMS (X) and Menu run along the top. VMS refuels, repairs and fits equipment.',
-            'L launches. In flight W / S set the throttle, the arrows steer and Q / E roll. In Nav, lock a destination, then hold H for 3 seconds to jump. Watch your fuel.',
+            'L launches. In flight W / S set the throttle, the arrows steer and Q / E roll. In Nav, lock a destination, fly 5,000 m clear of the station, then hold H for 3 seconds to jump. Watch your fuel.',
             'Near a station press 7 for docking clearance, then fly slowly into the slot, matching its roll. Within 5,000 m of a lawful station, pirates leave you alone.',
             'BACKSPACE goes back. ESC saves and closes the game at any time. Menu, Controls has the full pilot handbook.']),
         ('BUGS AND SUGGESTIONS',[
@@ -2555,6 +2555,9 @@ class Game:
             self.message = 'Launch, or cancel cruise, before charging hyperspace.'
         elif dist < .001: self.message = 'Already at that coordinate.'
         elif cost > self.p.fuel: self.message = f'Jump requires {cost:.2f} fuel; aboard {self.p.fuel:.2f}.'
+        elif not self.p.deep_space and (station := math.sqrt(sum(v*v for v in self.station))) < PATROL_RADIUS:
+            # Station mass lock: you must leave the patrolled space before jumping.
+            self.message = f'Hyperspace blocked by station mass lock. Fly beyond {PATROL_RADIUS:,} m (now {station:,.0f} m).'
         else:
             destination = dict(name=w['name'],position=w['position'][:],system=w['system'])
             self.jump_charge = dict(destination=destination,cost=cost,held=0.)
@@ -2601,7 +2604,7 @@ class Game:
             self.arrive(destination['position'],destination['system'])
             self.message = 'Cruise complete. Arrived at '+destination['name']+'.'
 
-    def arrive(self, position, system):
+    def arrive(self, position, system, from_hyperspace=False):
         self.p.position = list(position)
         self.p.deep_space = system is None
         if system is not None: self.p.system = system
@@ -2611,7 +2614,10 @@ class Game:
         self.enemy_police_system = None
         self.security_warning = 0
         self.launch(departure=False)
-        if system is not None: self.station = [random.uniform(-80,80),random.uniform(-50,50),2200.]
+        if system is not None:
+            # Hyperspace drops you outside the patrol zone, where pirates can be waiting.
+            depth = PATROL_RADIUS+random.uniform(800,2000) if from_hyperspace else 2200.
+            self.station = [random.uniform(-80,80),random.uniform(-50,50),depth]
         name = SYSTEMS[system][0] if system is not None else f'Deep space ({position[0]:.2f}, {position[1]:.2f})'
         self.arrival = dict(name=name,remaining=5.)
 
@@ -3020,7 +3026,7 @@ class Game:
             if self.jump_warp['elapsed'] >= 1.6:
                 destination = self.jump_warp['destination']
                 self.p.jumps += 1
-                self.arrive(destination['position'],destination['system'])
+                self.arrive(destination['position'],destination['system'],from_hyperspace=True)
                 self.message = 'Arrived at '+destination['name']+'.'
             return
         if self.mode == 'cruise':

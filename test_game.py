@@ -1,3 +1,4 @@
+import math
 """Offline regression checks. Run with python3 -m unittest -v test_game."""
 import json
 import os
@@ -815,7 +816,7 @@ class GameplayTests(unittest.TestCase):
 
     def test_jump_consumes_fuel_and_insufficient_jump_rejected(self):
         g = self.game
-        g.launch(); g.key(ord('g')); g.target = 1
+        g.launch(); g.station = [0.,0.,9000.]; g.key(ord('g')); g.target = 1
         fuel = g.p.fuel
         g.key(ord('h'))
         self.finish_jump(g)
@@ -1009,6 +1010,21 @@ class GameplayTests(unittest.TestCase):
         self.assertEqual((g.asteroids,len(g.fragments)),([],3))
         self.assertTrue(g.explosions)
 
+    def test_station_mass_lock_and_arrival_outside_patrol_zone(self):
+        g = self.game
+        g.launch(); g.speed = 0
+        g.p.waypoint = dict(name='Corvant',position=st.coordinates(1),system=1)
+        g.station = [0.,0.,3000.]
+        g.jump()
+        self.assertIsNone(g.jump_charge)
+        self.assertIn('mass lock',g.message)
+        g.station = [0.,0.,st.PATROL_RADIUS+100.]
+        g.jump()
+        self.assertIsNotNone(g.jump_charge)
+        g.arrive(st.coordinates(1),1,from_hyperspace=True)
+        self.assertGreater(math.sqrt(sum(v*v for v in g.station)),st.PATROL_RADIUS)
+        self.assertFalse(g.in_patrol_zone())
+
     def test_can_pass_station_at_safe_distance_and_reverse(self):
         g = self.game
         g.launch(); g.station = [500,0,66]; g.speed = 50
@@ -1099,7 +1115,7 @@ class GameplayTests(unittest.TestCase):
 
     def test_empty_coordinate_arrival_has_no_docking(self):
         g = self.game
-        g.launch(); g.p.waypoint = dict(name='Marker',position=[2,4],system=None)
+        g.launch(); g.station = [0.,0.,9000.]; g.p.waypoint = dict(name='Marker',position=[2,4],system=None)
         g.jump()
         self.finish_jump(g)
         self.assertTrue(g.p.deep_space)
@@ -1315,7 +1331,7 @@ class GameplayTests(unittest.TestCase):
 
     def test_hyperspace_requires_continuous_hold_and_cancels_without_jump_fuel(self):
         g = self.game
-        g.launch(); g.speed = 0
+        g.launch(); g.speed = 0; g.station = [0.,0.,9000.]
         g.p.waypoint = dict(name='Corvant',position=st.coordinates(1),system=1)
         fuel = g.p.fuel
         g.keys = {ord('h')}; g.key(ord('h'))
@@ -1356,7 +1372,7 @@ class GameplayTests(unittest.TestCase):
 
     def test_hyperspace_snapshot_and_map_hold_then_warp_input_is_ignored(self):
         g = self.game
-        g.launch(); g.speed = 0; g.key(ord('g')); g.target = 1
+        g.launch(); g.speed = 0; g.station = [0.,0.,9000.]; g.key(ord('g')); g.target = 1
         g.keys = {ord('h')}; g.key(ord('h'))
         self.assertEqual(g.mode,'flight')
         g.p.waypoint = dict(name='Meridel',position=st.coordinates(2),system=2)
