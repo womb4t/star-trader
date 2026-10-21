@@ -332,6 +332,15 @@ class FallbackServerTests(unittest.TestCase):
                 server.shutdown(); server.server_close(); worker.join()
 
 
+class SaveCompatibilityTests(unittest.TestCase):
+    def test_server_accepts_saves_from_before_gold_and_silver(self):
+        old = vars(game.Pilot()).copy()
+        old['cargo'] = old['cargo'][:8]; old['cargo_paid'] = old['cargo_paid'][:8]
+        old['stock'] = [row[:8] for row in old['stock']]
+        old['storage'] = [dict(bay,cargo=bay['cargo'][:8]) for bay in old['storage']]
+        validate_save(json.loads(json.dumps(old)))
+
+
 class InviteCommandTests(unittest.TestCase):
     def test_invite_file_holds_server_name_and_token(self):
         import subprocess, sys, startup

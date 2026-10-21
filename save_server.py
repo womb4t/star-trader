@@ -47,6 +47,7 @@ def validate_save(data):
     pilot = Pilot()
     for key in vars(pilot):
         if key in data: setattr(pilot, key, data[key])
+    pilot.add_new_commodities()  # accept saves from clients that predate gold and silver
     pilot.validate()
     session = data.get('_session')
     if session is not None:

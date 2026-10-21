@@ -1,3 +1,17 @@
+# 0.7.0 — your bug reports and suggestions
+
+Everything here came from in-game reports.
+
+- **Visible combat.** Ships, asteroids and missiles explode on screen. Missiles fly to their target. The cockpit shows the target's shield and hull.
+- **Disabled ships can be destroyed** with lasers (a 100 cr fine at lawful stations for attacking a helpless vessel).
+- **Mining feedback.** Each mining-laser hit reports progress; other lasers explain that only a mining laser breaks rock.
+- **Gold and silver.** New commodities, scarce at stations, and found in rare GOLD ROCK and SILVER ROCK asteroids that take more cutting. Scoops collect the metal automatically.
+- **A real fuel market.** Fuel costs 7–14 cr per unit depending on the system, and stations buy it back (VMS, K). Skim a sun for free fuel and sell it. A short wallet still buys whatever whole units it can.
+- **Station mass lock.** Hyperspace needs 5,000 m clearance from a station, and jumps now arrive outside the patrol zone, where pirates can be waiting.
+- **Best sale in range.** The market shows the top sale price for each commodity at systems your fuel can reach.
+
+Older saves gain the new commodity slots automatically, and the server accepts saves from both older and newer versions.
+
 # 0.6.4 — trade log and sun-skimming readout
 
 - **Trade log** in Money (6): your last 60 trades with time, station, price and the profit on each sale. Viewable anywhere, docked or in flight.

@@ -22,7 +22,7 @@ import shutil
 import subprocess
 import textwrap
 
-VERSION = '0.6.4'
+VERSION = '0.7.0'
 HOSTILITY_COOLDOWN_SECONDS = 30*60
 STATION_POLICE_CAPACITY = 6
 # Career points needed for each commander rank: kills, trade profit and hyperspace jumps all count.
@@ -41,9 +41,11 @@ TRADE_LOG_SIZE = 60
 DOCK_ROLL_TOLERANCE = math.radians(14)
 CRUISE_SECONDS_PER_LY = 45
 W, H = 1100, 760
-GOODS = ['Food', 'Textiles', 'Ore', 'Machinery', 'Medicine', 'Computers', 'Narcotics', 'Unlicensed Arms']
-BASE = [8, 15, 24, 48, 65, 90, 150, 110]
+GOODS = ['Food', 'Textiles', 'Ore', 'Machinery', 'Medicine', 'Computers', 'Narcotics', 'Unlicensed Arms', 'Gold', 'Silver']
+BASE = [8, 15, 24, 48, 65, 90, 150, 110, 260, 95]
 ILLEGAL = (6, 7)
+# Precious metals: scarce at stations, and found in the occasional rich asteroid.
+METALS = (8, 9)
 TECH = [5, 10, 4, 8, 3, 12, 2, 7]
 # key, label, cost, minimum technology, effect
 EQUIPMENT = [
@@ -90,6 +92,7 @@ def price(system, good):
     factor = (0.65 if good < 3 else 1.25) if economy == 'Agricultural' else (1.3 if good < 3 else 0.7)
     if economy == 'Frontier':
         factor = 1.0
+    if good in METALS: factor = {'Industrial': 1.15, 'Agricultural': .95, 'Frontier': .9}[economy]
     if good in ILLEGAL:
         # Contraband prices reflect supply and demand rather than a flat bonus.
         demand = {6: {'Industrial': .65, 'Agricultural': 1.65, 'Frontier': 1.40},
@@ -112,7 +115,19 @@ def quote(system, good, buy=True):
 
 
 def initial_stock():
-    return [[random.Random(i * 113 + j).randint(12, 35) for j in range(len(GOODS))] for i in range(8)]
+    return [[random.Random(i * 113 + j).randint(*((1, 6) if j in METALS else (12, 35))) for j in range(len(GOODS))] for i in range(8)]
+
+
+def fuel_price(system):
+    """Credits per fuel unit: refining and demand make fuel dear in some systems."""
+    return round(7 + random.Random(system * 31).uniform(0, 7))
+
+
+def random_asteroid(position):
+    # Most rocks hold ore; rare rich ones hold silver or gold and take more cutting.
+    roll = random.random()
+    good,health = (8,5) if roll < .08 else (9,4) if roll < .25 else (2,3)
+    return list(position)+[health,good]
 
 
 def coordinates(system):
@@ -239,14 +254,29 @@ class Pilot:
         return 1 + sum(self.cargo) * 0.025
 
     def fuel_cost(self):
-        return math.ceil(round(7 - self.fuel, 3) * 3)
+        return math.ceil(round(7 - self.fuel, 3) * fuel_price(self.system))
+
+    def sell_fuel(self):
+        # Stations buy fuel back at three quarters of their price, so sun-skimmed fuel can be sold.
+        if self.fuel < 1: return 'Less than one unit of fuel aboard to sell.'
+        value = fuel_price(self.system)*3//4
+        self.fuel = round(self.fuel-1,5)
+        self.credits += value
+        return f'Sold 1 unit of fuel for {value} cr. Tank {self.fuel:.2f}/7.'
 
     def refuel(self):
         cost = self.fuel_cost()
-        if self.credits < cost: return f'Refill costs {cost} cr. Sell cargo first.'
-        self.credits -= cost
-        self.fuel = 7.0
-        return f'Fuel purchased: {cost} cr. Tank full.'
+        if self.credits >= cost:
+            self.credits -= cost
+            self.fuel = 7.0
+            return f'Fuel purchased: {cost} cr. Tank full.'
+        # A short wallet still buys whole units, so a broke pilot can always limp to the next job.
+        price = fuel_price(self.system)
+        units = min(int(7-self.fuel),int(self.credits)//price)
+        if units <= 0: return f'Fuel costs {price} cr per unit here. Sell cargo or take a station job.'
+        self.credits -= units*price
+        self.fuel = round(self.fuel+units,5)
+        return f'Bought {units} fuel unit{"s" if units > 1 else ""} for {units*price} cr (all you can afford). Tank {self.fuel:.2f}/7.'
 
     def departure_wear(self):
         return 1+sum(self.cargo)*.025
@@ -281,12 +311,7 @@ class Pilot:
             if 'position' not in data: candidate.position = coordinates(candidate.system)
             if isinstance(candidate.waypoint,dict) and candidate.waypoint.get('name') in RENAMED_SYSTEMS:
                 candidate.waypoint['name'] = RENAMED_SYSTEMS[candidate.waypoint['name']]
-            if len(candidate.cargo) == 6: candidate.cargo += [0] * (len(GOODS)-6)
-            if len(candidate.cargo_paid) == 6: candidate.cargo_paid += [0] * (len(GOODS)-6)
-            if isinstance(candidate.stock,list):
-                for i,row in enumerate(candidate.stock):
-                    if isinstance(row,list) and len(row) == 6:
-                        row.extend(initial_stock()[i][6:])
+            candidate.add_new_commodities()
             candidate.validate()
             self.__dict__.update(vars(candidate))
             if 'commander_id' not in data:
@@ -295,6 +320,17 @@ class Pilot:
             return True
         except (OSError, ValueError, KeyError, TypeError, AttributeError):
             return False
+
+    def add_new_commodities(self):
+        # Saves from before new commodities were added get empty slots for them.
+        def pad(row, filler): return row+filler[len(row):] if isinstance(row,list) and len(row) in (6,8) else row
+        self.cargo = pad(self.cargo,[0]*len(GOODS))
+        self.cargo_paid = pad(self.cargo_paid,[0]*len(GOODS))
+        if isinstance(self.stock,list):
+            self.stock = [pad(row,initial_stock()[i]) if i < 8 else row for i,row in enumerate(self.stock)]
+        if isinstance(self.storage,list):
+            for bay in self.storage:
+                if isinstance(bay,dict): bay['cargo'] = pad(bay.get('cargo'),[0]*len(GOODS))
 
     def validate(self):
         def integer(n): return type(n) is int and n >= 0
@@ -700,7 +736,7 @@ class Game:
         self.nav_target = None
         self.nav = 'course' if self.p.waypoint and galactic_distance(self.p.position,self.p.waypoint['position']) > .001 else 'station'
         self.heat = 0
-        self.asteroids = [[150.,-70.,1000.,3],[-250.,100.,1700.,3],[320.,180.,2300.,3]]
+        self.asteroids = [random_asteroid(position) for position in ([150.,-70.,1000.],[-250.,100.,1700.],[320.,180.,2300.])]
         self.fragments = []
         self.sun = [1200.,-500.,3500.]
         self.ship_collision_cooldown = 0.
@@ -986,9 +1022,9 @@ class Game:
         d.text(35,85,'BANK / '+SYSTEMS[p.system][0].upper()+' STORAGE',GOLD)
         d.text(35,130,'COMMODITY                SHIP   STATION BAY')
         for i,name in enumerate(GOODS):
-            d.text(35,175+i*36,('> ' if i == self.selected else '  ')+name,GOLD if i == self.selected else GREEN)
-            d.text(320,175+i*36,str(p.cargo[i]))
-            d.text(440,175+i*36,str(bay['cargo'][i]))
+            d.text(35,172+i*30,('> ' if i == self.selected else '  ')+name,GOLD if i == self.selected else GREEN)
+            d.text(320,172+i*30,str(p.cargo[i]))
+            d.text(440,172+i*30,str(bay['cargo'][i]))
         d.text(720,135,f'Wallet {p.credits:.2f} cr')
         d.text(720,175,f'Bank   {p.bank_balance:.2f} cr',GOLD)
         if self.bank_custom is not None:
@@ -2026,7 +2062,7 @@ class Game:
         d.text(45,405,'FITTED EQUIPMENT',GOLD)
         for i,line in enumerate(textwrap.wrap(modules,90)[:3]): d.text(45,440+i*25,line)
         if self.vms_return == 'market':
-            d.text(45,535,f'Fuel refill: {p.fuel_cost()} cr / Service: {p.service_cost()} cr')
+            d.text(45,535,f'Fuel {fuel_price(p.system)} cr/unit (sells for {fuel_price(p.system)*3//4}). Refill {p.fuel_cost()} cr / Service {p.service_cost()} cr')
         else:
             d.text(45,535,'Fuel, station repairs and fitting require docking. Field engineering remains available.')
         d.text(45,625,'BACKSPACE returns. G opens Nav. 8 opens engineering.')
@@ -2157,9 +2193,10 @@ class Game:
             elif k == ord('9'): self.open_hub('money')
             elif k == ord('8'):
                 self.engineering_return,self.mode = 'vms','engineering'
-            elif k in (ord('f'),ord('r'),ord('u'),ord('l')):
+            elif k in (ord('f'),ord('k'),ord('r'),ord('u'),ord('l')):
                 if self.vms_return != 'market': self.message = 'Dock before using station vessel services.'
                 elif k == ord('f'): self.message = self.p.refuel(); self.checkpoint()
+                elif k == ord('k'): self.message = self.p.sell_fuel(); self.checkpoint()
                 elif k == ord('r'): self.message = self.p.repair(); self.checkpoint()
                 elif k == ord('u'): self.outfit_return,self.mode = 'vms','outfit'
                 elif k == ord('l'): self.mode = 'market'; self.request_launch()
@@ -2735,11 +2772,11 @@ class Game:
         d.text(610,140,'MARKET / * sells for Crymto',GOLD)
         d.text(610,178,'COMMODITY              BUY  SELL')
         for row,good in enumerate(GOODS):
-            d.text(610,215+row*32,f'{good+chr(42) if row in ILLEGAL else good:<20} {quote(i,row):>4} {quote(i,row,False):>5}',GOLD if row in ILLEGAL else GREEN)
+            d.text(610,210+row*27,f'{good+chr(42) if row in ILLEGAL else good:<20} {quote(i,row):>4} {quote(i,row,False):>5}',GOLD if row in ILLEGAL else GREEN)
         demand = {'Industrial':'Cheaper manufactured goods / contraband',
                   'Agricultural':'Food / ore exports; narcotics demand',
                   'Frontier':'Strong arms demand; mixed exports'}[economy]
-        for row,line in enumerate(textwrap.wrap(demand,42)): d.text(610,500+row*27,line)
+        for row,line in enumerate(textwrap.wrap(demand,42)): d.text(610,490+row*27,line)
         d.text(35,595,'I: map     LEFT / RIGHT: browse planets')
 
     def camera_vector(self, obj):
@@ -2779,7 +2816,7 @@ class Game:
             contacts.append(('ship',self.enemy,self.enemy_kind.upper(),RED if self.enemy_kind == 'pirate' else (120,170,255)))
         for mine in self.mine_objects:
             contacts.append(('object',mine,'MINE',RED))
-        for rock in self.asteroids: contacts.append(('object',rock,'ASTEROID',GOLD))
+        for rock in self.asteroids: contacts.append(('object',rock,{8:'GOLD ROCK',9:'SILVER ROCK'}.get(rock[4] if len(rock) > 4 else 2,'ASTEROID'),GOLD))
         for ore in self.fragments: contacts.append(('object',ore,'ORE',(150,190,255)))
         contacts += [('player',p['object'],'PLAYER '+p['name'],(140,185,255)) for p in self.other_players.values()]
         contacts.append(('object',self.sun,'SUN',GOLD))
@@ -2962,24 +2999,25 @@ class Game:
     def auto_scoop_ore(self):
         # Fitted scoops pick up ore fragments by themselves when you fly slowly past.
         if 'scoops' not in self.p.equipment or abs(self.speed) > 50 or sum(self.p.cargo) >= self.p.capacity: return
-        nearby = next((f for f in self.fragments if math.sqrt(sum(v*v for v in f)) < 260),None)
+        nearby = next((f for f in self.fragments if math.sqrt(sum(v*v for v in f[:3])) < 260),None)
         if nearby is None: return
-        self.p.cargo[2] += 1
-        self.fragments.remove(nearby)
-        self.message = 'Scooped 1 tonne of ore. Sell it at a station.'
+        self.collect_fragment(nearby)
+
+    def collect_fragment(self, fragment):
+        good = fragment[3] if len(fragment) > 3 else 2
+        self.p.cargo[good] += 1
+        self.fragments.remove(fragment)
+        self.message = f'Scooped 1 tonne of {GOODS[good].lower()}. Sell it at a station.'
 
     def scoop(self):
         if 'scoops' not in self.p.equipment:
             self.message = 'Fuel / cargo scoops required.'
             return
-        nearby = next((f for f in self.fragments if math.sqrt(sum(v*v for v in f)) < 260),None)
+        nearby = next((f for f in self.fragments if math.sqrt(sum(v*v for v in f[:3])) < 260),None)
         if nearby is None: self.message = 'Fly within 260 m of an ore fragment.'
         elif sum(self.p.cargo) >= self.p.capacity: self.message = 'Cargo hold full.'
         elif abs(self.speed) > 50: self.message = 'Slow below 50 to collect ore.'
-        else:
-            self.p.cargo[2] += 1
-            self.fragments.remove(nearby)
-            self.message = 'Scooped 1 tonne of ore. Sell it at a station.'
+        else: self.collect_fragment(nearby)
 
     def project(self, obj):
         x,y,z = obj[:3]
@@ -3258,7 +3296,8 @@ class Game:
             obj[3] -= 1
             if obj[3] <= 0:
                 self.asteroids.remove(obj)
-                self.fragments += [[obj[0]+offset,obj[1]+10,obj[2]] for offset in (-18,0,18)]
+                yields = obj[4] if len(obj) > 4 else 2
+                self.fragments += [[obj[0]+offset,obj[1]+10,obj[2],yields] for offset in (-18,0,18)]
                 self.explode(obj,.7)
                 self.message = 'Asteroid fragmented! Fly slowly within 260 m and your scoops collect the ore.'
             else: self.message = f'Mining laser hit: asteroid cracking ({obj[3]} more hit{"s" if obj[3] > 1 else ""}).'
@@ -3386,7 +3425,7 @@ class Game:
         elif self.mode in ('market','outfit'):
             if self.mode == 'market':
                 for i in range(len(GOODS)):
-                    self.mouse_row(35,165+i*35,610,35,lambda i=i:setattr(self,'selected',i))
+                    self.mouse_row(35,162+i*30,610,30,lambda i=i:setattr(self,'selected',i))
                 labels = [('Buy',ord('b')),('Sell',ord('s'))]
             else:
                 start = max(0,min(self.shop_selected-4,len(EQUIPMENT)-8))
@@ -3401,8 +3440,8 @@ class Game:
                 self.mouse_button(665,638,300,'Buy with Crymto C',ord('c'))
         elif self.mode == 'vms':
             if self.vms_return == 'market':
-                for i,(label,key) in enumerate([('Buy fuel F',ord('f')),('Service R',ord('r')),('Outfit U',ord('u')),('Engineering 8',ord('8')),('Launch L',ord('l'))]):
-                    self.mouse_button(35+i*205,575,195,label,key)
+                for i,(label,key) in enumerate([('Buy fuel F',ord('f')),('Sell fuel K',ord('k')),('Service R',ord('r')),('Outfit U',ord('u')),('Engineer 8',ord('8')),('Launch L',ord('l'))]):
+                    self.mouse_button(35+i*172,575,164,label,key)
             else: self.mouse_button(35,575,300,'Engineering 8',ord('8'))
             self.mouse_button(35,674,1000,'Return',action=self.mouse_back)
         elif self.mode == 'money' and self.money_return == 'market':
@@ -3468,7 +3507,7 @@ class Game:
             self.mouse_button(790,570,250,'Return to Money',ord('j'))
         elif self.mode == 'bank':
             for i in range(len(GOODS)):
-                self.mouse_row(35,165+i*36,600,36,lambda i=i:setattr(self,'selected',i))
+                self.mouse_row(35,162+i*30,600,30,lambda i=i:setattr(self,'selected',i))
             for i,amount in enumerate([50,100,1000,None]):
                 self.mouse_button(720+(i%2)*145,270+(i//2)*38,135,'All' if amount is None else str(amount)+' cr',action=lambda amount=amount:self.choose_bank_amount(amount))
             self.mouse_button(720,346,280,'Set amount' if self.bank_custom is not None else 'Custom amount',action=self.set_custom_bank_amount if self.bank_custom is not None else lambda:setattr(self,'bank_custom',''))
@@ -3704,14 +3743,14 @@ class Game:
                     d.text(x,130,label)
                 for i,g in enumerate(GOODS):
                     color = GOLD if i == self.selected else GREEN
-                    d.text(35,170+i*35,('> ' if i == self.selected else '  ')+g+(' *' if i in ILLEGAL else ''),color)
+                    d.text(35,170+i*30,('> ' if i == self.selected else '  ')+g+(' *' if i in ILLEGAL else ''),color)
                     for x,value in [(270,quote(p.system,i)),(340,quote(p.system,i,False)),(415,p.stock[p.system][i]),(495,p.cargo[i])]:
-                        d.text(x,170+i*35,str(value),color)
+                        d.text(x,170+i*30,str(value),color)
                     best = self.best_sale_in_range(i)
                     if best:
                         price,system = best
-                        d.text(565,170+i*35,f'{price:>3} {SYSTEMS[system][0][:7]}',(120,220,140) if price > quote(p.system,i) else (120,140,150))
-                    else: d.text(565,170+i*35,'-',(120,140,150))
+                        d.text(565,170+i*30,f'{price:>3} {SYSTEMS[system][0][:7]}',(120,220,140) if price > quote(p.system,i) else (120,140,150))
+                    else: d.text(565,170+i*30,'-',(120,140,150))
                 d.text(35,470,'BUY = you pay. * Contraband sales pay Crymto (CYM).')
                 d.text(35,500,'BEST IN RANGE: top sale price at systems your fuel can reach.',(135,175,185))
             else:

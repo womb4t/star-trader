@@ -276,8 +276,9 @@ class GameplayTests(unittest.TestCase):
         self.assertEqual(g.mode,'money')
         g.key(ord('9'))
         g.key(ord('f'))
-        self.assertEqual(g.p.fuel,7)
-        self.assertEqual(g.p.credits,4)
+        units = 25//st.fuel_price(0)
+        self.assertEqual(g.p.fuel,units)
+        self.assertEqual(g.p.credits,25-units*st.fuel_price(0))
 
     def test_job_mistakes_preserve_base_pay_and_workshop_experience(self):
         g = self.game
@@ -809,10 +810,16 @@ class GameplayTests(unittest.TestCase):
         p.repair()
         self.assertEqual((p.fuel,p.hull,p.credits),(2,100,132))
         p.refuel()
-        self.assertEqual((p.fuel,p.credits),(7,117))
+        self.assertEqual((p.fuel,p.credits),(7,132-5*st.fuel_price(0)))
         p.fuel,p.credits = 0,0
         p.refuel()
         self.assertEqual(p.fuel,0)
+        p.credits = st.fuel_price(0)*2+1
+        p.refuel()
+        self.assertEqual((p.fuel,p.credits),(2,1))  # partial fill with what you can afford
+        p.fuel = 7
+        p.sell_fuel()
+        self.assertEqual((p.fuel,p.credits),(6,1+st.fuel_price(0)*3//4))
 
     def test_jump_consumes_fuel_and_insufficient_jump_rejected(self):
         g = self.game
@@ -1036,6 +1043,38 @@ class GameplayTests(unittest.TestCase):
         self.assertEqual(price,max(st.quote(j,3,False) for j in reach))
         g.p.fuel = 0
         self.assertIsNone(g.best_sale_in_range(3))
+
+    def test_gold_and_silver_come_from_rich_asteroids(self):
+        g = self.game
+        self.assertEqual(st.GOODS[8:],['Gold','Silver'])
+        g.launch(); g.station = [9000.,0,9000.]; g.speed = 0
+        g.p.equipment = ['mining','scoops']; g.p.laser = 'mining'
+        g.asteroids = [[0.,0.,1000.,5,8]]
+        hits = 0
+        while g.asteroids:
+            g.cooldown = 0; g.fire_laser(); hits += 1
+        self.assertEqual(hits,5)
+        self.assertTrue(all(f[3] == 8 for f in g.fragments))
+        g.fragments = [[0.,0.,100.,8]]; g.speed = 20; g.update(.01)
+        self.assertEqual(g.p.cargo[8],1)
+        self.assertIn('gold',g.message)
+        rocks = []
+        with patch('star_trader.random.random',side_effect=[.05,.2,.9]):
+            rocks = [st.random_asteroid([0,0,0]) for _ in range(3)]
+        self.assertEqual([r[4] for r in rocks],[8,9,2])
+
+    def test_old_saves_gain_metal_slots(self):
+        g = self.game
+        g.p.save()
+        data = json.loads(st.SAVE.read_text())
+        data['cargo'] = data['cargo'][:8]; data['cargo_paid'] = data['cargo_paid'][:8]
+        data['stock'] = [row[:8] for row in data['stock']]
+        for bay in data['storage']: bay['cargo'] = bay['cargo'][:8]
+        st.SAVE.write_text(json.dumps(data))
+        q = st.Pilot()
+        self.assertTrue(q.load())
+        self.assertEqual(len(q.cargo),len(st.GOODS))
+        self.assertTrue(all(1 <= row[8] <= 6 for row in q.stock))
 
     def test_can_pass_station_at_safe_distance_and_reverse(self):
         g = self.game
@@ -1507,7 +1546,7 @@ class GameplayTests(unittest.TestCase):
 
     def test_salvage_rounding_does_not_destroy_extra_cargo(self):
         g = self.game
-        g.p.cargo = [1,1,1,0,0,0,0,0]
+        g.p.cargo = [1,1,1]+[0]*(len(st.GOODS)-3)
         for rate in (25,35,65):
             terms = g.salvage_terms(rate)
             self.assertEqual(sum(terms['cargo']),terms['tonnes'])
