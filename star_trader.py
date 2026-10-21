@@ -531,6 +531,7 @@ class Game:
         self._restoring = False
         self.ship_collision_cooldown = 0.
         self.bank_amount = 50
+        self.bank_custom = None
         self.help_page = self.action_tab = 0
         self.d = display
         self.p = Pilot()
@@ -890,6 +891,16 @@ class Game:
         self.message = f'{amount:.2f} credits '+('deposited. Bank funds are off-ship.' if deposit else 'withdrawn to ship wallet.')
         self.save()
 
+    def choose_bank_amount(self, amount):
+        self.bank_amount,self.bank_custom = amount,None
+
+    def set_custom_bank_amount(self):
+        amount = int(self.bank_custom or 0)
+        self.bank_custom = None
+        if amount <= 0: self.message = 'Enter an amount of at least 1 credit.'; return
+        self.bank_amount = amount
+        self.message = f'Transfer amount set to {amount} cr. D deposits, W withdraws.'
+
     def storage_capacity(self):
         bay = self.p.storage[self.p.system]
         return 100 if bay['owned'] else 40 if bay['rented_until'] > time.time() else 0
@@ -947,7 +958,10 @@ class Game:
             d.text(440,175+i*36,str(bay['cargo'][i]))
         d.text(720,135,f'Wallet {p.credits:.2f} cr')
         d.text(720,175,f'Bank   {p.bank_balance:.2f} cr',GOLD)
-        d.text(720,215,'Transfer: '+('ALL' if self.bank_amount is None else str(self.bank_amount))+' cr')
+        if self.bank_custom is not None:
+            d.text(720,215,'Amount: '+self.bank_custom+('_' if int(time.monotonic()*2)%2 == 0 else '')+' cr',GOLD)
+            d.text(720,420,'Type an amount, then ENTER.')
+        else: d.text(720,215,'Transfer: '+('ALL' if self.bank_amount is None else str(self.bank_amount))+' cr')
         d.text(35,490,'Bay: '+('OWNED' if bay['owned'] else 'RENTED' if self.storage_capacity() else 'NONE / RENT EXPIRED'))
         d.text(35,530,f'Stored {sum(bay["cargo"])}/{self.storage_capacity()} t. Rent 40t: 50 cr / 7 real days. Buy 100t: 750 cr.')
         d.text(35,570,'Expired rentals retain cargo; retrieval is allowed, new deposits require renewal.')
@@ -1698,6 +1712,7 @@ class Game:
         if self.mode == 'notes': return self.p,'notes',4000
         if self.mode == 'rename': return self.p,'name',24
         if self.mode == 'feedback': return self,'feedback_text',1500
+        if self.mode == 'bank' and self.bank_custom is not None: return self,'bank_custom',9
         return None
 
     def text_input(self, text):
@@ -1708,6 +1723,7 @@ class Game:
         self.text_selection_all = False
         text = text.replace('\r\n','\n').replace('\r','\n')
         text = ''.join(c for c in text if c.isprintable() or c == '\n' and self.mode not in ('redeem','rename'))
+        if name == 'bank_custom': text = ''.join(c for c in text if c.isdigit())
         setattr(owner,name,(before+text)[:limit])
         if self.mode == 'notes': self.notes_scroll = 0
 
@@ -1928,6 +1944,11 @@ class Game:
         # Escape is a global emergency save-and-close, even inside text fields.
         if k == 27:
             self.request_exit()
+            return
+        if self.mode == 'bank' and self.bank_custom is not None:
+            # Typing an amount: digits arrive as text input, so shortcut keys are paused.
+            if k == 8: self.bank_custom = self.bank_custom[:-1]
+            elif k == 13: self.set_custom_bank_amount()
             return
         if k == 8 and self.text_selection_all and self.text_selection_mode == self.mode and self.active_text_field():
             owner,name,_ = self.active_text_field()
@@ -3225,8 +3246,9 @@ class Game:
         elif self.mode == 'bank':
             for i in range(len(GOODS)):
                 self.mouse_row(35,165+i*36,600,36,lambda i=i:setattr(self,'selected',i))
-            for i,amount in enumerate([10,50,100,None]):
-                self.mouse_button(720+(i%2)*145,270+(i//2)*38,135,'All' if amount is None else str(amount)+' cr',action=lambda amount=amount:setattr(self,'bank_amount',amount))
+            for i,amount in enumerate([50,100,1000,None]):
+                self.mouse_button(720+(i%2)*145,270+(i//2)*38,135,'All' if amount is None else str(amount)+' cr',action=lambda amount=amount:self.choose_bank_amount(amount))
+            self.mouse_button(720,346,280,'Set amount' if self.bank_custom is not None else 'Custom amount',action=self.set_custom_bank_amount if self.bank_custom is not None else lambda:setattr(self,'bank_custom',''))
             for i,(label,key) in enumerate([('Deposit',ord('d')),('Withdraw',ord('w')),('Rent bay',ord('r')),('Buy bay',ord('b'))]): self.mouse_button(35+i*255,638,240,label,key)
             for i,(label,key) in enumerate([('Store 1t',ord('s')),('Retrieve 1t',ord('t')),('Return',ord('9'))]): self.mouse_button(35+i*340,674,320,label,key)
         elif self.mode == 'planet_profile':

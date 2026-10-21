@@ -1945,6 +1945,23 @@ class LawAndPrisonTests(unittest.TestCase):
         self.assertFalse(g.surrendering)
         self.assertIn('refused',g.message)
 
+    def test_bank_presets_and_custom_amount(self):
+        g = self.game
+        g.mode = 'bank'
+        g.p.credits = 5000
+        g.choose_bank_amount(1000); g.key(ord('d'))
+        self.assertEqual((g.p.credits,g.p.bank_balance),(4000,1000))
+        g.bank_custom = ''
+        for c in '2a5x0': g.text_input(c)
+        g.key(ord('9')); g.key(ord('2'))  # shortcuts are paused while typing
+        self.assertEqual((g.mode,g.bank_custom),('bank','250'))
+        g.key(8); g.text_input('7'); g.key(13)
+        self.assertEqual((g.bank_amount,g.bank_custom),(257,None))
+        g.key(ord('w'))
+        self.assertEqual((g.p.credits,g.p.bank_balance),(4257,743))
+        g.bank_custom = ''; g.key(13)
+        self.assertEqual(g.bank_amount,257)
+
     def test_invalid_prison_record_is_rejected(self):
         pilot = st.Pilot()
         pilot.prison = dict(system=0,days=9,start=0.,release_at=1.,bribe_day=-1,work_day=-1)
