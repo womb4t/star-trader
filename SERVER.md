@@ -38,9 +38,30 @@ cd "$HOME/star-trader" &&
 python3 save_server.py create-player Tester2 --token-file "$HOME/.star-trader-server/tester2.token"
 ```
 
+## Players outside your home network (Tailscale Funnel)
+
+Tailscale Funnel gives the iMac server a public HTTPS address without opening router ports. One-time setup on the iMac: install Tailscale from https://tailscale.com/download/mac, sign in, then in Terminal:
+
+```bash
+/Applications/Tailscale.app/Contents/MacOS/Tailscale funnel --bg 8766
+```
+
+The first run prints a link to enable HTTPS and Funnel for your tailnet; open it, approve, and run the command again. It prints the public address, such as `https://imac.tail1234.ts.net`. Keep the server running as usual (`serve --host 0.0.0.0 --port 8766 --lan`); Funnel forwards internet players to it, and home players can still use the LAN address.
+
+On the internet, in-game sign-up is off by default (home network only), so strangers cannot fill your eight places. Give remote players an invite that uses the public address:
+
+```bash
+cd "$HOME/star-trader" &&
+python3 save_server.py create-player Frank --token-file "$HOME/.star-trader-server/frank.token" &&
+python3 save_server.py invite --server https://imac.tail1234.ts.net \
+  --token-file "$HOME/.star-trader-server/frank.token" --out "$HOME/frank-invite.txt"
+```
+
+`--public-signup` opens sign-up to everyone who can reach the server. `tailscale funnel --bg off` (or `funnel reset`) takes the public address down.
+
 ## Sign-up and game news
 
-New players can sign up from the game: **Online play** opens a sign-up form when no login is saved yet (it is also under **Connection settings → New pilot? Sign up**). They choose a pilot name and may give an email for game news. The server creates the account and the game saves the private login on that computer. The eight-pilot limit still applies. Start the server with `--no-signup` to allow only players you create or invite.
+New players can sign up from the game: **Online play** opens a sign-up form when no login is saved yet (it is also under **Connection settings → New pilot? Sign up**). They choose a pilot name and may give an email for game news. The server creates the account and the game saves the private login on that computer. Sign-up works from your home network; players on the internet need an invite (see above). The eight-pilot limit still applies. Start the server with `--no-signup` to allow only players you create or invite.
 
 Emails are stored only for players who enter one. To see who asked for news, or to remove an address when someone asks:
 

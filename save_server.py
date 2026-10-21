@@ -3,6 +3,7 @@
 import argparse
 from contextlib import contextmanager
 import hashlib
+import ipaddress
 import json
 import math
 import os
@@ -223,6 +224,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self.reply(200,dict(changed=changed))
             if self.path != '/v1/signup': return self.reply(404,dict(error='Not found'))
             if not self.server.signup: return self.reply(403,dict(error='Sign-up is closed on this server. Ask the host for an invite.'))
+            if self.server.signup == 'lan' and not home_network(self.client_address[0]):
+                # Internet visitors (including Tailscale Funnel, which arrives via loopback) need an invite.
+                return self.reply(403,dict(error='Sign-up is only open on the host\'s home network. Ask the host for an invite code.'))
             length = int(self.headers.get('Content-Length','0'))
             if not 0 < length <= 2048: return self.reply(413,dict(error='Request too large or empty'))
             data = json.loads(self.rfile.read(length))
@@ -262,7 +266,14 @@ class Handler(BaseHTTPRequestHandler):
         except sqlite3.Error: self.reply(503,dict(error='Save storage temporarily unavailable'))
 
 
-def make_server(store, host='127.0.0.1', port=8765, signup=True):
+def home_network(address):
+    try: ip = ipaddress.ip_address(address)
+    except ValueError: return False
+    if getattr(ip,'ipv4_mapped',None): ip = ip.ipv4_mapped
+    return ip.is_private and not ip.is_loopback and ip not in ipaddress.ip_network('100.64.0.0/10')
+
+
+def make_server(store, host='127.0.0.1', port=8765, signup='lan'):
     server = ThreadingHTTPServer((host,port),Handler)
     server.daemon_threads = True
     server.signup = signup
@@ -286,6 +297,7 @@ def main():
     serve.add_argument('--cert',type=Path)
     serve.add_argument('--key',type=Path)
     serve.add_argument('--no-signup',action='store_true',help='Only admin-created players and invites; no in-game sign-up')
+    serve.add_argument('--public-signup',action='store_true',help='Allow in-game sign-up from the internet too (default: home network only)')
     sub.add_parser('news-list',help='Print name and email of players who asked for game news')
     listing = sub.add_parser('feedback-list',help='Print bug reports and suggestions')
     listing.add_argument('--status',choices=('new','seen','done'))
@@ -351,7 +363,8 @@ def main():
     else:
         if bool(args.cert) != bool(args.key): parser.error('--cert and --key must be used together')
         if args.host not in ('127.0.0.1','localhost','::1') and not (args.lan or args.cert): parser.error('Use --lan for private network testing or configure --cert and --key')
-        server = make_server(store,args.host,args.port,signup=not args.no_signup)
+        if args.no_signup and args.public_signup: parser.error('Choose --no-signup or --public-signup')
+        server = make_server(store,args.host,args.port,signup=False if args.no_signup else True if args.public_signup else 'lan')
         if args.cert:
             context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
             context.load_cert_chain(args.cert,args.key)

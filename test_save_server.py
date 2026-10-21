@@ -236,6 +236,17 @@ class SignupTests(unittest.TestCase):
         with self.assertRaises(RuntimeError) as error: signup(closed,'Late')
         self.assertIn('closed',str(error.exception))
 
+    def test_default_signup_is_home_network_only(self):
+        from save_sync import signup
+        from save_server import home_network
+        url = self.serve(signup='lan')  # the test client connects from loopback, like Tailscale Funnel
+        with self.assertRaises(RuntimeError) as error: signup(url,'Stranger')
+        self.assertIn('invite',str(error.exception))
+        self.assertTrue(home_network('192.168.1.182'))
+        self.assertTrue(home_network('10.0.0.7'))
+        for outside in ('127.0.0.1','::1','100.101.102.103','8.8.8.8','::ffff:127.0.0.1','junk'):
+            with self.subTest(address=outside): self.assertFalse(home_network(outside))
+
     def test_existing_database_gains_email_column(self):
         import sqlite3
         path = Path(self.tmp.name)/'old.sqlite3'
