@@ -931,7 +931,12 @@ class GameplayTests(unittest.TestCase):
         self.assertEqual((g.p.kills,g.p.credits),(1,185))
         g.enemy = [0,0,500,6,0]; g.key(ord('m'))
         self.assertEqual(g.p.missiles,2)
+        self.assertEqual(len(g.missiles_in_flight),1)  # visible in flight, not instant
+        self.assertEqual(g.p.kills,1)
+        g.update(.5)
         self.assertEqual(g.p.kills,2)
+        self.assertEqual(g.missiles_in_flight,[])
+        self.assertTrue(g.explosions)
         g.p.missiles = 0; g.enemy = [0,0,500,6,0]; g.key(ord('m'))
         self.assertIsNotNone(g.enemy)
         g.p.credits = 1000; g.p.missiles = 4; g.p.buy_equipment(0)
@@ -972,6 +977,37 @@ class GameplayTests(unittest.TestCase):
         self.assertEqual(len(g.fragments),1)  # too fast
         g.speed = 20; g.update(.01)
         self.assertEqual((len(g.fragments),g.p.cargo[2]),(0,1))
+
+    def test_disabled_ships_can_be_destroyed_and_targets_show_status(self):
+        g = self.game
+        g.launch(); g.station = [9000.,0,9000.]; g.speed = 0; g.spawn = 1e9
+        g.enemy_kind = 'pirate'; g.enemy = [0.,0.,800.,6,0.]
+        self.assertEqual(g.target_status(),('PIRATE',100.,100.))
+        g.enemy[3] = 2
+        name,shield,hull = g.target_status()
+        self.assertEqual((shield,round(hull)),(0.,67))
+        g.enemy = None
+        g.disabled_ship = dict(object=[0.,0.,600.],hull=40)
+        g.ship_target = g.disabled_ship['object']
+        self.assertEqual(g.target_status()[0],'DISABLED SHIP')
+        fine = g.p.fine
+        for _ in range(5):
+            g.cooldown = 0; g.fire_laser()
+        self.assertIsNone(g.disabled_ship)
+        self.assertTrue(g.explosions)
+        self.assertEqual(g.p.fine,fine+100)
+
+    def test_mining_laser_reports_each_hit_and_other_lasers_explain(self):
+        g = self.game
+        g.launch(); g.station = [9000.,0,9000.]; g.speed = 0
+        g.asteroids = [[0.,0.,1000.,3]]
+        g.fire_laser()
+        self.assertIn('Only a mining laser',g.message)
+        g.p.equipment = ['mining']; g.p.laser = 'mining'; g.cooldown = 0; g.fire_laser()
+        self.assertIn('2 more hits',g.message)
+        for _ in range(2): g.cooldown = 0; g.fire_laser()
+        self.assertEqual((g.asteroids,len(g.fragments)),([],3))
+        self.assertTrue(g.explosions)
 
     def test_can_pass_station_at_safe_distance_and_reverse(self):
         g = self.game

@@ -61,6 +61,9 @@ EQUIPMENT = [
     ('rear', 'Rear pulse laser', 600, 4, '4 rear view; SPACE fires the rear-mounted laser'),
 ]
 LASERS = {'pulse': (0.30, 1), 'beam': (0.14, 1), 'military': (0.12, 2), 'mining': (0.65, 1)}
+# Full strength of NPC ships; the first half of it is shields, the rest hull.
+ENEMY_STRENGTH = {'pirate': 6, 'police': 10}
+MISSILE_SPEED = 1200
 UP, DOWN, LEFT, RIGHT = 1073741906, 1073741905, 1073741904, 1073741903
 GREEN, GOLD, RED = (68, 227, 182), (255, 206, 113), (255, 112, 100)
 SYSTEMS = [
@@ -620,6 +623,7 @@ class Game:
         self.broken_down = False
         self.breakdown_in = None
         self.disabled_ship = None
+        self.explosions,self.missiles_in_flight = [],[]
         self.assist_spawn_timer = 35.
         self.dock_clearance = self.docking_pending = 0.
         self.rescue = None
@@ -662,6 +666,7 @@ class Game:
         self.breakdown_in = random.uniform(8,25) if departure and random.random() < self.breakdown_risk() else None
         self.broken_down = False
         self.disabled_ship = None
+        self.explosions,self.missiles_in_flight = [],[]
         self.assist_spawn_timer = 35.
         self.dock_clearance = self.docking_pending = 0.
         self.world_basis = [[1.,0.,0.],[0.,1.,0.],[0.,0.,1.]]
@@ -1553,7 +1558,38 @@ class Game:
             self.autodock = False
         if amount >= 1: self.checkpoint()
 
+    def explode(self, position, size=1.):
+        self.explosions.append(dict(position=list(position[:3]),remaining=.8,size=size))
+
+    def update_explosions_and_missiles(self, dt):
+        for e in self.explosions: e['remaining'] -= dt
+        self.explosions = [e for e in self.explosions if e['remaining'] > 0]
+        for m in self.missiles_in_flight[:]:
+            if self.enemy is None:
+                self.missiles_in_flight.remove(m)
+                self.explode(m['position'],.3)
+                continue
+            delta = [t-p for t,p in zip(self.enemy[:3],m['position'])]
+            distance = math.sqrt(sum(v*v for v in delta))
+            if distance <= MISSILE_SPEED*dt+60:
+                self.missiles_in_flight.remove(m)
+                self.destroy_enemy()
+                continue
+            for i in range(3): m['position'][i] += delta[i]/distance*MISSILE_SPEED*dt
+
+    def target_status(self):
+        """Name, shield % and hull % of the ship under attack, for the cockpit readout."""
+        if self.enemy is not None and (self.ship_target is None or self.ship_target is self.enemy):
+            full = ENEMY_STRENGTH.get(self.enemy_kind,6)
+            half = full/2
+            strength = max(0,min(full,self.enemy[3]))
+            return self.enemy_kind.upper(),max(0,strength-half)/half*100,min(strength,half)/half*100
+        if self.disabled_ship and self.ship_target is self.disabled_ship['object']:
+            return 'DISABLED SHIP',0.,max(0,self.disabled_ship['hull'])/40*100
+        return None
+
     def destroy_enemy(self):
+        if self.enemy is not None: self.explode(self.enemy)
         self.enemy = None
         self.ship_target = None
         if self.enemy_kind == 'police':
@@ -2454,7 +2490,8 @@ class Game:
                 self.cloaked = False
                 self.cancel_surrender('missile fired.')
                 self.p.missiles -= 1
-                self.destroy_enemy()
+                self.missiles_in_flight.append(dict(position=[0.,-25.,40.]))
+                self.message = 'Missile away! Tracking target.'
         if k == ord('a'):
             self.nav = 'asteroid'
             self.message = 'Asteroid beacon selected. V selects laser; SPACE fires; O scoops nearby ore.'
@@ -2952,6 +2989,7 @@ class Game:
         if self.enemy: objects.append(self.enemy)
         if self.enemy_shot: objects.append(self.enemy_shot['position'])
         if self.disabled_ship: objects.append(self.disabled_ship['object'])
+        objects += [e['position'] for e in self.explosions]+[m['position'] for m in self.missiles_in_flight]
         for obj in objects:
             x,y,z = obj[:3]
             x,y = x*c+y*s,-x*s+y*c
@@ -2960,7 +2998,7 @@ class Game:
             obj[0],obj[1],obj[2] = x*c-y*s,x*s+y*c,z
 
     def move_world(self, dx, dy, dz):
-        for obj in [self.station,self.sun,self.planet] + ([self.enemy_shot['position']] if self.enemy_shot else []) + ([self.disabled_ship['object']] if self.disabled_ship else []) + self.asteroids + self.fragments + self.mine_objects:
+        for obj in [self.station,self.sun,self.planet] + ([self.enemy_shot['position']] if self.enemy_shot else []) + ([self.disabled_ship['object']] if self.disabled_ship else []) + self.asteroids + self.fragments + self.mine_objects + [e['position'] for e in self.explosions] + [m['position'] for m in self.missiles_in_flight]:
             obj[0] -= dx
             obj[1] -= dy
             obj[2] -= dz
@@ -3017,6 +3055,7 @@ class Game:
         self.cooldown = max(0,self.cooldown-dt)
         self.flash = max(0,self.flash-dt)
         self.laser_flash = max(0,self.laser_flash-dt)
+        self.update_explosions_and_missiles(dt)
         if self.p.hull <= 0:
             self.mode = 'dead'
             return
@@ -3188,6 +3227,17 @@ class Game:
         elif kind == 'ship':
             obj[3] -= power
             if obj[3] <= 0: self.destroy_enemy()
+        elif kind == 'disabled':
+            self.disabled_ship['hull'] -= power*8
+            if self.disabled_ship['hull'] <= 0:
+                self.explode(obj)
+                self.disabled_ship = self.ship_target = None
+                self.p.kills += 1
+                lawful = not self.p.deep_space and PROFILES[self.p.system][0] not in ('Anarchy','Feudal')
+                if lawful: self.p.fine += 100
+                self.message = 'Disabled ship destroyed.'+(' Attacking a helpless vessel: 100 cr fine.' if lawful else '')
+                self.checkpoint()
+            else: self.message = f'Disabled ship hit: hull {self.disabled_ship["hull"]/40*100:.0f}%.'
         elif kind == 'station':
             self.station_struck()
         elif kind == 'asteroid' and weapon == 'mining':
@@ -3195,7 +3245,11 @@ class Game:
             if obj[3] <= 0:
                 self.asteroids.remove(obj)
                 self.fragments += [[obj[0]+offset,obj[1]+10,obj[2]] for offset in (-18,0,18)]
-                self.message = 'Asteroid fragmented! Approach slowly; O collects ore within 260m.'
+                self.explode(obj,.7)
+                self.message = 'Asteroid fragmented! Fly slowly within 260 m and your scoops collect the ore.'
+            else: self.message = f'Mining laser hit: asteroid cracking ({obj[3]} more hit{"s" if obj[3] > 1 else ""}).'
+        elif kind == 'asteroid':
+            self.message = 'Only a mining laser breaks asteroids.'+(' V selects it.' if 'mining' in self.p.equipment else ' Fit one at a tech 4+ station.')
 
     def laser_hit_depth(self, obj, kind):
         point = self.project(obj)
@@ -3711,6 +3765,22 @@ class Game:
             if projected: d.text(max(35,min(W-240,projected[0]-60)),max(100,min(510,projected[1]-35)),player['name'],(140,185,255))
         if self.enemy: self.object(self.enemy,self.enemy_kind)
         if self.disabled_ship: self.object(self.disabled_ship['object'],'disabled')
+        for m in self.missiles_in_flight:
+            point = self.project(m['position'])
+            if point:
+                x,y,_ = point
+                d.line(x-6,y,x+6,y,(255,240,160)); d.line(x,y-6,x,y+6,(255,240,160))
+                d.line(x,y,x+(W/2-x)*.15,y+(560-y)*.15,GOLD)
+        for e in self.explosions:
+            point = self.project(e['position'])
+            if point:
+                x,y,scale = point
+                grow = (1-e['remaining']/.8)*e['size']
+                radius = max(6,(30+170*grow)*max(scale,.05))
+                color = (255,220,120) if e['remaining'] > .4 else (230,110,60)
+                for i in range(12):
+                    a = i*math.pi/6
+                    d.line(x+math.cos(a)*radius*.3,y+math.sin(a)*radius*.3,x+math.cos(a)*radius,y+math.sin(a)*radius,color)
         if self.laser_flash:
             color = GOLD if p.laser == 'mining' and not self.rear_view else RED
             d.line(160,550,550,330,color)
@@ -3737,6 +3807,10 @@ class Game:
         self.draw_scanner()
         self.draw_heat_instrument()
         d.text(35,73,'REAR VIEW' if self.rear_view else 'FORWARD VIEW',GOLD)
+        status = self.target_status()
+        if status:
+            name,shield,hull = status
+            d.text(35,100,f'TARGET {name}  SHIELD {shield:.0f}%  HULL {hull:.0f}%',(255,100,180))
         if getattr(self,'presence',None): d.text(360,73,f'PLAYERS NEARBY {len(self.other_players)} / PvP disabled',(140,185,255))
         if self.flash: d.rect(26,65,W-52,490,RED)
         obj,label = self.active_navigation()
