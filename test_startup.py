@@ -31,6 +31,7 @@ class StartupTests(unittest.TestCase):
         screen.error = ''
         screen.replace_field = False
         screen.signup = None
+        screen.auto_at = None
         return screen
 
     def test_keyboard_and_mouse_select_both_modes(self):
@@ -177,6 +178,29 @@ class StartupTests(unittest.TestCase):
         self.assertIsNotNone(screen.signup)
         self.assertIn('taken',screen.error)
         self.assertFalse(self.path.exists())
+
+    def test_last_online_player_reconnects_automatically_unless_a_key_is_pressed(self):
+        from unittest.mock import MagicMock
+        token = Path(self.tmp.name)/'me.token'; token.write_text('t'*43)
+        config = dict(startup.load_connection(),last_mode='online',token_file=str(token))
+        display = MagicMock(); display.events.return_value = []
+        with patch.object(startup.StartScreen,'draw'), patch.object(startup.time,'sleep'):
+            screen = startup.StartScreen(display,config)
+            screen.auto_at = startup.time.monotonic()-1
+            self.assertEqual(screen.choose(),'online')
+            screen = startup.StartScreen(display,config)
+            screen.event('down',st.DOWN)
+            self.assertIsNone(screen.auto_at)
+            self.assertIsNone(startup.StartScreen(display,dict(config,last_mode='offline')).auto_at)
+            self.assertIsNone(startup.StartScreen(display,config,error='Server unavailable').auto_at)
+
+    def test_chosen_mode_is_remembered(self):
+        from unittest.mock import MagicMock
+        display = MagicMock(); display.events.return_value = [('down',st.DOWN),('down',13)]
+        with patch.object(startup.StartScreen,'draw'), patch.object(startup.time,'sleep'):
+            screen = startup.StartScreen(display,startup.load_connection())
+            self.assertEqual(screen.choose(),'offline')
+        self.assertEqual(startup.load_connection()['last_mode'],'offline')
 
 
 if __name__ == '__main__': unittest.main()

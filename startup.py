@@ -20,7 +20,7 @@ def config_path():
 
 
 def load_connection():
-    defaults = dict(server=DEFAULT_SERVER,token_file=str(config_path().with_name('player.token')),allow_lan=True,import_local_save=True)
+    defaults = dict(server=DEFAULT_SERVER,token_file=str(config_path().with_name('player.token')),allow_lan=True,import_local_save=True,last_mode='')
     try:
         saved = json.loads(config_path().read_text())
         for key in defaults:
@@ -97,6 +97,9 @@ class StartScreen:
         self.selected = 0
         self.settings = False
         self.signup = None
+        # Players who last played online go straight back in unless they press something.
+        ready = self.config.get('last_mode') == 'online' and self.config['server'] and Path(self.config['token_file']).expanduser().is_file()
+        self.auto_at = time.monotonic()+2.5 if ready and not error else None
         self.field = 0
         self.replace_field = False
         self.texture = None
@@ -175,6 +178,7 @@ class StartScreen:
     def event(self, kind, value):
         from star_trader import UP,DOWN,LEFT,RIGHT
         if kind == 'quit' or (kind == 'down' and value == 27): return 'quit'
+        if kind in ('down','click','text'): self.auto_at = None
         if self.signup is not None:
             if kind == 'click':
                 x,y = value
@@ -303,14 +307,27 @@ class StartScreen:
                 x = 110+index*300
                 d.rect(x,615,280,48,GOLD if index == self.selected else GREEN)
                 d.text(x+15,630,label,GOLD if index == self.selected else GREEN)
-            d.text(110,685,'Arrows choose / Enter opens / Click to play / ESC closes')
+            if self.auto_at: d.text(110,685,f'Connecting to online play in {max(0,self.auto_at-time.monotonic()):.0f}s - press any key to choose',GOLD)
+            else: d.text(110,685,'Arrows choose / Enter opens / Click to play / ESC closes')
         if self.error: d.text(45,727,self.error[:94],GOLD if self.error.startswith(('Welcome','Invite accepted','Signing up')) else RED)
         d.present(d.r)
+
+    def remember(self, mode):
+        self.auto_at = None
+        if self.config.get('last_mode') == mode: return
+        self.config['last_mode'] = mode
+        try: save_connection(self.config)
+        except OSError: pass
 
     def choose(self):
         while True:
             for kind,value in self.d.events():
                 choice = self.event(kind,value)
-                if choice: return choice
+                if choice:
+                    if choice in ('online','offline'): self.remember(choice)
+                    return choice
+            if self.auto_at and time.monotonic() >= self.auto_at:
+                self.remember('online')
+                return 'online'
             self.draw()
             time.sleep(1/60)
