@@ -149,7 +149,7 @@ class StartupTests(unittest.TestCase):
         screen.config['token_file'] = str(Path(self.tmp.name)/'missing.token')
         self.assertIsNone(screen.activate(0))
         self.assertIsNotNone(screen.signup)
-        self.assertIn('Sign up',screen.error)
+        self.assertIn('Paste invite',screen.error)
 
     def test_signup_form_creates_account_and_saves_private_token(self):
         screen = self.screen(); screen.draw = lambda: None
@@ -201,6 +201,18 @@ class StartupTests(unittest.TestCase):
             screen = startup.StartScreen(display,startup.load_connection())
             self.assertEqual(screen.choose(),'offline')
         self.assertEqual(startup.load_connection()['last_mode'],'offline')
+
+    def test_new_install_uses_public_server_and_invite_works_from_signup(self):
+        self.assertTrue(startup.DEFAULT_SERVER.startswith('https://'))
+        screen = self.screen(); screen.draw = lambda: None
+        screen.open_signup()
+        screen.event('text',startup.make_invite(startup.DEFAULT_SERVER,'Frank','f'*43))
+        self.assertIsNone(screen.signup)
+        self.assertIn('Frank',screen.error)
+        self.assertEqual(startup.load_connection()['server'],startup.DEFAULT_SERVER)
+        screen.open_signup()
+        screen.invite_from_signup('not an invite')
+        self.assertIsNotNone(screen.signup)
 
 
 if __name__ == '__main__': unittest.main()

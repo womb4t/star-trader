@@ -11,7 +11,7 @@ import time
 import urllib.parse
 
 # The one community server for now; an invite code fills in everything else.
-DEFAULT_SERVER = 'http://192.168.1.45:8766'
+DEFAULT_SERVER = 'https://kentons-imac.tail8cde7d.ts.net'
 INVITE_PREFIX = 'STAR-TRADER-INVITE:'
 
 
@@ -127,7 +127,7 @@ class StartScreen:
                 self.error = 'Enter your server address and private token file path.'
                 return None
             if not Path(self.config['token_file']).expanduser().is_file():
-                self.open_signup('New pilot? Sign up below, or paste an invite in Connection settings.')
+                self.open_signup('New pilot? Copy your invite code and click Paste invite, or sign up on the host\'s Wi-Fi.')
                 return None
             return 'online'
         if index == 1: return 'offline'
@@ -185,8 +185,11 @@ class StartScreen:
                 if 70 <= x <= 1030 and 200 <= y <= 244: self.field,self.replace_field = 0,False
                 elif 70 <= x <= 1030 and 295 <= y <= 339: self.field,self.replace_field = 1,False
                 elif 70 <= x <= 370 and 550 <= y <= 596: return self.submit_signup()
+                elif 390 <= x <= 710 and 550 <= y <= 596: self.invite_from_signup()
                 elif 730 <= x <= 1030 and 550 <= y <= 596: self.signup = None; self.error = ''
             elif kind == 'down' and value == 13: return self.submit_signup()
+            elif kind == 'text' and value.strip().startswith(INVITE_PREFIX): self.invite_from_signup(value)
+            elif kind == 'clipboard' and value == 'paste': self.invite_from_signup()
             else: self.form_event(kind,value,self.signup,('name','email'),(32,254))
             return None
         if self.settings:
@@ -230,6 +233,10 @@ class StartScreen:
                     self.selected = index
                     return self.activate(index)
         return None
+
+    def invite_from_signup(self, code=None):
+        self.paste_invite(code)
+        if self.error.startswith('Invite accepted'): self.signup = None
 
     def paste_invite(self, code=None):
         try:
@@ -280,7 +287,7 @@ class StartScreen:
             d.text(70,380,'Your email is only used to send game news. Leave it blank to skip.')
             d.text(70,420,'Your private login is saved on this computer automatically.')
             d.text(70,495,'Click a field or TAB. Enter signs up. ESC closes.')
-            for x,w,label in ((70,300,'Sign up'),(730,300,'Back')):
+            for x,w,label in ((70,300,'Sign up'),(390,320,'Paste invite'),(730,300,'Back')):
                 d.rect(x,550,w,46,GREEN); d.text(x+15,562,label,GREEN)
         elif self.settings:
             d.fill(40,90,1020,545,(5,15,25))

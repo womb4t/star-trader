@@ -1,3 +1,8 @@
+# 0.6.1 — online settings that work from anywhere
+
+- New installs point at the community server's public address (https://kentons-imac.tail8cde7d.ts.net), so online play works away from the host's home network.
+- The new-pilot screen has a Paste invite button (Ctrl+V works too), so players with an invite code are set up in one click.
+
 # 0.6.0 — Mac install with nothing else needed
 
 - **One-line Mac install on a brand-new Mac.** No Xcode tools, git, Homebrew or Python needed:

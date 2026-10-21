@@ -89,7 +89,7 @@ Then `python3 feedback_report.py` lists new reports, and `--mark seen` marks wha
 
 ## Invite a tester
 
-New installs already point at the community server (`http://192.168.1.45:8766`). Create the player, then write an invite code file for them:
+New installs already point at the community server (`https://kentons-imac.tail8cde7d.ts.net`, through Tailscale Funnel). Create the player, then write an invite code file for them:
 
 ```bash
 cd "$HOME/star-trader" &&
