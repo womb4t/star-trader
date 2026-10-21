@@ -22,7 +22,7 @@ import shutil
 import subprocess
 import textwrap
 
-VERSION = '0.6.3'
+VERSION = '0.6.4'
 HOSTILITY_COOLDOWN_SECONDS = 30*60
 STATION_POLICE_CAPACITY = 6
 # Career points needed for each commander rank: kills, trade profit and hyperspace jumps all count.
@@ -37,6 +37,7 @@ PRISON_DAY_SECONDS, PRISON_MAX_DAYS, PRISON_BRIBE, PRISON_WORK_SECONDS = 3600, 7
 PATROL_RADIUS = 5000
 # The sun's visible radius (m) and the altitude band above it where fitted scoops collect fuel.
 SUN_RADIUS, SCOOP_ALTITUDE, SCOOP_SPEEDS = 220, 280, (10, 60)
+TRADE_LOG_SIZE = 60
 DOCK_ROLL_TOLERANCE = math.radians(14)
 CRUISE_SECONDS_PER_LY = 45
 W, H = 1100, 760
@@ -165,6 +166,7 @@ class Pilot:
         self.storage = [dict(owned=False,rented_until=0.,cargo=[0]*len(GOODS)) for _ in SYSTEMS]
         self.prison = None
         self.intro_seen = False
+        self.trade_log = []
 
     @property
     def career_points(self):
@@ -197,17 +199,23 @@ class Pilot:
             self.cargo_paid[good] += value
             self.cargo[good] += 1
             stock[good] -= 1
+            self.log_trade('buy',good,value,'CYM' if dirty == value else 'cr')
         else:
             if self.cargo[good] <= 0: return 'None aboard to sell.'
             if good in ILLEGAL and not clean_deal: self.crymto += value
             else: self.credits += value
             basis = self.cargo_paid[good]//self.cargo[good]
             self.trade_profit += max(0,value-basis)
+            self.log_trade('sell',good,value,'CYM' if good in ILLEGAL and not clean_deal else 'cr',value-basis)
             self.cargo_paid[good] = 0 if self.cargo[good] == 1 else self.cargo_paid[good]-basis
             self.cargo[good] -= 1
             stock[good] += 1
         unit = ('Crymto / credits' if use_crymto and good in ILLEGAL else 'cr') if buy else ('Crymto' if good in ILLEGAL and not clean_deal else 'cr')
         return f'{"Bought" if buy else "Sold"} 1 t {GOODS[good]} for {value} {unit}.'
+
+    def log_trade(self, side, good, price, unit, profit=0):
+        self.trade_log.append(dict(time=time.time(),system=self.system,side=side,good=good,price=price,unit=unit,profit=profit))
+        del self.trade_log[:-TRADE_LOG_SIZE]
 
     def buy_equipment(self, index):
         key, label, cost, tech, _ = EQUIPMENT[index]
@@ -293,6 +301,11 @@ class Pilot:
         if type(self.name) is not str or len(self.name)>24 or not all(c.isprintable() for c in self.name): raise ValueError('name')
         if not integer(self.trade_profit) or not integer(self.jumps): raise ValueError('career')
         if type(self.intro_seen) is not bool: raise ValueError('introduction')
+        if not isinstance(self.trade_log,list) or len(self.trade_log) > TRADE_LOG_SIZE: raise ValueError('trade log')
+        for entry in self.trade_log:
+            if not isinstance(entry,dict) or entry.get('side') not in ('buy','sell') or not integer(entry.get('good')) or entry['good'] >= len(GOODS): raise ValueError('trade entry')
+            if not integer(entry.get('system')) or entry['system'] >= len(SYSTEMS) or not integer(entry.get('price')) or type(entry.get('profit',0)) is not int: raise ValueError('trade entry')
+            if entry.get('unit') not in ('cr','CYM') or type(entry.get('time')) not in (int,float) or not math.isfinite(entry['time']): raise ValueError('trade entry')
         if self.prison is not None:
             j = self.prison
             if not isinstance(j,dict) or not integer(j.get('system')) or j['system'] >= len(SYSTEMS): raise ValueError('prison')
@@ -618,6 +631,7 @@ class Game:
         self.rename_return = 'market'
         self.intro_return = 'market'
         self.intro_page = 0
+        self.trades_page = 0
         self.text_selection_all = False
         self.text_selection_mode = None
         self.credit_code_text = ""
@@ -704,6 +718,7 @@ class Game:
         mode = self.mode
         for _ in range(6):
             if mode in ('market','outfit','departure','launch_warning','bank','jobs','exchange','trade_deal','redeem','prison'): return 'market'
+            if mode == 'trades': mode = 'money'; continue
             if mode in ('flight','cruise','hyperspace','dead'): return mode
             attr = {'money':'money_return','vms':'vms_return','help':'help_return','updates':'update_return','map':'map_return','menu':'menu_return','notes':'notes_return','rename':'rename_return','intro':'intro_return','feedback':'feedback_return','planet_profile':'map_return','engineering':'engineering_return'}.get(mode)
             if not attr: return 'flight'
@@ -1887,10 +1902,30 @@ class Game:
             d.text(45,155+i*45,line)
         d.text(45,350,'Banking, exchange, codes, fines and paid station jobs.')
         d.text(45,435,'Crymto exchange: '+('available here' if self.exchange_available() else 'feudal and anarchy ports only'))
+        if self.money_return != 'market': d.text(45,480,'6 Trade log is available anywhere.')
 
         d.text(45,320,f'Pay fines costs {p.fine:,} credits. Code redemption is single-use per pilot.')
         d.text(45,570,'Crymto survives ship destruction. Bank funds and stored cargo are protected.')
         d.text(45,610,'BACKSPACE returns. Docking is required for financial services.' if self.money_return != 'market' else 'BACKSPACE returns to the market.')
+
+    def draw_trades(self):
+        d,log = self.d,self.p.trade_log
+        d.text(35,85,'MONEY / TRADE LOG',GOLD)
+        if not log:
+            d.text(45,160,'No trades yet. Buy with B and sell with S in a station market.')
+            return
+        sells = [e for e in log if e['side'] == 'sell']
+        d.text(45,125,f'Last {len(log)} trades. Profit on sales shown: {sum(e["profit"] for e in sells if e["unit"] == "cr"):+,} cr.',(135,175,185))
+        d.text(45,165,'WHEN         WHERE      TRADE  COMMODITY          PRICE        PROFIT',GOLD)
+        newest = list(reversed(log))
+        page = newest[self.trades_page*14:(self.trades_page+1)*14]
+        for i,e in enumerate(page):
+            when = time.strftime('%d %b %H:%M',time.localtime(e['time']))
+            profit = f'{e["profit"]:+,} {e["unit"]}' if e['side'] == 'sell' else ''
+            color = (120,220,140) if e['side'] == 'sell' and e['profit'] > 0 else RED if e['side'] == 'sell' and e['profit'] < 0 else GREEN
+            d.text(45,200+i*27,f'{when:<12} {SYSTEMS[e["system"]][0]:<10} {e["side"].upper():<6} {GOODS[e["good"]]:<18} {e["price"]:>5} {e["unit"]:<4}  {profit}',color)
+        pages = max(1,math.ceil(len(log)/14))
+        d.text(45,595,f'Page {self.trades_page+1} of {pages}. UP shows older trades, DOWN newer. BACKSPACE returns.',(135,175,185))
 
     def draw_notepad(self):
         d = self.d
@@ -2039,6 +2074,11 @@ class Game:
             elif k == 8: self.p.notes = self.p.notes[:-1]
             elif k == 13: self.text_input('\n')
             return
+        if self.mode == 'trades':
+            pages = max(1,math.ceil(len(self.p.trade_log)/14))
+            if k == UP: self.trades_page = min(pages-1,self.trades_page+1)
+            elif k == DOWN: self.trades_page = max(0,self.trades_page-1)
+            return
         if self.mode == 'intro':
             if k in (13,RIGHT,32): self.intro_next()
             elif k == LEFT: self.intro_page = max(0,self.intro_page-1)
@@ -2082,6 +2122,7 @@ class Game:
             return
         if self.mode == 'money':
             if k in (27,ord('9')): self.mode = self.money_return
+            elif k == ord('6'): self.trades_page,self.mode = 0,'trades'
             elif self.money_return != 'market' and k != ord('0'): self.message = 'Dock at a station to use Money services.'
             elif k == ord('1'): self.mode = 'bank'
             elif k == ord('2'):
@@ -3299,10 +3340,16 @@ class Game:
         elif self.mode == 'money' and self.money_return == 'market':
             for i,(label,key) in enumerate([('Bank / storage',ord('1')),('Crymto exchange',ord('2')),('Redeem code',ord('3')),('Pay fines',ord('4'))]):
                 self.mouse_button(35+(i%2)*515,380+(i//2)*100,490,label,key)
-            self.mouse_button(35,535,1005,'Station jobs / earn credits',ord('5'))
+            self.mouse_button(35,535,490,'Station jobs / earn credits',ord('5'))
+            self.mouse_button(550,535,490,'Trade log',ord('6'))
             self.mouse_button(35,674,1000,'Return to market',ord('9'))
         elif self.mode == 'money':
+            self.mouse_button(35,535,490,'Trade log',ord('6'))
             self.mouse_button(35,674,1000,'Return',ord('9'))
+        elif self.mode == 'trades':
+            self.mouse_button(35,674,240,'Older',UP)
+            self.mouse_button(290,674,240,'Newer',DOWN)
+            self.mouse_button(800,674,240,'Return to Money',action=self.mouse_back)
         elif self.mode == 'redeem':
             self.mouse_button(35,315,160,'Paste',action=lambda:self.handle_clipboard('paste'))
             self.mouse_button(210,315,160,'Copy',action=lambda:self.handle_clipboard('copy'))
@@ -3426,7 +3473,7 @@ class Game:
                        'menu':'menu_return','notes':'notes_return','rename':'rename_return','intro':'intro_return','feedback':'feedback_return',
                        'money':'money_return','vms':'vms_return','outfit':'outfit_return',
                        'engineering':'engineering_return','launch_warning':'launch_return'}
-            fixed = {'planet_profile':'map','redeem':'money','bank':'money','jobs':'money',
+            fixed = {'planet_profile':'map','redeem':'money','bank':'money','jobs':'money','trades':'money',
                      'exchange':'money','trade_deal':'market','departure':'market'}
             if self.mode in returns: self.mode = getattr(self,returns[self.mode],'market')
             elif self.mode in fixed: self.mode = fixed[self.mode]
@@ -3516,6 +3563,8 @@ class Game:
             self.draw_notepad()
         elif self.mode == 'intro':
             self.draw_intro()
+        elif self.mode == 'trades':
+            self.draw_trades()
         elif self.mode == 'prison':
             self.draw_prison()
         elif self.mode == 'rename':

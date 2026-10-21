@@ -1,3 +1,9 @@
+# 0.6.4 — trade log and sun-skimming readout
+
+- **Trade log** in Money (6): your last 60 trades with time, station, price and the profit on each sale. Viewable anywhere, docked or in flight.
+- **Sun skimming readout:** near the sun the heat panel shows your altitude above the surface and whether your fuel scoops are collecting, or why not.
+- **Automatic ore pickup:** fitted scoops collect ore fragments when you fly slowly within 260 m.
+
 # 0.6.3 — game introduction
 
 - New pilots get a four-page introduction: who you are, the point of the game, how to play, and how to send bug reports and suggestions. Reopen it any time from Menu, Introduction.

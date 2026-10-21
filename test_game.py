@@ -1844,6 +1844,26 @@ class CommanderStatusTests(unittest.TestCase):
         self.assertEqual(restored.p.waypoint['name'],'Corvant')
         self.assertEqual(restored.jump_warp['destination']['name'],'Corvant')
 
+    def test_trades_are_logged_with_profit_and_shown_in_money(self):
+        g = self.game
+        p = g.p; p.credits = 1000
+        p.system = min(range(8),key=lambda i:st.quote(i,3,True))
+        p.trade(3,True)
+        paid = st.quote(p.system,3,True)
+        p.system = max(range(8),key=lambda i:st.quote(i,3,False))
+        p.trade(3,False)
+        self.assertEqual([e['side'] for e in p.trade_log],['buy','sell'])
+        self.assertEqual(p.trade_log[1]['profit'],st.quote(p.system,3,False)-paid)
+        g.mode = 'money'; g.money_return = 'flight'
+        g.key(ord('6'))
+        self.assertEqual(g.mode,'trades')
+        g.key(8)
+        self.assertEqual(g.mode,'money')
+        for _ in range(st.TRADE_LOG_SIZE+5): p.log_trade('buy',0,8,'cr')
+        self.assertEqual(len(p.trade_log),st.TRADE_LOG_SIZE)
+        p.save(); q = st.Pilot(); self.assertTrue(q.load())
+        self.assertEqual(q.trade_log,p.trade_log)
+
     def test_invalid_career_fields_are_rejected(self):
         for key,value in (('name','x'*25),('trade_profit',-1),('jumps',1.5),('cargo_paid',[0])):
             with self.subTest(key=key):
