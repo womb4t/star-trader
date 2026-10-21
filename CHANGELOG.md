@@ -1,3 +1,17 @@
+# 0.5.0 — shared universe preview, Mac support, law and order
+
+- **See other pilots online.** Players on the same server see each other's ships, names and radar contacts in every system. This is an early preview: no combat, trading or collisions between players yet, and positions are reported by each game, not checked by the server.
+- **Sign up in the game.** New pilots choose a name (and may give an email for game news) right from the Online play screen. Hosts can also send one-paste invite codes. Fresh installs point at the community server, and returning online players reconnect automatically.
+- **macOS installer.** `install-mac.sh` sets up the official SDL frameworks and adds Star Trader to Applications with its own icon. Intel and Apple Silicon, no Homebrew needed.
+- **Automatic updates.** New releases install themselves when the game starts. Saves are preserved.
+- **Commander status.** Your name, rank (Newbie to Legend, earned from kills, trading profit and hyperspace jumps) and a 0–5 wanted level on the station screen.
+- **Law and order.** A few stray shots at a station bring a call from station control and a fine instead of police. Lawful stations hold your launch until fines are paid. Wanted pilots can surrender and dock to be arrested; destroying police earns prison time (one real hour per day, up to seven), with daily work shifts or a 1-in-10 bribe to escape.
+- **Patrol zones.** Pirates do not attack within 5,000 m of a lawful station.
+- **Bug reports and suggestions** are logged in the game and sent to the developers when you are online. GitHub drafts are gone.
+- **Quality of life.** Backspace is Back on every screen. Bank presets of 50/100/1000 cr plus a custom amount. Blinking cursor in Connection settings.
+- **New star system names** (Halvora, Corvant, Meridel, Brennix, Skarrow, Velmora, Duskholt, Ambrell). Saves migrate automatically.
+- **Fixes.** Python 3.9–3.11 compatibility, online saves survive a server address change, and the commander name shows when playing online.
+
 # 0.2.26 — clear mine and missile availability
 
 - Stop ammunition counts hiding technology restrictions in the outfitter.

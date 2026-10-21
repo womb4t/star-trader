@@ -13,3 +13,5 @@ This file is project context for another Codex chat, not a live transfer of the 
 Current release: v0.4.0. Escape is a global emergency save-and-close on every screen; mouse Back/Return/Cancel navigates separately. Both the game and save server support --version; /health reports the server version. Update both checkouts from main before testing.
 
 The splash artwork and startup.py are installed with the game; the headless server does not need them. The installer migrates old Star Trader Online settings and removes its duplicate desktop entry.
+
+Update 21 October 2026: development moved to Claude Code. v0.5.0 released: shared-presence preview, in-game sign-up and invites, macOS installer, automatic updates, commander rank/wanted level, station comms, arrest and prison, patrol zones and server-side feedback. The iMac server runs from ~/star-trader-wip on port 8766; internet players reach it through Tailscale Funnel with invite codes.
