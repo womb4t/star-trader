@@ -35,6 +35,8 @@ STRAY_SHOT_LIMIT, STRAY_SHOT_FINE, STRAY_SHOT_RESET = 3, 50, 300
 PRISON_DAY_SECONDS, PRISON_MAX_DAYS, PRISON_BRIBE, PRISON_WORK_SECONDS = 3600, 7, 200, 1800
 # Lawful stations patrol this radius (m): pirates do not attack inside it.
 PATROL_RADIUS = 5000
+# The sun's visible radius (m) and the altitude band above it where fitted scoops collect fuel.
+SUN_RADIUS, SCOOP_ALTITUDE, SCOOP_SPEEDS = 220, 280, (10, 60)
 DOCK_ROLL_TOLERANCE = math.radians(14)
 CRUISE_SECONDS_PER_LY = 45
 W, H = 1100, 760
@@ -2762,13 +2764,19 @@ class Game:
     def draw_heat_instrument(self):
         d = self.d
         color = RED if self.heat >= 90 else GOLD if self.heat >= 70 else GREEN
-        d.fill(840,430,230,82,(5,16,27))
-        d.rect(840,430,230,82,(45,105,115))
+        near_sun = self.sun_altitude() < 2000
+        d.fill(840,430,230,130 if near_sun else 82,(5,16,27))
+        d.rect(840,430,230,130 if near_sun else 82,(45,105,115))
         d.text(850,435,f'HEAT {self.heat:.0f}% / LIMIT 90',color)
         d.text(850,458,f'SHIELDS {self.shield:.0f}%',color)
         d.rect(850,490,210,8,(45,105,115))
         d.fill(851,491,int(min(120,self.heat)/120*208),6,color)
         d.line(850+210*90/120,487,850+210*90/120,501,GOLD)
+        if near_sun:
+            altitude = self.sun_altitude()
+            state,label = self.scoop_status()
+            d.text(850,510,'INSIDE THE SUN' if altitude < 0 else f'SUN ALTITUDE {altitude:.0f} m',RED if altitude < 0 else GOLD)
+            d.text(850,533,label,GREEN if state == 'collecting' else (120,140,150) if state == 'none' else GOLD)
 
     def draw_scanner(self):
         d = self.d
@@ -2845,6 +2853,28 @@ class Game:
         d.fill(240,285,620,88,(4,9,18))
         d.text(420,300,'H Y P E R S P A C E',GREEN)
         d.text(300,338,'Destination: '+self.jump_warp['destination']['name'],GOLD)
+
+    def sun_altitude(self):
+        return math.sqrt(sum(v*v for v in self.sun))-SUN_RADIUS
+
+    def scoop_status(self):
+        """Why fitted scoops are or are not collecting sun fuel right now."""
+        altitude = self.sun_altitude()
+        if 'scoops' not in self.p.equipment: return 'none','SCOOP: NOT FITTED'
+        if self.p.fuel >= 7: return 'full','SCOOP: TANK FULL'
+        if altitude < 0: return 'low','SCOOP: CLIMB OUT'
+        if altitude > SCOOP_ALTITUDE: return 'high',f'SCOOP: BELOW {SCOOP_ALTITUDE} m'
+        if not SCOOP_SPEEDS[0] <= self.speed <= SCOOP_SPEEDS[1]: return 'speed',f'SCOOP: SPEED {SCOOP_SPEEDS[0]}-{SCOOP_SPEEDS[1]}'
+        return 'collecting','SCOOP: COLLECTING'
+
+    def auto_scoop_ore(self):
+        # Fitted scoops pick up ore fragments by themselves when you fly slowly past.
+        if 'scoops' not in self.p.equipment or abs(self.speed) > 50 or sum(self.p.cargo) >= self.p.capacity: return
+        nearby = next((f for f in self.fragments if math.sqrt(sum(v*v for v in f)) < 260),None)
+        if nearby is None: return
+        self.p.cargo[2] += 1
+        self.fragments.remove(nearby)
+        self.message = 'Scooped 1 tonne of ore. Sell it at a station.'
 
     def scoop(self):
         if 'scoops' not in self.p.equipment:
@@ -3045,12 +3075,14 @@ class Game:
             self.heat = min(120,self.heat + (6 if sun_range > 250 else 30)*(.6 if self.shield > 0 else 1)*dt)
             if old_heat < 70 <= self.heat: self.message = 'THERMAL WARNING: shield protection degrading. Leave the sun before shields fail!'
             if old_heat < 90 <= self.heat: self.message = 'THERMAL WARNING: temperature tolerance exceeded! Turn away from the sun!'
-            if 'scoops' in self.p.equipment and 10 <= self.speed <= 60 and 150 < sun_range <= 500:
+            if self.scoop_status()[0] == 'collecting':
+                if self.p.fuel < 7 and not self.message.startswith('Sun skimming'):
+                    self.message = 'Sun skimming: collecting fuel. Turn away before overheating!'
                 self.p.fuel = min(7,self.p.fuel+0.15*dt)
-                self.message = 'Sun skimming: collecting fuel. Turn away before overheating!'
             if self.heat > 70: self.damage((2+(self.heat-70)*.25)*dt)
             if self.mode == 'dead': return
         else: self.heat = max(0,self.heat-10*dt)
+        self.auto_scoop_ore()
         self.spawn -= dt
         patrolled = self.in_patrol_zone()
         if self.enemy and self.enemy_kind == 'pirate' and patrolled:

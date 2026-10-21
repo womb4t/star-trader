@@ -949,6 +949,30 @@ class GameplayTests(unittest.TestCase):
         g.sun = [1000,0,1000]; heat = g.heat; g.update(.1)
         self.assertLess(g.heat,heat)
 
+    def test_scoop_status_explains_sun_skimming_conditions(self):
+        g = self.game
+        g.launch(); g.station = [9000.,0,9000.]
+        g.sun = [0.,0.,st.SUN_RADIUS+150.]; g.speed = 20; g.p.fuel = 3
+        self.assertAlmostEqual(g.sun_altitude(),150)
+        self.assertEqual(g.scoop_status()[0],'none')
+        g.p.equipment = ['scoops']
+        self.assertEqual(g.scoop_status()[0],'collecting')
+        g.speed = 80; self.assertEqual(g.scoop_status()[0],'speed')
+        g.speed = 20; g.sun = [0.,0.,st.SUN_RADIUS+400.]; self.assertEqual(g.scoop_status()[0],'high')
+        g.sun = [0.,0.,100.]; self.assertEqual(g.scoop_status()[0],'low')
+        g.sun = [0.,0.,st.SUN_RADIUS+150.]; g.p.fuel = 7; self.assertEqual(g.scoop_status()[0],'full')
+
+    def test_scoops_collect_ore_automatically_when_slow_and_close(self):
+        g = self.game
+        g.launch(); g.station = [9000.,0,9000.]; g.speed = 20
+        g.fragments = [[0.,0.,100.]]
+        g.update(.01)
+        self.assertEqual(len(g.fragments),1)  # no scoops fitted
+        g.p.equipment = ['scoops']; g.speed = 80; g.update(.01)
+        self.assertEqual(len(g.fragments),1)  # too fast
+        g.speed = 20; g.update(.01)
+        self.assertEqual((len(g.fragments),g.p.cargo[2]),(0,1))
+
     def test_can_pass_station_at_safe_distance_and_reverse(self):
         g = self.game
         g.launch(); g.station = [500,0,66]; g.speed = 50
