@@ -182,6 +182,10 @@ def main():
     serve.add_argument('--lan',action='store_true',help='Allow unencrypted private-LAN testing')
     serve.add_argument('--cert',type=Path)
     serve.add_argument('--key',type=Path)
+    invite = sub.add_parser('invite',help='Write an invite code file for a player to paste into Connection settings')
+    invite.add_argument('--server',required=True,help='Address players use, e.g. http://192.168.1.45:8766')
+    invite.add_argument('--token-file',type=Path,required=True)
+    invite.add_argument('--out',type=Path,required=True)
     backup = sub.add_parser('backup')
     backup.add_argument('destination',type=Path)
     args = parser.parse_args()
@@ -198,6 +202,12 @@ def main():
                 raise
             out.write(token+'\n')
         print(f'Created {args.name}. Private token file: {args.token_file}. Keep it private.')
+    elif args.command == 'invite':
+        from startup import make_invite
+        token = args.token_file.read_text().strip()
+        name = store.read(token)['player']
+        with args.out.open('x') as out: out.write(make_invite(args.server,name,token)+'\n')
+        print(f'Invite for {name} written to {args.out}. It works like a password: send it privately, then delete it.')
     elif args.command == 'backup':
         if args.destination.resolve() == args.db.resolve() or args.destination.exists(): parser.error('Choose a new backup file')
         with store.connect() as source:

@@ -38,6 +38,19 @@ cd "$HOME/star-trader" &&
 python3 save_server.py create-player Tester2 --token-file "$HOME/.star-trader-server/tester2.token"
 ```
 
+## Invite a tester
+
+New installs already point at the community server (`http://192.168.1.45:8766`). Create the player, then write an invite code file for them:
+
+```bash
+cd "$HOME/star-trader" &&
+python3 save_server.py create-player FriendName --token-file "$HOME/.star-trader-server/friendname.token" &&
+python3 save_server.py invite --server http://192.168.1.45:8766 \
+  --token-file "$HOME/.star-trader-server/friendname.token" --out "$HOME/friendname-invite.txt"
+```
+
+Send the code in that file privately: it works like a password. The tester copies it, opens **Connection settings**, clicks **Paste invite**, then chooses **Online play**. The game saves the token to its own private file. Delete the invite file once it has been used.
+
 ## Connect the Omarchy laptop
 
 Close the game first. This fresh-terminal command asks for the real iMac address and privately transferred token file. It imports your existing offline save only when this server account has no progress yet; the original offline save remains untouched.

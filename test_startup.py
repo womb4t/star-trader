@@ -60,7 +60,7 @@ class StartupTests(unittest.TestCase):
         self.assertFalse(screen.settings)
         loaded = startup.load_connection()
         self.assertEqual(loaded['token_file'],str(Path(self.tmp.name)/'private.token'))
-        self.assertTrue(loaded['allow_lan'])
+        self.assertFalse(loaded['allow_lan'])  # the click toggled the default off
         self.assertEqual(self.path.stat().st_mode & 0o777,0o600)
 
     def test_legacy_migration_never_executes_shell_and_preserves_existing_config(self):
@@ -97,9 +97,47 @@ class StartupTests(unittest.TestCase):
 
     def test_bad_config_falls_back_without_breaking_offline(self):
         self.path.write_text('{broken')
-        self.assertEqual(startup.load_connection()['server'],'')
+        self.assertEqual(startup.load_connection()['server'],startup.DEFAULT_SERVER)
         self.path.write_text('{"server": false, "allow_lan": "no"}')
-        self.assertFalse(startup.load_connection()['allow_lan'])
+        self.assertEqual(startup.load_connection()['server'],startup.DEFAULT_SERVER)
+        self.assertTrue(startup.load_connection()['allow_lan'])
+
+    def test_fresh_install_defaults_to_the_community_server(self):
+        config = startup.load_connection()
+        self.assertEqual(config['server'],startup.DEFAULT_SERVER)
+        self.assertTrue(config['allow_lan'])
+
+    def test_clicking_a_field_focuses_it_without_hiding_replacement(self):
+        screen = self.screen(); screen.settings = True
+        screen.config['token_file'] = '/old/path'
+        screen.event('click',(100,310))
+        self.assertEqual((screen.field,screen.replace_field),(1,False))
+        screen.event('down',8)
+        self.assertEqual(screen.config['token_file'],'/old/pat')
+
+    def test_invite_code_round_trip_sets_server_and_private_token(self):
+        code = startup.make_invite('http://192.168.1.45:8766/','Friend_1','t'*43)
+        screen = self.screen(); screen.settings = True
+        screen.event('text',code)
+        self.assertFalse(screen.settings)
+        self.assertIn('Friend_1',screen.error)
+        loaded = startup.load_connection()
+        token_file = Path(loaded['token_file'])
+        self.assertEqual(token_file,self.path.with_name('friend_1.token'))
+        self.assertEqual(token_file.read_text().strip(),'t'*43)
+        self.assertEqual(token_file.stat().st_mode & 0o777,0o600)
+        self.assertEqual(loaded['server'],'http://192.168.1.45:8766')
+        self.assertNotIn('t'*43,self.path.read_text())
+
+    def test_bad_invite_codes_change_nothing(self):
+        good = startup.make_invite('http://192.168.1.45:8766','Friend','t'*43)
+        for code in ('hello',good[:-10],startup.make_invite('ftp://x','Friend','t'*43),startup.make_invite('http://x:1','bad name','t'*43),startup.make_invite('http://x:1','Friend','short')):
+            with self.subTest(code=code):
+                screen = self.screen(); screen.settings = True
+                screen.paste_invite(code)
+                self.assertTrue(screen.settings)
+                self.assertTrue(screen.error)
+                self.assertFalse(self.path.exists())
 
 
 if __name__ == '__main__': unittest.main()

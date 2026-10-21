@@ -187,4 +187,20 @@ class HostilityTests(unittest.TestCase):
             self.assertEqual(g.p.fine,500)
 
 
+class InviteCommandTests(unittest.TestCase):
+    def test_invite_file_holds_server_name_and_token(self):
+        import subprocess, sys, startup
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            db, token_file, out = root/'p.sqlite3', root/'friend.token', root/'friend-invite.txt'
+            base = [sys.executable,'save_server.py','--db',str(db)]
+            subprocess.run(base+['create-player','Friend','--token-file',str(token_file)],check=True,capture_output=True)
+            result = subprocess.run(base+['invite','--server','http://192.168.1.45:8766','--token-file',str(token_file),'--out',str(out)],check=True,capture_output=True,text=True)
+            token = token_file.read_text().strip()
+            self.assertNotIn(token,result.stdout)
+            self.assertEqual(out.stat().st_mode & 0o777,0o600)
+            invite = startup.read_invite(out.read_text())
+            self.assertEqual(invite,dict(server='http://192.168.1.45:8766',name='Friend',token=token))
+
+
 if __name__ == '__main__': unittest.main()
