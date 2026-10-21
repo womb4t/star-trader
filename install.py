@@ -10,7 +10,8 @@ import sys
 
 def install_mac_app(target):
     # A minimal app bundle in ~/Applications, so Star Trader opens from Launchpad, Spotlight or the Dock.
-    app = Path.home()/'Applications'/'Star Trader.app'/'Contents'
+    bundle = Path(os.environ.get('STAR_TRADER_APP') or Path.home()/'Applications'/'Star Trader.app')
+    app = bundle/'Contents'
     (app/'MacOS').mkdir(parents=True, exist_ok=True)
     (app/'Info.plist').write_text('<?xml version="1.0" encoding="UTF-8"?>\n'
         '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n'
@@ -24,24 +25,31 @@ def install_mac_app(target):
         '<key>LSMinimumSystemVersion</key><string>10.13</string>\n'
         '</dict></plist>\n', encoding='utf-8')
     def quote(value): return "'" + str(value).replace("'", "'\\''") + "'"
-    # The Dock names and badges an app after the bundle holding the running binary. Running
-    # Python's own app binary shows "Python" and a rocket, so keep a copy inside this bundle.
-    python_app = Path(sys.base_prefix)/'Resources'/'Python.app'/'Contents'/'MacOS'/'Python'
+    game = quote(target/'star_trader.py')
+    private = app/'Resources'/'python'/'bin'/'python3'
     interpreter = app/'MacOS'/'Star Trader'
-    if python_app.is_file():
-        shutil.copy2(python_app, interpreter)
-        command = '"$(dirname "$0")/Star Trader"'
+    if private.exists():
+        # The Dock names an app after the bundle holding the running binary, so run a copy of the
+        # app's private (statically linked) Python from Contents/MacOS, pointed at its own library.
+        shutil.copy2(private.resolve(), interpreter)
+        script = ('#!/bin/sh\n'
+                  'contents="$(cd "$(dirname "$0")/.." && pwd)"\n'
+                  'export PYTHONHOME="$contents/Resources/python"\n'
+                  'export SSL_CERT_FILE="$contents/Resources/cacert.pem"\n'
+                  'export STAR_TRADER_FRAMEWORKS="$contents/Frameworks"\n'
+                  f'[ -x "$contents/MacOS/Star Trader" ] && exec "$contents/MacOS/Star Trader" {game} "$@"\n'
+                  f'exec "$PYTHONHOME/bin/python3" {game} "$@"\n')
     else:
-        command = quote(sys.executable)
+        interpreter.unlink(missing_ok=True)
+        script = f'#!/bin/sh\nexec {quote(sys.executable)} {game} "$@"\n'
     launcher = app/'MacOS'/'star-trader'
-    launcher.write_text(f'#!/bin/sh\nexec {command} {quote(target/"star_trader.py")} "$@"\n', encoding='utf-8')
+    launcher.write_text(script, encoding='utf-8')
     launcher.chmod(0o755)
     icon = Path(__file__).resolve().parent/'assets'/'StarTrader.icns'
     if icon.is_file():
         (app/'Resources').mkdir(exist_ok=True)
         shutil.copy2(icon, app/'Resources'/'StarTrader.icns')
     print('Installed! Open Star Trader from Launchpad, Spotlight, or ~/Applications.')
-    print(f'Or run: {sys.executable} "{target / "star_trader.py"}"')
     print('Your saved game is preserved when reinstalling. New releases install automatically at launch.')
 
 

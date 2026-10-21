@@ -350,7 +350,9 @@ class Pilot:
 
 
 def find_sdl_library(name):
-    # macOS Homebrew installs outside the default dyld search path.
+    # The macOS app carries its own SDL frameworks; Homebrew installs outside the default dyld path.
+    bundled = Path(os.environ.get('STAR_TRADER_FRAMEWORKS','/nonexistent'))/f'{name}.framework'/name
+    if bundled.exists(): return str(bundled)
     found = ctypes.util.find_library(name)
     if found: return found
     for folder in ('/opt/homebrew/lib', '/usr/local/lib'):

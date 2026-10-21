@@ -20,14 +20,13 @@ The native window supports Hyprland tiling, resizing and 3 fullscreen. No compos
 
 ## Install on macOS
 
-In Terminal (Git and Python 3.9+ are needed; macOS offers to install Apple's command line tools if they are missing):
+Nothing else to install first: no Xcode tools, git, Homebrew or Python. In Terminal:
 
 ```bash
-git clone https://github.com/womb4t/star-trader.git "$HOME/star-trader" &&
-bash "$HOME/star-trader/install-mac.sh"
+curl -fsSL https://raw.githubusercontent.com/womb4t/star-trader/main/install-mac.sh | bash
 ```
 
-The script downloads the official SDL2 and SDL2_ttf frameworks from libsdl-org (checksum-verified) into `~/Library/Frameworks`, installs the game, and adds **Star Trader** to `~/Applications`, so it opens from Launchpad or Spotlight. It works on Intel and Apple Silicon Macs without Homebrew or sudo.
+The installer downloads the latest release, a private Python and the official SDL2/SDL2_ttf frameworks (all checksum-pinned except the release itself), and puts them inside `~/Applications/Star Trader.app`, which opens from Launchpad or Spotlight with its own Dock icon. It works on Intel and Apple Silicon Macs and needs no password. Running it again repairs or updates the app; saves are kept.
 
 ## Update
 

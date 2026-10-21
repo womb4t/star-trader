@@ -1,10 +1,16 @@
 #!/usr/bin/env python3
-"""Update an official checkout, then reinstall without touching the saved game."""
+"""Update Star Trader to the latest release without touching the saved game.
+
+Installs made from a Git checkout update that checkout; others download the release archive."""
 import argparse
 import json
 from pathlib import Path
+import shutil
 import subprocess
 import sys
+import tarfile
+import tempfile
+import urllib.request
 
 OFFICIAL = 'https://github.com/womb4t/star-trader'
 
@@ -36,13 +42,47 @@ def resolve_checkout(here):
     raise ValueError('No valid checkout or installation metadata found. Run the installer from the official checkout.')
 
 
+def installer_name():
+    return 'install-mac.sh' if sys.platform == 'darwin' else 'install.sh'
+
+
+def fetch(url):
+    req = urllib.request.Request(url,headers={'User-Agent':'StarTrader-updater','Accept':'application/vnd.github+json'})
+    with urllib.request.urlopen(req,timeout=30) as response: return response.read(64*1024*1024)
+
+
+def release_update(dry_run):
+    tag = json.loads(fetch('https://api.github.com/repos/womb4t/star-trader/releases/latest')).get('tag_name')
+    if not isinstance(tag,str) or not tag.startswith('v') or '/' in tag: raise ValueError('Could not find the latest release.')
+    print(f'Updating to release {tag}. Saved progress will be preserved.',flush=True)
+    if dry_run:
+        print(f'Dry run: would download {tag} and rerun {installer_name()}.')
+        return
+    work = Path(tempfile.mkdtemp(prefix='star-trader-update-'))
+    try:
+        archive = work/'release.tar.gz'
+        archive.write_bytes(fetch(f'{OFFICIAL}/archive/refs/tags/{tag}.tar.gz'))
+        with tarfile.open(archive) as tar:
+            for member in tar.getmembers():
+                name = Path(member.name)
+                if name.is_absolute() or '..' in name.parts or member.issym() or member.islnk() or member.isdev():
+                    raise ValueError(f'Unexpected file in release archive: {member.name}')
+            tar.extractall(work)
+        source = next(path for path in work.iterdir() if path.is_dir() and path.name.startswith('star-trader-'))
+        subprocess.run(['bash',str(source/installer_name())],check=True,cwd=source)
+    finally:
+        shutil.rmtree(work,ignore_errors=True)
+    print('Update complete. Restart Star Trader to use the new version.')
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--dry-run',action='store_true',help='validate and show the update without changing files')
     args = parser.parse_args()
     here = Path(__file__).resolve().parent
     try:
-        repo = resolve_checkout(here)
+        try: repo = resolve_checkout(here)
+        except ValueError: return release_update(args.dry_run)
         remote = output(repo,'remote','get-url','origin').removesuffix('.git').rstrip('/')
         if remote not in (OFFICIAL,'git@github.com:womb4t/star-trader'):
             raise ValueError('This updater only fetches the official womb4t/star-trader repository.')
@@ -57,12 +97,11 @@ def main():
             return
         subprocess.run(['git','-C',str(repo),'fetch','origin','main'],check=True)
         subprocess.run(['git','-C',str(repo),'merge','--ff-only','origin/main'],check=True)
-        installer = 'install-mac.sh' if sys.platform == 'darwin' else 'install.sh'
-        subprocess.run(['bash',str(repo/installer)],check=True,cwd=repo)
+        subprocess.run(['bash',str(repo/installer_name())],check=True,cwd=repo)
         print('Update complete. Restart Star Trader to use the new version.')
-    except (OSError,ValueError,KeyError,subprocess.CalledProcessError) as error:
+    except (OSError,ValueError,KeyError,StopIteration,tarfile.TarError,subprocess.CalledProcessError) as error:
         print(f'Update stopped: {error}',file=sys.stderr)
-        print('If the original checkout was moved or removed, clone the official repository again and run bash install.sh.',file=sys.stderr)
+        print('You can reinstall at any time; saved progress is kept. See README.md for the install command.',file=sys.stderr)
         sys.exit(1)
 
 

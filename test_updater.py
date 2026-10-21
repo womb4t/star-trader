@@ -87,17 +87,59 @@ class MacInstallTests(unittest.TestCase):
             self.assertEqual(out.returncode,0)
             self.assertIn("'"+str(target).replace("'","'\\''")+"/star_trader.py'",launcher.read_text())
 
-    def test_mac_app_runs_python_from_inside_its_own_bundle(self):
-        import install
+    def test_mac_app_runs_its_private_python_from_inside_the_bundle(self):
+        import install, subprocess
         with tempfile.TemporaryDirectory() as home, contextlib.redirect_stdout(io.StringIO()):
-            prefix = Path(home)/'Python.framework'
-            binary = prefix/'Resources'/'Python.app'/'Contents'/'MacOS'/'Python'
-            binary.parent.mkdir(parents=True); binary.write_text('python')
-            with patch.object(install.Path,'home',return_value=Path(home)), patch.object(install.sys,'base_prefix',str(prefix)):
+            contents = Path(home)/'Applications'/'Star Trader.app'/'Contents'
+            private = contents/'Resources'/'python'/'bin'
+            private.mkdir(parents=True)
+            # A stand-in interpreter that reports how it was started.
+            (private/'python3.12').write_text('#!/bin/sh\necho "$PYTHONHOME|$SSL_CERT_FILE|$STAR_TRADER_FRAMEWORKS|$*"\n')
+            (private/'python3.12').chmod(0o755)
+            (private/'python3').symlink_to('python3.12')
+            with patch.object(install.Path,'home',return_value=Path(home)):
                 install.install_mac_app(Path(home)/'game')
-            macos = Path(home)/'Applications'/'Star Trader.app'/'Contents'/'MacOS'
-            self.assertEqual((macos/'Star Trader').read_text(),'python')
-            self.assertIn('"$(dirname "$0")/Star Trader"',(macos/'star-trader').read_text())
+            copy = contents/'MacOS'/'Star Trader'
+            self.assertTrue(copy.is_file() and not copy.is_symlink())
+            out = subprocess.run([str(contents/'MacOS'/'star-trader'),'--offline'],capture_output=True,text=True).stdout.strip()
+            real = str(contents.resolve())
+            self.assertEqual(out,f"{real}/Resources/python|{real}/Resources/cacert.pem|{real}/Frameworks|{home}/game/star_trader.py --offline")
+
+
+class ReleaseUpdateTests(unittest.TestCase):
+    def archive(self, folder, extra=None):
+        import tarfile
+        source = Path(folder)/'star-trader-9.9.9'
+        source.mkdir()
+        (source/update.installer_name()).write_text('echo installed')
+        path = Path(folder)/'release.tar.gz'
+        with tarfile.open(path,'w:gz') as tar:
+            tar.add(source,arcname='star-trader-9.9.9')
+            if extra: tar.add(extra[0],arcname=extra[1])
+        return path.read_bytes()
+
+    def test_install_without_a_checkout_updates_from_the_release_archive(self):
+        with tempfile.TemporaryDirectory() as folder:
+            payload = self.archive(folder)
+            answers = {'https://api.github.com/repos/womb4t/star-trader/releases/latest':b'{"tag_name":"v9.9.9"}',
+                       update.OFFICIAL+'/archive/refs/tags/v9.9.9.tar.gz':payload}
+            with patch.object(update,'resolve_checkout',side_effect=ValueError('no checkout')), patch.object(update,'fetch',side_effect=answers.__getitem__), \
+                 patch.object(update.sys,'argv',['update.py']), patch.object(update.subprocess,'run') as run, contextlib.redirect_stdout(io.StringIO()):
+                update.main()
+            command = run.call_args.args[0]
+            self.assertEqual(command[0],'bash')
+            self.assertTrue(command[1].endswith('star-trader-9.9.9/'+update.installer_name()))
+
+    def test_unsafe_release_archive_is_refused(self):
+        with tempfile.TemporaryDirectory() as folder:
+            evil = Path(folder)/'evil'; evil.write_text('x')
+            payload = self.archive(folder,(evil,'../evil'))
+            answers = {'https://api.github.com/repos/womb4t/star-trader/releases/latest':b'{"tag_name":"v9.9.9"}',
+                       update.OFFICIAL+'/archive/refs/tags/v9.9.9.tar.gz':payload}
+            with patch.object(update,'resolve_checkout',side_effect=ValueError('no checkout')), patch.object(update,'fetch',side_effect=answers.__getitem__), \
+                 patch.object(update.sys,'argv',['update.py']), patch.object(update.subprocess,'run') as run, contextlib.redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit): update.main()
+            run.assert_not_called()
 
 
 class AutoUpdateTests(unittest.TestCase):
