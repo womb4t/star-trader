@@ -72,7 +72,10 @@ class RemoteSave:
         self.url = check_server(url,allow_lan)
         self.token = Path(token_file).read_text().strip()
         if not 20 <= len(self.token) <= 200 or any(c.isspace() for c in self.token): raise ValueError('Invalid token file')
-        slot = digest((self.url+'\n'+self.token).encode())[:24]
+        # The slot follows the login, not the address, so a server that changes IP keeps your progress.
+        slot = digest(('account\n'+self.token).encode())[:24]
+        legacy = Path(root)/'servers'/digest((self.url+'\n'+self.token).encode())[:24]
+        if legacy.is_dir() and not (Path(root)/'servers'/slot).exists(): legacy.rename(Path(root)/'servers'/slot)
         self.save_path = Path(root)/'servers'/slot/'save.json'
         self.meta_path = self.save_path.with_name('sync.json')
         self.opener = urllib.request.build_opener(urllib.request.ProxyHandler({}),NoRedirect())

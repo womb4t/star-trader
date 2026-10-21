@@ -145,6 +145,17 @@ class ProgressTests(unittest.TestCase):
             self.assertTrue(restored.station_hostilities[2])
             self.assertEqual(restored.station_hostile_until[2],12345678900.)
 
+    def test_save_slot_survives_a_server_address_change(self):
+        from save_sync import digest
+        root = self.root/'client'
+        legacy = root/'servers'/digest(('http://127.0.0.1:8765\n'+self.token).encode())[:24]
+        legacy.mkdir(parents=True); (legacy/'save.json').write_text('{"credits": 5}')
+        first = RemoteSave('http://127.0.0.1:8765',self.token_file,root)
+        self.assertEqual(first.save_path.read_text(),'{"credits": 5}')
+        self.assertFalse(legacy.exists())
+        moved = RemoteSave('http://192.168.1.213:8766',self.token_file,root,allow_lan=True)
+        self.assertEqual(moved.save_path,first.save_path)
+
     def test_urls_cannot_send_tokens_to_public_http_or_embedded_userinfo(self):
         for url in ('http://example.com','http://8.8.8.8','https://user:password@example.com','http://localhost/other'):
             with self.assertRaises(ValueError): RemoteSave(url,self.token_file,self.root,allow_lan=True)
