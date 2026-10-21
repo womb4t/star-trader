@@ -33,6 +33,8 @@ WANTED_FINES = [1,100,300,600,1000]
 STRAY_SHOT_LIMIT, STRAY_SHOT_FINE, STRAY_SHOT_RESET = 3, 50, 300
 # Prison: one sentence day lasts one real hour and keeps passing while the game is closed.
 PRISON_DAY_SECONDS, PRISON_MAX_DAYS, PRISON_BRIBE, PRISON_WORK_SECONDS = 3600, 7, 200, 1800
+# Lawful stations patrol this radius (m): pirates do not attack inside it.
+PATROL_RADIUS = 5000
 DOCK_ROLL_TOLERANCE = math.radians(14)
 CRUISE_SECONDS_PER_LY = 45
 W, H = 1100, 760
@@ -1284,6 +1286,10 @@ class Game:
         self.security_dispatch = 0
         self.message = f'SURRENDER VOID: {reason} Police response resumes!'
         self.alert = dict(text=self.message,remaining=5.,elapsed=0.)
+
+    def in_patrol_zone(self):
+        if self.p.deep_space or PROFILES[self.p.system][0] in ('Anarchy','Feudal') or self.station_hostilities[self.p.system]: return False
+        return math.sqrt(sum(v*v for v in self.station)) <= PATROL_RADIUS
 
     def station_struck(self):
         if self.station_hostilities[self.p.system]: return
@@ -2989,9 +2995,15 @@ class Game:
             if self.mode == 'dead': return
         else: self.heat = max(0,self.heat-10*dt)
         self.spawn -= dt
+        patrolled = self.in_patrol_zone()
+        if self.enemy and self.enemy_kind == 'pirate' and patrolled:
+            self.enemy = self.ship_target = None
+            self.spawn = 24
+            self.message = 'Pirate breaks off: you are inside the station patrol zone.'
         if self.spawn <= 0 and not self.enemy and self.station[2] > 450:
             if self.p.fine > 0 and random.random() < .5 and self.p.station_police_remaining[self.p.system] > 0 and not self.p.deep_space:
                 self.dispatch_station_police()
+            elif patrolled: self.spawn = 5
             else:
                 self.enemy_kind = 'pirate'
                 self.enemy = [random.uniform(-120,120),random.uniform(-70,70),-850. if random.random()<.3 else 850.,6,0.]
@@ -3601,7 +3613,7 @@ class Game:
         d.text(650,598,('GUIDANCE Y  ' if self.course_assist else '')+('FINE I' if self.fine_control else ''),GOLD)
         d.text(650,625,'DRIVE DISABLED' if self.broken_down else 'AUTODOCK' if self.autodock else f'SLOT {error:+.0f}/14deg '+('CLEAR' if self.dock_clearance else '7 radio'),GOLD)
         status = 'CLOAKED' if self.cloaked else 'JAMMING' if self.jamming else ''
-        d.text(35,650,f'MINES {p.mines}  {status}  6 distress  /  4 rear view',GOLD)
+        d.text(35,650,f'MINES {p.mines}  {status}  6 distress  /  4 rear view'+('  /  PATROL ZONE' if self.in_patrol_zone() else ''),GOLD)
         if p.fuel < 1.0:
             d.text(810,650,'LOW FUEL',RED)
         if p.waypoint:

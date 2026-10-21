@@ -349,6 +349,7 @@ class GameplayTests(unittest.TestCase):
         g = self.game
         g.mode = 'flight'
         g.speed = 0
+        g.station = [0.,0.,9000.]  # outside the patrol zone
         g.enemy = [0.,0.,500.,6,1.95]
         g.update(.1)
         self.assertIsNotNone(g.enemy_shot)
@@ -906,7 +907,7 @@ class GameplayTests(unittest.TestCase):
 
     def test_lasers_and_missiles(self):
         g = self.game
-        g.launch(); g.speed = 0; g.enemy = [0,0,500,2,0]
+        g.launch(); g.speed = 0; g.station = [0.,0.,9000.]; g.enemy = [0,0,500,2,0]
         g.p.equipment = ['military']; g.p.laser = 'military'; g.keys = {32}
         g.update(.01)
         self.assertIsNone(g.enemy)
@@ -1591,7 +1592,7 @@ class GameplayTests(unittest.TestCase):
     def test_unattended_enemy_can_destroy_ship_and_death_stays_saved(self):
         g=self.game
         with patch.object(st.time,'time',return_value=10000):
-            g.launch();g.speed=0;g.shield=0;g.p.hull=20
+            g.launch();g.speed=0;g.shield=0;g.p.hull=20;g.station=[0.,0.,9000.]
             g.p.bank_balance=200;g.enemy=[0,0,500.,6,1.9]
             g.request_exit()
         with patch.object(st.time,'time',return_value=10010): resumed=st.Game(None)
@@ -2007,6 +2008,33 @@ class LawAndPrisonTests(unittest.TestCase):
         self.assertEqual((g.p.credits,g.p.bank_balance),(4257,743))
         g.bank_custom = ''; g.key(13)
         self.assertEqual(g.bank_amount,257)
+
+    def test_no_pirates_inside_a_lawful_station_patrol_zone(self):
+        g = self.game
+        g.launch(); g.speed = 0
+        g.station = [0.,0.,3000.]
+        self.assertTrue(g.in_patrol_zone())
+        g.spawn = 0
+        g.update(.01)
+        self.assertIsNone(g.enemy)
+        g.enemy_kind = 'pirate'; g.enemy = [0.,0.,800.,6,0.]
+        g.update(.01)
+        self.assertIsNone(g.enemy)
+        self.assertIn('patrol zone',g.message)
+        g.station = [0.,0.,st.PATROL_RADIUS+500.]
+        self.assertFalse(g.in_patrol_zone())
+        g.spawn = 0; g.update(.01)
+        self.assertEqual(g.enemy_kind,'pirate')
+        self.assertIsNotNone(g.enemy)
+
+    def test_lawless_or_hostile_stations_offer_no_patrol_zone(self):
+        g = self.game
+        g.launch(); g.station = [0.,0.,2000.]
+        g.station_hostilities[0] = True
+        self.assertFalse(g.in_patrol_zone())
+        g.station_hostilities[0] = False
+        g.p.system = 4
+        self.assertFalse(g.in_patrol_zone())
 
     def test_invalid_prison_record_is_rejected(self):
         pilot = st.Pilot()

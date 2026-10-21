@@ -327,6 +327,10 @@ Outfitting shows the local/required tech levels even for ammunition.
 
 Station hostility cools after 30 minutes away from the station (more than 10,000 metres, deep space, or another system). Remaining nearby resets the timer; further attacks restart it. Planet profiles show the remaining wait. Outstanding fines and police reserves do not reset.
 
+## Station patrol zones
+
+Lawful stations patrol 5,000 m around themselves: pirates do not attack inside that radius, and a pirate chasing you breaks off when you enter it. The cockpit shows PATROL ZONE while you are covered. Anarchy and Feudal stations offer no patrol, and a station that is hostile to you will not protect you.
+
 ## Emergency close
 
 Escape always saves and closes the game immediately, from every screen, including text entry and hyperspace. **Backspace** goes back one screen everywhere (in a text field it deletes a character instead), as do the Back, Return and Cancel buttons. In-flight logout still preserves your position and unattended recovery rules.
