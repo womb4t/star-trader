@@ -87,6 +87,18 @@ class MacInstallTests(unittest.TestCase):
             self.assertEqual(out.returncode,0)
             self.assertIn("'"+str(target).replace("'","'\\''")+"/star_trader.py'",launcher.read_text())
 
+    def test_mac_app_runs_python_from_inside_its_own_bundle(self):
+        import install
+        with tempfile.TemporaryDirectory() as home, contextlib.redirect_stdout(io.StringIO()):
+            prefix = Path(home)/'Python.framework'
+            binary = prefix/'Resources'/'Python.app'/'Contents'/'MacOS'/'Python'
+            binary.parent.mkdir(parents=True); binary.write_text('python')
+            with patch.object(install.Path,'home',return_value=Path(home)), patch.object(install.sys,'base_prefix',str(prefix)):
+                install.install_mac_app(Path(home)/'game')
+            macos = Path(home)/'Applications'/'Star Trader.app'/'Contents'/'MacOS'
+            self.assertEqual((macos/'Star Trader').read_text(),'python')
+            self.assertIn('"$(dirname "$0")/Star Trader"',(macos/'star-trader').read_text())
+
 
 class AutoUpdateTests(unittest.TestCase):
     def setUp(self):

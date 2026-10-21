@@ -57,4 +57,22 @@ install_framework SDL2_ttf \
   https://github.com/libsdl-org/SDL_ttf/releases/download/release-2.24.0/SDL2_ttf-2.24.0.dmg \
   677404e23a1a5f6efcbe64697471c5161283e4af5a6403dcb92235d7d83805cd
 
+# Build the app icon from the 1024x1024 artwork, if provided.
+icon_png="$source_dir/assets/star-trader-icon.png"
+if [[ -f "$icon_png" ]]; then
+  iconset="$(mktemp -d)/StarTrader.iconset"
+  mkdir "$iconset"
+  for size in 16 32 128 256 512; do
+    sips -z "$size" "$size" "$icon_png" --out "$iconset/icon_${size}x${size}.png" >/dev/null
+    sips -z "$((size * 2))" "$((size * 2))" "$icon_png" --out "$iconset/icon_${size}x${size}@2x.png" >/dev/null
+  done
+  iconutil -c icns "$iconset" -o "$source_dir/assets/StarTrader.icns"
+  rm -rf "$(dirname "$iconset")"
+fi
+
 "$python" "$source_dir/install.py"
+app="$HOME/Applications/Star Trader.app"
+# The bundle holds a copy of Python's app binary; re-sign it ad hoc so its signature matches this bundle.
+codesign --force --sign - "$app" >/dev/null 2>&1 || echo 'Note: could not sign the app bundle; if it will not open, run the game with the command above.'
+# Finder caches app icons; touching the bundle makes it pick up a new one.
+touch "$app"

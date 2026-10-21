@@ -19,12 +19,27 @@ def install_mac_app(target):
         '<key>CFBundleIdentifier</key><string>io.github.womb4t.star-trader</string>\n'
         '<key>CFBundleExecutable</key><string>star-trader</string>\n'
         '<key>CFBundlePackageType</key><string>APPL</string>\n'
+        '<key>CFBundleIconFile</key><string>StarTrader</string>\n'
+        '<key>NSHighResolutionCapable</key><true/>\n'
         '<key>LSMinimumSystemVersion</key><string>10.13</string>\n'
         '</dict></plist>\n', encoding='utf-8')
     def quote(value): return "'" + str(value).replace("'", "'\\''") + "'"
+    # The Dock names and badges an app after the bundle holding the running binary. Running
+    # Python's own app binary shows "Python" and a rocket, so keep a copy inside this bundle.
+    python_app = Path(sys.base_prefix)/'Resources'/'Python.app'/'Contents'/'MacOS'/'Python'
+    interpreter = app/'MacOS'/'Star Trader'
+    if python_app.is_file():
+        shutil.copy2(python_app, interpreter)
+        command = '"$(dirname "$0")/Star Trader"'
+    else:
+        command = quote(sys.executable)
     launcher = app/'MacOS'/'star-trader'
-    launcher.write_text(f'#!/bin/sh\nexec {quote(sys.executable)} {quote(target/"star_trader.py")} "$@"\n', encoding='utf-8')
+    launcher.write_text(f'#!/bin/sh\nexec {command} {quote(target/"star_trader.py")} "$@"\n', encoding='utf-8')
     launcher.chmod(0o755)
+    icon = Path(__file__).resolve().parent/'assets'/'StarTrader.icns'
+    if icon.is_file():
+        (app/'Resources').mkdir(exist_ok=True)
+        shutil.copy2(icon, app/'Resources'/'StarTrader.icns')
     print('Installed! Open Star Trader from Launchpad, Spotlight, or ~/Applications.')
     print(f'Or run: {sys.executable} "{target / "star_trader.py"}"')
     print('Your saved game is preserved when reinstalling. New releases install automatically at launch.')
