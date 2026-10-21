@@ -187,6 +187,55 @@ class HostilityTests(unittest.TestCase):
             self.assertEqual(g.p.fine,500)
 
 
+class SignupTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.store = Store(Path(self.tmp.name)/'p.sqlite3')
+
+    def tearDown(self): self.tmp.cleanup()
+
+    def serve(self, signup=True):
+        server = make_server(self.store,port=0,signup=signup)
+        worker = threading.Thread(target=server.serve_forever,daemon=True); worker.start()
+        self.addCleanup(lambda: (server.shutdown(),server.server_close(),worker.join()))
+        return 'http://127.0.0.1:'+str(server.server_port)
+
+    def test_signup_returns_working_token_and_keeps_optional_email(self):
+        from save_sync import signup
+        url = self.serve()
+        token = signup(url,'Nova','  Nova@Example.com ')
+        self.assertEqual(self.store.read(token)['player'],'Nova')
+        quiet = signup(url,'Quiet')
+        self.assertEqual(self.store.read(quiet)['player'],'Quiet')
+        self.assertEqual(self.store.news_list(),[('Nova','nova@example.com')])
+        self.assertEqual(self.store.remove_email('NOVA@example.com'),1)
+        self.assertEqual(self.store.news_list(),[])
+
+    def test_signup_rejects_duplicates_bad_email_full_server_and_closed_signup(self):
+        from save_sync import signup
+        url = self.serve()
+        signup(url,'Nova')
+        for name,email,message in (('nova','',"taken"),('Bad name','',"Name"),('Ok','not-an-email','email')):
+            with self.subTest(name=name), self.assertRaises(RuntimeError) as error: signup(url,name,email)
+            self.assertIn(message,str(error.exception))
+        for i in range(7): signup(url,f'P{i}')
+        with self.assertRaises(RuntimeError) as error: signup(url,'Ninth')
+        self.assertIn('taken',str(error.exception))
+        closed = self.serve(signup=False)
+        with self.assertRaises(RuntimeError) as error: signup(closed,'Late')
+        self.assertIn('closed',str(error.exception))
+
+    def test_existing_database_gains_email_column(self):
+        import sqlite3
+        path = Path(self.tmp.name)/'old.sqlite3'
+        with sqlite3.connect(path) as db:
+            db.execute('CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT UNIQUE NOT NULL, token_hash TEXT UNIQUE NOT NULL, revision INTEGER NOT NULL DEFAULT 0, save TEXT, updated REAL)')
+            db.execute("INSERT INTO players(name,token_hash) VALUES ('Old','h')")
+        store = Store(path)
+        store.create_player('New','n'*43,'new@example.com')
+        self.assertEqual(store.news_list(),[('New','new@example.com')])
+
+
 class InviteCommandTests(unittest.TestCase):
     def test_invite_file_holds_server_name_and_token(self):
         import subprocess, sys, startup

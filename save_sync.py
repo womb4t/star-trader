@@ -35,19 +35,41 @@ def atomic(path, data):
     temp.replace(path)
 
 
+def check_server(url, allow_lan=False):
+    parsed = urllib.parse.urlsplit(url)
+    if parsed.scheme not in ('http','https') or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment or parsed.path not in ('','/'):
+        raise ValueError('Server must be an http(s) origin, e.g. http://192.168.1.20:8765')
+    if parsed.scheme == 'http':
+        try:
+            address = ipaddress.ip_address(parsed.hostname)
+            permitted = address.is_loopback or (allow_lan and (address in ipaddress.ip_network('192.168.0.0/16') or address in ipaddress.ip_network('10.0.0.0/8') or address in ipaddress.ip_network('172.16.0.0/12')))
+        except ValueError:
+            permitted = parsed.hostname == 'localhost' or (allow_lan and parsed.hostname.endswith('.local'))
+        if not permitted: raise ValueError('HTTP is limited to localhost or --allow-lan private addresses; use HTTPS elsewhere')
+    return url.rstrip('/')
+
+
+def signup(url, name, email='', allow_lan=False):
+    """Create a pilot account on the server and return its new private token."""
+    url = check_server(url,allow_lan)
+    raw = canonical(dict(name=name.strip(),email=email.strip() or None))
+    req = urllib.request.Request(url+'/v1/signup',data=raw,method='POST',headers={'Content-Type':'application/json'})
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}),NoRedirect())
+    try:
+        with opener.open(req,timeout=8) as response: data = json.loads(response.read(4096))
+    except urllib.error.HTTPError as error:
+        try: message = json.loads(error.read(4096)).get('error')
+        except (ValueError,AttributeError): message = None
+        error.close()
+        raise RuntimeError(message if type(message) is str else f'Server returned HTTP {error.code}') from None
+    token = data.get('token') if type(data) is dict else None
+    if type(token) is not str or not 20 <= len(token) <= 200 or any(c.isspace() for c in token): raise RuntimeError('Server sent an invalid sign-up reply')
+    return token
+
+
 class RemoteSave:
     def __init__(self, url, token_file, root, allow_lan=False):
-        parsed = urllib.parse.urlsplit(url)
-        if parsed.scheme not in ('http','https') or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment or parsed.path not in ('','/'):
-            raise ValueError('Server must be an http(s) origin, e.g. http://192.168.1.20:8765')
-        if parsed.scheme == 'http':
-            try:
-                address = ipaddress.ip_address(parsed.hostname)
-                permitted = address.is_loopback or (allow_lan and (address in ipaddress.ip_network('192.168.0.0/16') or address in ipaddress.ip_network('10.0.0.0/8') or address in ipaddress.ip_network('172.16.0.0/12')))
-            except ValueError:
-                permitted = parsed.hostname == 'localhost' or (allow_lan and parsed.hostname.endswith('.local'))
-            if not permitted: raise ValueError('HTTP is limited to localhost or --allow-lan private addresses; use HTTPS elsewhere')
-        self.url = url.rstrip('/')
+        self.url = check_server(url,allow_lan)
         self.token = Path(token_file).read_text().strip()
         if not 20 <= len(self.token) <= 200 or any(c.isspace() for c in self.token): raise ValueError('Invalid token file')
         slot = digest((self.url+'\n'+self.token).encode())[:24]

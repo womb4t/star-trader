@@ -60,15 +60,19 @@ def read_invite(code):
     return dict(server=server.rstrip('/'),name=name,token=token)
 
 
-def apply_invite(config, code):
-    invite = read_invite(code)
-    token_file = config_path().with_name(invite['name'].lower()+'.token')
+def store_account(config, server, name, token):
+    token_file = config_path().with_name(name.lower()+'.token')
     token_file.parent.mkdir(parents=True,exist_ok=True)
     fd = os.open(token_file,os.O_WRONLY|os.O_CREAT|os.O_TRUNC,0o600)
-    with os.fdopen(fd,'w') as out: out.write(invite['token']+'\n')
+    with os.fdopen(fd,'w') as out: out.write(token+'\n')
     token_file.chmod(0o600)
-    config.update(server=invite['server'],token_file=str(token_file),allow_lan=True)
+    config.update(server=server,token_file=str(token_file),allow_lan=True,import_local_save=True)
     save_connection(config)
+
+
+def apply_invite(config, code):
+    invite = read_invite(code)
+    store_account(config,invite['server'],invite['name'],invite['token'])
     return invite['name']
 
 
@@ -92,6 +96,7 @@ class StartScreen:
         self.d,self.config,self.error = display,dict(config),error
         self.selected = 0
         self.settings = False
+        self.signup = None
         self.field = 0
         self.replace_field = False
         self.texture = None
@@ -118,15 +123,68 @@ class StartScreen:
                 self.settings = True
                 self.error = 'Enter your server address and private token file path.'
                 return None
+            if not Path(self.config['token_file']).expanduser().is_file():
+                self.open_signup('New pilot? Sign up below, or paste an invite in Connection settings.')
+                return None
             return 'online'
         if index == 1: return 'offline'
         self.settings = True
         self.error = ''
         return None
 
+    def open_signup(self, message=''):
+        self.signup = dict(name='',email='')
+        self.settings = False
+        self.field,self.replace_field = 0,False
+        self.error = message
+
+    def submit_signup(self):
+        from save_sync import signup
+        name,email = self.signup['name'].strip(),self.signup['email'].strip()
+        if not name: self.error = 'Choose a pilot name: letters, numbers, _ or -.'; return None
+        self.error = 'Signing up...'
+        self.draw()
+        try:
+            token = signup(self.config['server'],name,email,allow_lan=True)
+            store_account(self.config,self.config['server'].rstrip('/'),name,token)
+        except (RuntimeError,ValueError) as error: self.error = str(error); return None
+        except OSError: self.error = 'Could not reach the server. Check your connection, or play offline.'; return None
+        self.signup = None
+        self.error = f'Welcome aboard, {name}! Choose Online play.'
+        return None
+
+    def form_event(self, kind, value, record, keys, limits):
+        if kind == 'down':
+            if value == 9: self.field = (self.field+1)%len(keys); self.replace_field = False
+            elif value == 8:
+                key = keys[self.field]
+                record[key] = '' if self.replace_field else record[key][:-1]
+                self.replace_field = False
+            else: return False
+            return True
+        if kind == 'clipboard' and value == 'select_all': self.replace_field = True; return True
+        if kind == 'text' or (kind == 'clipboard' and value == 'paste'):
+            try: text = value if kind == 'text' else self.d.clipboard_text()
+            except RuntimeError: self.error = 'Clipboard unavailable.'; return True
+            key = keys[self.field]
+            record[key] = (('' if self.replace_field else record[key])+text.replace('\n','').replace('\r',''))[:limits[self.field]]
+            self.replace_field = False
+            return True
+        return False
+
     def event(self, kind, value):
         from star_trader import UP,DOWN,LEFT,RIGHT
         if kind == 'quit' or (kind == 'down' and value == 27): return 'quit'
+        if self.signup is not None:
+            if kind == 'click':
+                x,y = value
+                if 70 <= x <= 1030 and 200 <= y <= 244: self.field,self.replace_field = 0,False
+                elif 70 <= x <= 1030 and 295 <= y <= 339: self.field,self.replace_field = 1,False
+                elif 70 <= x <= 370 and 550 <= y <= 596: return self.submit_signup()
+                elif 730 <= x <= 1030 and 550 <= y <= 596: self.signup = None; self.error = ''
+            elif kind == 'down' and value == 13: return self.submit_signup()
+            else: self.form_event(kind,value,self.signup,('name','email'),(32,254))
+            return None
         if self.settings:
             keys = ('server','token_file')
             if kind == 'click':
@@ -137,6 +195,7 @@ class StartScreen:
                 elif 70 <= x <= 1030 and 435 <= y <= 469: self.config['import_local_save'] = not self.config['import_local_save']
                 elif 70 <= x <= 370 and 550 <= y <= 596: self.save_settings()
                 elif 390 <= x <= 710 and 550 <= y <= 596: self.paste_invite()
+                elif 70 <= x <= 500 and 495 <= y <= 529: self.open_signup()
                 elif 730 <= x <= 1030 and 550 <= y <= 596: self.settings = False; self.error = ''
             elif kind == 'down':
                 if value == 9: self.field = 1-self.field; self.replace_field = False
@@ -201,7 +260,25 @@ class StartScreen:
             rect = (C.c_int*4)((W-w)//2,(600-h)//2,w,h)
             d.copy(d.r,self.texture,None,rect)
         else: d.text(420,250,'STAR TRADER',GOLD)
-        if self.settings:
+        if self.signup is not None:
+            d.fill(40,90,1020,545,(5,15,25))
+            d.text(70,110,'NEW PILOT SIGN-UP / '+self.config['server'],GOLD)
+            d.text(70,155,'Pilot name (letters, numbers, _ or -). Other pilots see this name.')
+            d.text(70,250,'Email for Star Trader news (optional)')
+            for i,key in enumerate(('name','email')):
+                y = 200+i*95
+                d.rect(70,y,960,44,GOLD if self.field == i else GREEN)
+                text = self.signup[key][-81:]
+                if self.field == i:
+                    if self.replace_field and text: d.fill(76,y+6,len(text)*11+8,32,(20,65,70))
+                    d.text(80,y+10,text+('_' if int(time.monotonic()*2)%2 == 0 else ''),GOLD)
+                else: d.text(80,y+10,text or ('(click to enter)' if i == 0 else '(leave blank for no news)'))
+            d.text(70,380,'Your email is only used to send game news. Leave it blank to skip.')
+            d.text(70,420,'Your private login is saved on this computer automatically.')
+            d.text(70,495,'Click a field or TAB. Enter signs up. ESC closes.')
+            for x,w,label in ((70,300,'Sign up'),(730,300,'Back')):
+                d.rect(x,550,w,46,GREEN); d.text(x+15,562,label,GREEN)
+        elif self.settings:
             d.fill(40,90,1020,545,(5,15,25))
             d.text(70,110,'ONLINE CONNECTION',GOLD)
             d.text(70,155,'Server address')
@@ -217,7 +294,8 @@ class StartScreen:
                 else: d.text(80,y+10,self.config[key][-82:] or '(click to enter)')
             for y,key,label in ((380,'allow_lan','Allow HTTP on a trusted home network'),(435,'import_local_save','Import offline pilot only if this server account is empty')):
                 d.text(70,y,('[X] ' if self.config[key] else '[ ] ')+label,GREEN)
-            d.text(70,495,'Got an invite code? Copy it, then click Paste invite. Enter saves. ESC closes.')
+            d.rect(70,490,430,40,GREEN); d.text(85,500,'New pilot? Sign up',GREEN)
+            d.text(520,500,'Or copy an invite and Paste invite.')
             for x,w,label in ((70,300,'Save settings'),(390,320,'Paste invite'),(730,300,'Back')):
                 d.rect(x,550,w,46,GREEN); d.text(x+15,562,label,GREEN)
         else:
@@ -226,7 +304,7 @@ class StartScreen:
                 d.rect(x,615,280,48,GOLD if index == self.selected else GREEN)
                 d.text(x+15,630,label,GOLD if index == self.selected else GREEN)
             d.text(110,685,'Arrows choose / Enter opens / Click to play / ESC closes')
-        if self.error: d.text(45,727,self.error[:94],RED)
+        if self.error: d.text(45,727,self.error[:94],GOLD if self.error.startswith(('Welcome','Invite accepted','Signing up')) else RED)
         d.present(d.r)
 
     def choose(self):

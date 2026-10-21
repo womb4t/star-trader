@@ -22,11 +22,15 @@ class StartupTests(unittest.TestCase):
         screen = startup.StartScreen.__new__(startup.StartScreen)
         screen.config = startup.load_connection()
         screen.config['server'] = 'http://192.168.1.45:8766'
+        token = Path(self.tmp.name)/'existing.token'
+        token.write_text('t'*43)
+        screen.config['token_file'] = str(token)
         screen.settings = False
         screen.field = 0
         screen.selected = 0
         screen.error = ''
         screen.replace_field = False
+        screen.signup = None
         return screen
 
     def test_keyboard_and_mouse_select_both_modes(self):
@@ -138,6 +142,41 @@ class StartupTests(unittest.TestCase):
                 self.assertTrue(screen.settings)
                 self.assertTrue(screen.error)
                 self.assertFalse(self.path.exists())
+
+    def test_online_without_a_login_opens_signup(self):
+        screen = self.screen()
+        screen.config['token_file'] = str(Path(self.tmp.name)/'missing.token')
+        self.assertIsNone(screen.activate(0))
+        self.assertIsNotNone(screen.signup)
+        self.assertIn('Sign up',screen.error)
+
+    def test_signup_form_creates_account_and_saves_private_token(self):
+        screen = self.screen(); screen.draw = lambda: None
+        screen.open_signup()
+        screen.event('text','Nova_7')
+        screen.event('down',9)
+        screen.event('text','nova@example.com')
+        with patch('save_sync.signup',return_value='z'*43) as call:
+            screen.event('down',13)
+        call.assert_called_once_with('http://192.168.1.45:8766','Nova_7','nova@example.com',allow_lan=True)
+        self.assertIsNone(screen.signup)
+        self.assertIn('Welcome aboard, Nova_7',screen.error)
+        loaded = startup.load_connection()
+        self.assertEqual(Path(loaded['token_file']).read_text().strip(),'z'*43)
+        self.assertEqual(Path(loaded['token_file']).stat().st_mode & 0o777,0o600)
+        self.assertEqual(screen.activate(0),'online')
+
+    def test_signup_errors_keep_the_form_open(self):
+        screen = self.screen(); screen.draw = lambda: None
+        screen.open_signup()
+        screen.event('down',13)
+        self.assertIn('pilot name',screen.error)
+        screen.event('text','Taken')
+        with patch('save_sync.signup',side_effect=RuntimeError('That pilot name is taken. Choose another.')):
+            screen.event('down',13)
+        self.assertIsNotNone(screen.signup)
+        self.assertIn('taken',screen.error)
+        self.assertFalse(self.path.exists())
 
 
 if __name__ == '__main__': unittest.main()

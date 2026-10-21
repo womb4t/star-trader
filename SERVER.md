@@ -38,6 +38,17 @@ cd "$HOME/star-trader" &&
 python3 save_server.py create-player Tester2 --token-file "$HOME/.star-trader-server/tester2.token"
 ```
 
+## Sign-up and game news
+
+New players can sign up from the game: **Online play** opens a sign-up form when no login is saved yet (it is also under **Connection settings → New pilot? Sign up**). They choose a pilot name and may give an email for game news. The server creates the account and the game saves the private login on that computer. The eight-pilot limit still applies. Start the server with `--no-signup` to allow only players you create or invite.
+
+Emails are stored only for players who enter one. To see who asked for news, or to remove an address when someone asks:
+
+```bash
+cd "$HOME/star-trader" && python3 save_server.py news-list
+cd "$HOME/star-trader" && python3 save_server.py news-remove someone@example.com
+```
+
 ## Invite a tester
 
 New installs already point at the community server (`http://192.168.1.45:8766`). Create the player, then write an invite code file for them:

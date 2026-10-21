@@ -17,6 +17,8 @@ from star_trader import VERSION
 from presence import SharedPresence, PresenceBusy
 
 MAX_SAVE = 256 * 1024
+MAX_PLAYERS = 8
+EMAIL = re.compile(r'[^@\s]{1,64}@[^@\s]+\.[^@\s]+')
 
 
 def encode(value):
@@ -53,6 +55,14 @@ def validate_save(data):
     if len(encode(data)) > MAX_SAVE: raise ValueError('Save too large')
 
 
+class NameTaken(ValueError):
+    pass
+
+
+class PlayerLimit(ValueError):
+    pass
+
+
 class Store:
     def __init__(self, path):
         self.path = str(path)
@@ -65,6 +75,10 @@ class Store:
                 CREATE TABLE IF NOT EXISTS history (
                 player INTEGER, revision INTEGER, save TEXT, updated REAL,
                 PRIMARY KEY(player, revision));''')
+            # Added for sign-up: an optional email, kept only for players who ask for game news.
+            columns = {row[1] for row in db.execute('PRAGMA table_info(players)')}
+            if 'email' not in columns: db.execute('ALTER TABLE players ADD COLUMN email TEXT')
+            if 'created' not in columns: db.execute('ALTER TABLE players ADD COLUMN created REAL')
         os.chmod(path, 0o600)
 
     @contextmanager
@@ -78,12 +92,25 @@ class Store:
     def token_hash(token):
         return hashlib.sha256(token.encode()).hexdigest()
 
-    def create_player(self, name, token):
+    def create_player(self, name, token, email=None):
         if not re.fullmatch(r'[A-Za-z0-9_-]{1,32}', name): raise ValueError('Name: 1–32 letters, numbers, _ or -')
+        if email is not None:
+            email = email.strip().lower()
+            if not email: email = None
+            elif len(email) > 254 or not EMAIL.fullmatch(email): raise ValueError('That email address does not look right.')
         with self.connect() as db:
             db.execute('BEGIN IMMEDIATE')
-            if db.execute('SELECT count(*) FROM players').fetchone()[0] >= 8: raise ValueError('Eight-player testing limit reached')
-            db.execute('INSERT INTO players(name,token_hash) VALUES (?,?)', (name,self.token_hash(token)))
+            if db.execute('SELECT count(*) FROM players').fetchone()[0] >= MAX_PLAYERS: raise PlayerLimit('All pilot places on this server are taken.')
+            if db.execute('SELECT 1 FROM players WHERE lower(name)=lower(?)',(name,)).fetchone(): raise NameTaken('That pilot name is taken. Choose another.')
+            db.execute('INSERT INTO players(name,token_hash,email,created) VALUES (?,?,?,?)', (name,self.token_hash(token),email,time.time()))
+
+    def news_list(self):
+        with self.connect() as db:
+            return db.execute('SELECT name,email FROM players WHERE email IS NOT NULL ORDER BY name').fetchall()
+
+    def remove_email(self, email):
+        with self.connect() as db:
+            return db.execute('UPDATE players SET email=NULL WHERE email=?',(email.strip().lower(),)).rowcount
 
     def read(self, token):
         with self.connect() as db:
@@ -138,6 +165,23 @@ class Handler(BaseHTTPRequestHandler):
             self.reply(200,self.server.store.read(self.token()))
         except PermissionError: self.reply(401,dict(error='Invalid or missing player token'))
 
+    def do_POST(self):
+        try:
+            if self.path != '/v1/signup': return self.reply(404,dict(error='Not found'))
+            if not self.server.signup: return self.reply(403,dict(error='Sign-up is closed on this server. Ask the host for an invite.'))
+            length = int(self.headers.get('Content-Length','0'))
+            if not 0 < length <= 2048: return self.reply(413,dict(error='Request too large or empty'))
+            data = json.loads(self.rfile.read(length))
+            if type(data) is not dict or type(data.get('name')) is not str or type(data.get('email','')) not in (str,type(None)): raise ValueError('Invalid sign-up')
+            token = secrets.token_urlsafe(32)
+            self.server.store.create_player(data['name'],token,data.get('email'))
+            self.reply(201,dict(player=data['name'],token=token))
+        except NameTaken as error: self.reply(409,dict(error=str(error)))
+        except PlayerLimit as error: self.reply(403,dict(error=str(error)))
+        except ValueError as error: self.reply(400,dict(error=str(error) if str(error)[:1].isupper() else 'Invalid sign-up'))
+        except (KeyError,TypeError,AttributeError,RecursionError): self.reply(400,dict(error='Invalid sign-up'))
+        except sqlite3.Error: self.reply(503,dict(error='Server storage temporarily unavailable'))
+
     def do_PUT(self):
         try:
             if self.path not in ('/v1/save','/v1/presence'): return self.reply(404,dict(error='Not found'))
@@ -160,9 +204,10 @@ class Handler(BaseHTTPRequestHandler):
         except sqlite3.Error: self.reply(503,dict(error='Save storage temporarily unavailable'))
 
 
-def make_server(store, host='127.0.0.1', port=8765):
+def make_server(store, host='127.0.0.1', port=8765, signup=True):
     server = ThreadingHTTPServer((host,port),Handler)
     server.daemon_threads = True
+    server.signup = signup
     server.store = store
     server.presence = SharedPresence()
     return server
@@ -182,6 +227,10 @@ def main():
     serve.add_argument('--lan',action='store_true',help='Allow unencrypted private-LAN testing')
     serve.add_argument('--cert',type=Path)
     serve.add_argument('--key',type=Path)
+    serve.add_argument('--no-signup',action='store_true',help='Only admin-created players and invites; no in-game sign-up')
+    sub.add_parser('news-list',help='Print name and email of players who asked for game news')
+    remove = sub.add_parser('news-remove',help='Stop game news to an email address and forget it')
+    remove.add_argument('email')
     invite = sub.add_parser('invite',help='Write an invite code file for a player to paste into Connection settings')
     invite.add_argument('--server',required=True,help='Address players use, e.g. http://192.168.1.45:8766')
     invite.add_argument('--token-file',type=Path,required=True)
@@ -208,6 +257,10 @@ def main():
         name = store.read(token)['player']
         with args.out.open('x') as out: out.write(make_invite(args.server,name,token)+'\n')
         print(f'Invite for {name} written to {args.out}. It works like a password: send it privately, then delete it.')
+    elif args.command == 'news-list':
+        for name,email in store.news_list(): print(f'{name}\t{email}')
+    elif args.command == 'news-remove':
+        print(f'Removed {store.remove_email(args.email)} address(es).')
     elif args.command == 'backup':
         if args.destination.resolve() == args.db.resolve() or args.destination.exists(): parser.error('Choose a new backup file')
         with store.connect() as source:
@@ -218,7 +271,7 @@ def main():
     else:
         if bool(args.cert) != bool(args.key): parser.error('--cert and --key must be used together')
         if args.host not in ('127.0.0.1','localhost','::1') and not (args.lan or args.cert): parser.error('Use --lan for private network testing or configure --cert and --key')
-        server = make_server(store,args.host,args.port)
+        server = make_server(store,args.host,args.port,signup=not args.no_signup)
         if args.cert:
             context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
             context.load_cert_chain(args.cert,args.key)
