@@ -55,6 +55,24 @@ class GameplayTests(unittest.TestCase):
                 self.assertTrue(g.running)
                 self.assertEqual(g.mode,mode)
 
+    def test_repeated_backspace_always_reaches_market_or_cockpit(self):
+        import random
+        keys = [ord(c) for c in 'gx9`2u8jie145']+[st.UP,st.DOWN]
+        for seed in range(300):
+            with self.subTest(seed=seed):
+                rng = random.Random(seed)
+                g = st.Game(None); g.spawn = 10**6
+                if rng.random() < .5: g.launch(); g.speed = 0
+                base = g.mode
+                for _ in range(rng.randint(1,8)):
+                    g.key(rng.choice(keys))
+                    if g.mode in ('market','flight'): base = g.mode
+                for _ in range(25):
+                    if g.mode in ('market','flight'): break
+                    g.key(8)
+                self.assertTrue(g.running)
+                self.assertEqual(g.mode,base)
+
     def test_backspace_still_deletes_in_text_fields(self):
         g = st.Game(None)
         for mode,attr in (('notes','notes'),('rename','name')):
