@@ -8,6 +8,10 @@ import unittest
 from pathlib import Path
 import star_trader as st
 
+# Keep logged feedback out of the real outbox.
+_OUTBOX = tempfile.TemporaryDirectory()
+st.FEEDBACK_OUTBOX = Path(_OUTBOX.name)/'feedback-outbox'
+
 
 class GameplayTests(unittest.TestCase):
     def setUp(self):
@@ -446,36 +450,27 @@ class GameplayTests(unittest.TestCase):
         self.assertEqual(g.mode,'map')
         self.assertIn('No planet',g.message)
 
-    def test_feedback_draft_saves_offline_without_attaching_save(self):
+    def test_each_feedback_report_is_logged_as_its_own_entry(self):
         g = self.game
+        for f in st.FEEDBACK_OUTBOX.glob('*'): f.unlink()
         g.key(ord('0'))
         self.assertEqual(g.mode,'feedback')
         self.assertEqual(g.session_mode(),'market')
         self.assertFalse(g.save_feedback())
         g.text_input('Buttons fail at 150% scaling. Café test.')
         self.assertTrue(g.save_feedback())
-        body = Path(g.feedback_path).read_text()
-        self.assertIn(st.VERSION,body)
-        self.assertIn('Café',body)
-        self.assertNotIn(g.p.commander_id,body)
-        g.mouse_back()
-        self.assertEqual(g.mode,'market')
-
-    def test_feedback_browser_opens_prefilled_issue_and_preserves_local_copy(self):
-        g = self.game
-        g.key(ord('0'))
+        self.assertEqual(g.feedback_text,'')
+        self.assertIn('logged',g.message)
         g.feedback_type = 'suggestion'
         g.text_input('Please add escorts & convoys')
-        with patch.object(st.webbrowser,'open',return_value=True) as browser:
-            g.open_feedback_issue()
-        url = browser.call_args.args[0]
-        self.assertTrue(url.startswith('https://github.com/womb4t/star-trader/issues/new?'))
-        fields = st.urllib.parse.parse_qs(st.urllib.parse.urlsplit(url).query)
-        self.assertTrue(fields['title'][0].startswith('Suggestion:'))
-        self.assertIn('escorts & convoys',fields['body'][0])
-        self.assertTrue(Path(g.feedback_path).exists())
-        with patch.object(st.webbrowser,'open',return_value=False): g.open_feedback_issue()
-        self.assertIn('saved locally',g.message)
+        self.assertTrue(g.save_feedback())
+        entries = sorted((json.loads(p.read_text()) for p in st.FEEDBACK_OUTBOX.glob('*.json')),key=lambda e:e['created'])
+        self.assertEqual([(e['kind'],e['text']) for e in entries],[('bug','Buttons fail at 150% scaling. Café test.'),('suggestion','Please add escorts & convoys')])
+        self.assertEqual(entries[0]['version'],st.VERSION)
+        self.assertNotIn(g.p.commander_id,json.dumps(entries))
+        self.assertEqual(g.feedback_waiting(),2)
+        g.mouse_back()
+        self.assertEqual(g.mode,'market')
 
     def test_illicit_sale_pays_crymto_but_credit_purchases_remain_available(self):
         p = self.game.p

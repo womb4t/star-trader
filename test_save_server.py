@@ -236,6 +236,65 @@ class SignupTests(unittest.TestCase):
         self.assertEqual(store.news_list(),[('New','new@example.com')])
 
 
+class FeedbackTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.store = Store(self.root/'p.sqlite3')
+        self.store.create_player('Frank','f'*43)
+        (self.root/'frank.token').write_text('f'*43)
+        server = make_server(self.store,port=0)
+        worker = threading.Thread(target=server.serve_forever,daemon=True); worker.start()
+        self.addCleanup(lambda: (server.shutdown(),server.server_close(),worker.join()))
+        self.url = 'http://127.0.0.1:'+str(server.server_port)
+
+    def tearDown(self): self.tmp.cleanup()
+
+    def entry(self, text='Ship clipped the station', kind='bug'):
+        import uuid
+        return dict(id=uuid.uuid4().hex,kind=kind,text=text,created=1.0,version='0.5.0',platform='darwin',screen='flight',system='Halvora')
+
+    def test_outbox_entries_are_sent_once_each_and_removed(self):
+        from save_sync import FeedbackUploader
+        outbox = self.root/'outbox'; outbox.mkdir()
+        entries = [self.entry('first'),self.entry('second','suggestion')]
+        for e in entries: (outbox/(e['id']+'.json')).write_text(json.dumps(e))
+        (outbox/'broken.json').write_text('{oops')
+        remote = RemoteSave(self.url,self.root/'frank.token',self.root/'client')
+        uploader = FeedbackUploader(remote,outbox)
+        uploader.send_all()
+        self.assertEqual(sorted(p.name for p in outbox.iterdir()),['broken.unreadable'])
+        remote.request(entries[0],endpoint='/v1/feedback')  # a resend after a lost reply is harmless
+        stored = self.store.feedback()
+        self.assertEqual([(i['player'],i['kind'],i['text']) for i in stored],[('Frank','bug','first'),('Frank','suggestion','second')])
+        self.assertEqual(stored[0]['details']['system'],'Halvora')
+
+    def test_offline_outbox_waits_for_the_server(self):
+        from save_sync import FeedbackUploader
+        outbox = self.root/'outbox'; outbox.mkdir()
+        e = self.entry(); (outbox/(e['id']+'.json')).write_text(json.dumps(e))
+        remote = RemoteSave('http://127.0.0.1:9',self.root/'frank.token',self.root/'client')
+        FeedbackUploader(remote,outbox).send_all()
+        self.assertTrue((outbox/(e['id']+'.json')).exists())
+
+    def test_admin_key_reads_and_marks_feedback_players_cannot(self):
+        remote = RemoteSave(self.url,self.root/'frank.token',self.root/'client')
+        remote.request(self.entry(),endpoint='/v1/feedback')
+        self.store.set_admin_token('a'*43)
+        import feedback_report
+        items = feedback_report.call(self.url,'a'*43,'/v1/admin/feedback?status=new')['feedback']
+        self.assertEqual(len(items),1)
+        self.assertEqual(feedback_report.call(self.url,'a'*43,'/v1/admin/feedback/status',dict(ids=[items[0]['id']],status='done'))['changed'],1)
+        self.assertEqual(self.store.feedback('new'),[])
+        with self.assertRaises(urllib.error.HTTPError) as error: feedback_report.call(self.url,'f'*43,'/v1/admin/feedback')
+        self.assertEqual(error.exception.code,401)
+        error.exception.close()
+
+    def test_invalid_feedback_is_rejected(self):
+        for bad in (dict(self.entry(),kind='rant'),dict(self.entry(),text=''),dict(self.entry(),id='x'),dict(self.entry(),text='x'*1501)):
+            with self.subTest(bad=bad), self.assertRaises(ValueError): self.store.add_feedback('Frank',bad)
+
+
 class InviteCommandTests(unittest.TestCase):
     def test_invite_file_holds_server_name_and_token(self):
         import subprocess, sys, startup

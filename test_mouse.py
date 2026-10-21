@@ -8,6 +8,10 @@ import unittest
 from unittest.mock import patch
 import star_trader as st
 
+# Keep logged feedback out of the real outbox.
+_OUTBOX = tempfile.TemporaryDirectory()
+st.FEEDBACK_OUTBOX = Path(_OUTBOX.name)/'feedback-outbox'
+
 
 class MouseIntegrationTests(unittest.TestCase):
     def test_scaled_mouse_events_hit_jobs_answers_and_held_controls(self):

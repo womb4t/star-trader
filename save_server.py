@@ -13,6 +13,7 @@ import sqlite3
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import ssl
 import time
+import urllib.parse
 from star_trader import VERSION
 from presence import SharedPresence, PresenceBusy
 
@@ -79,6 +80,10 @@ class Store:
             columns = {row[1] for row in db.execute('PRAGMA table_info(players)')}
             if 'email' not in columns: db.execute('ALTER TABLE players ADD COLUMN email TEXT')
             if 'created' not in columns: db.execute('ALTER TABLE players ADD COLUMN created REAL')
+            db.executescript('''CREATE TABLE IF NOT EXISTS feedback (
+                id TEXT PRIMARY KEY, player TEXT NOT NULL, kind TEXT NOT NULL, text TEXT NOT NULL,
+                details TEXT NOT NULL, created REAL, received REAL NOT NULL, status TEXT NOT NULL DEFAULT 'new');
+                CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);''')
         os.chmod(path, 0o600)
 
     @contextmanager
@@ -103,6 +108,43 @@ class Store:
             if db.execute('SELECT count(*) FROM players').fetchone()[0] >= MAX_PLAYERS: raise PlayerLimit('All pilot places on this server are taken.')
             if db.execute('SELECT 1 FROM players WHERE lower(name)=lower(?)',(name,)).fetchone(): raise NameTaken('That pilot name is taken. Choose another.')
             db.execute('INSERT INTO players(name,token_hash,email,created) VALUES (?,?,?,?)', (name,self.token_hash(token),email,time.time()))
+
+    def add_feedback(self, player, entry):
+        if type(entry) is not dict: raise ValueError('Invalid feedback')
+        if type(entry.get('id')) is not str or not re.fullmatch(r'[0-9a-f]{32}',entry['id']): raise ValueError('Invalid feedback id')
+        if entry.get('kind') not in ('bug','suggestion'): raise ValueError('Invalid feedback kind')
+        text = entry.get('text')
+        if type(text) is not str or not text.strip() or len(text) > 1500: raise ValueError('Invalid feedback text')
+        details = {key:entry[key] for key in ('version','platform','screen','system') if type(entry.get(key)) is str and len(entry[key]) <= 60}
+        created = entry.get('created') if type(entry.get('created')) in (int,float) and math.isfinite(entry['created']) else None
+        now = time.time()
+        with self.connect() as db:
+            db.execute('BEGIN IMMEDIATE')
+            if db.execute('SELECT count(*) FROM feedback WHERE player=? AND received>?',(player,now-86400)).fetchone()[0] >= 50:
+                raise ValueError('Feedback limit reached for today')
+            # The client's id makes a resend after a lost reply harmless.
+            db.execute('INSERT OR IGNORE INTO feedback(id,player,kind,text,details,created,received) VALUES (?,?,?,?,?,?,?)',
+                       (entry['id'],player,entry['kind'],text.strip(),encode(details).decode(),created,now))
+
+    def feedback(self, status=None):
+        with self.connect() as db:
+            rows = db.execute('SELECT id,player,kind,text,details,created,received,status FROM feedback'
+                              +(' WHERE status=?' if status else '')+' ORDER BY received',(status,) if status else ()).fetchall()
+        return [dict(id=r[0],player=r[1],kind=r[2],text=r[3],details=json.loads(r[4]),created=r[5],received=r[6],status=r[7]) for r in rows]
+
+    def set_feedback_status(self, feedback_id, status):
+        if status not in ('new','seen','done'): raise ValueError('Status must be new, seen or done')
+        with self.connect() as db:
+            return db.execute('UPDATE feedback SET status=? WHERE id=?',(status,feedback_id)).rowcount
+
+    def set_admin_token(self, token):
+        with self.connect() as db:
+            db.execute("INSERT OR REPLACE INTO settings VALUES ('admin_token_hash',?)",(self.token_hash(token),))
+
+    def is_admin(self, token):
+        with self.connect() as db:
+            row = db.execute("SELECT value FROM settings WHERE key='admin_token_hash'").fetchone()
+        return row is not None and secrets.compare_digest(row[0],self.token_hash(token))
 
     def news_list(self):
         with self.connect() as db:
@@ -161,12 +203,24 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         try:
             if self.path == '/health': return self.reply(200,dict(service='star-trader-saves',protocol=1,version=VERSION))
+            if self.path.startswith('/v1/admin/feedback'):
+                if not self.server.store.is_admin(self.token()): raise PermissionError('Admin only')
+                status = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query).get('status',[None])[0]
+                return self.reply(200,dict(feedback=self.server.store.feedback(status)))
             if self.path != '/v1/save': return self.reply(404,dict(error='Not found'))
             self.reply(200,self.server.store.read(self.token()))
         except PermissionError: self.reply(401,dict(error='Invalid or missing player token'))
 
     def do_POST(self):
         try:
+            if self.path == '/v1/admin/feedback/status':
+                if not self.server.store.is_admin(self.token()): raise PermissionError('Admin only')
+                length = int(self.headers.get('Content-Length','0'))
+                if not 0 < length <= 4096: return self.reply(413,dict(error='Request too large or empty'))
+                data = json.loads(self.rfile.read(length))
+                if type(data) is not dict or type(data.get('ids')) is not list or not all(type(i) is str for i in data['ids']): raise ValueError('Invalid request')
+                changed = sum(self.server.store.set_feedback_status(i,data.get('status')) for i in data['ids'][:200])
+                return self.reply(200,dict(changed=changed))
             if self.path != '/v1/signup': return self.reply(404,dict(error='Not found'))
             if not self.server.signup: return self.reply(403,dict(error='Sign-up is closed on this server. Ask the host for an invite.'))
             length = int(self.headers.get('Content-Length','0'))
@@ -176,6 +230,7 @@ class Handler(BaseHTTPRequestHandler):
             token = secrets.token_urlsafe(32)
             self.server.store.create_player(data['name'],token,data.get('email'))
             self.reply(201,dict(player=data['name'],token=token))
+        except PermissionError: self.reply(401,dict(error='Invalid or missing admin token'))
         except NameTaken as error: self.reply(409,dict(error=str(error)))
         except PlayerLimit as error: self.reply(403,dict(error=str(error)))
         except ValueError as error: self.reply(400,dict(error=str(error) if str(error)[:1].isupper() else 'Invalid sign-up'))
@@ -184,12 +239,15 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_PUT(self):
         try:
-            if self.path not in ('/v1/save','/v1/presence'): return self.reply(404,dict(error='Not found'))
+            if self.path not in ('/v1/save','/v1/presence','/v1/feedback'): return self.reply(404,dict(error='Not found'))
             token = self.token()
             self.server.store.read(token)
             length = int(self.headers.get('Content-Length','0'))
             if not 0 < length <= MAX_SAVE+1024: return self.reply(413,dict(error='Save too large or empty'))
             data = json.loads(self.rfile.read(length))
+            if self.path == '/v1/feedback':
+                self.server.store.add_feedback(self.server.store.read(token)['player'],data)
+                return self.reply(201,dict(received=data['id']))
             if self.path == '/v1/presence':
                 with self.server.store.connect() as db:
                     player_id,name = db.execute('SELECT id,name FROM players WHERE token_hash=?',(self.server.store.token_hash(token),)).fetchone()
@@ -229,6 +287,12 @@ def main():
     serve.add_argument('--key',type=Path)
     serve.add_argument('--no-signup',action='store_true',help='Only admin-created players and invites; no in-game sign-up')
     sub.add_parser('news-list',help='Print name and email of players who asked for game news')
+    listing = sub.add_parser('feedback-list',help='Print bug reports and suggestions')
+    listing.add_argument('--status',choices=('new','seen','done'))
+    mark = sub.add_parser('feedback-mark',help='Set a report to new, seen or done')
+    mark.add_argument('id'); mark.add_argument('status',choices=('new','seen','done'))
+    admin = sub.add_parser('admin-token',help='Create (or replace) the admin key used to read feedback remotely')
+    admin.add_argument('--token-file',type=Path,required=True)
     remove = sub.add_parser('news-remove',help='Stop game news to an email address and forget it')
     remove.add_argument('email')
     invite = sub.add_parser('invite',help='Write an invite code file for a player to paste into Connection settings')
@@ -257,6 +321,22 @@ def main():
         name = store.read(token)['player']
         with args.out.open('x') as out: out.write(make_invite(args.server,name,token)+'\n')
         print(f'Invite for {name} written to {args.out}. It works like a password: send it privately, then delete it.')
+    elif args.command == 'feedback-list':
+        for item in store.feedback(args.status):
+            when = time.strftime('%Y-%m-%d %H:%M',time.localtime(item['received']))
+            print(f"[{item['status']}] {item['id'][:8]} {when} {item['player']} {item['kind'].upper()}: {item['text']}")
+    elif args.command == 'feedback-mark':
+        matches = [i['id'] for i in store.feedback() if i['id'].startswith(args.id)]
+        if len(matches) != 1: parser.error('Give a unique report id (or its first characters)')
+        store.set_feedback_status(matches[0],args.status)
+        print(f'Marked {matches[0][:8]} {args.status}.')
+    elif args.command == 'admin-token':
+        token = secrets.token_urlsafe(32)
+        args.token_file.parent.mkdir(parents=True,exist_ok=True)
+        with args.token_file.open('w') as out: out.write(token+'\n')
+        args.token_file.chmod(0o600)
+        store.set_admin_token(token)
+        print(f'Admin key written to {args.token_file}. Keep it private; it can read all feedback.')
     elif args.command == 'news-list':
         for name,email in store.news_list(): print(f'{name}\t{email}')
     elif args.command == 'news-remove':

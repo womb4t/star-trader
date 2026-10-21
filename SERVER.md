@@ -49,6 +49,23 @@ cd "$HOME/star-trader" && python3 save_server.py news-list
 cd "$HOME/star-trader" && python3 save_server.py news-remove someone@example.com
 ```
 
+## Bug reports and suggestions
+
+Players log bug reports and suggestions in the game (Menu → Report a bug, or 0). Each one is saved as its own entry on their computer and sent to this server the next time they play online; nothing goes to GitHub. On the server:
+
+```bash
+cd "$HOME/star-trader" && python3 save_server.py feedback-list --status new
+cd "$HOME/star-trader" && python3 save_server.py feedback-mark 1a2b3c4d done
+```
+
+To read them from another computer, create an admin key once and copy the file there privately (for example to `~/.config/star-trader/admin.token`):
+
+```bash
+cd "$HOME/star-trader" && python3 save_server.py admin-token --token-file "$HOME/.star-trader-server/admin.token"
+```
+
+Then `python3 feedback_report.py` lists new reports, and `--mark seen` marks what it listed.
+
 ## Invite a tester
 
 New installs already point at the community server (`http://192.168.1.45:8766`). Create the player, then write an invite code file for them:

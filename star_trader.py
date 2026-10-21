@@ -15,7 +15,6 @@ import time
 import threading
 import urllib.request
 import urllib.parse
-import webbrowser
 import uuid
 import tempfile
 import fcntl
@@ -73,6 +72,8 @@ PROFILES = [
     ('Feudal', 0.8, 4200), ('Communist', 3.6, 8100)]
 
 SAVE = Path(os.environ.get('XDG_DATA_HOME') or Path.home() / '.local/share') / 'star-trader' / 'save.json'
+# Bug reports and suggestions wait here, one file each, until an online session sends them.
+FEEDBACK_OUTBOX = SAVE.parent / 'feedback-outbox'
 
 
 def price(system, good):
@@ -1747,36 +1748,34 @@ class Game:
         except (OSError,RuntimeError) as error:
             self.message = 'Clipboard unavailable: '+str(error)
 
-    def feedback_body(self):
-        return (self.feedback_text.strip()+'\n\n---\n'+f'Star Trader: {VERSION}\n'
-                +f'Platform: {sys.platform}\nScreen: {self.feedback_return}\n'
-                +f'System: {"Deep space" if self.p.deep_space else SYSTEMS[self.p.system][0]}\n')
+    def feedback_entry(self):
+        return dict(id=uuid.uuid4().hex,kind=self.feedback_type,text=self.feedback_text.strip(),created=time.time(),
+                    version=VERSION,platform=sys.platform,screen=self.feedback_return,
+                    system='Deep space' if self.p.deep_space else SYSTEMS[self.p.system][0])
 
     def save_feedback(self):
         if not self.feedback_text.strip():
             self.message = 'Write a description first.'
             return False
         try:
-            folder = SAVE.parent/'feedback'
-            folder.mkdir(parents=True,exist_ok=True)
-            path = folder/(self.feedback_type+'-'+uuid.uuid4().hex[:12]+'.md')
-            path.write_text(self.feedback_body(),encoding='utf-8')
+            entry = self.feedback_entry()
+            FEEDBACK_OUTBOX.mkdir(parents=True,exist_ok=True)
+            path = FEEDBACK_OUTBOX/(entry['id']+'.json')
+            temp = path.with_suffix('.tmp')
+            temp.write_text(json.dumps(entry),encoding='utf-8')
+            temp.replace(path)
             self.feedback_path = str(path)
-            self.message = 'Feedback draft saved locally. It has not been submitted.'
+            self.feedback_text = ''
+            label = 'Bug report' if entry['kind'] == 'bug' else 'Suggestion'
+            self.message = f'{label} logged. It is sent to the developers next time you play online.'
             return True
         except OSError as error:
-            self.message = 'Could not save feedback: '+str(error)
+            self.message = 'Could not log feedback: '+str(error)
             return False
 
-    def open_feedback_issue(self):
-        if not self.save_feedback(): return
-        prefix = 'Bug' if self.feedback_type == 'bug' else 'Suggestion'
-        title = prefix+': '+self.feedback_text.strip().splitlines()[0][:85]
-        url = 'https://github.com/womb4t/star-trader/issues/new?'+urllib.parse.urlencode(dict(title=title,body=self.feedback_body()))
-        try: opened = webbrowser.open(url,new=2)
-        except (OSError,webbrowser.Error): opened = False
-        self.message = ('GitHub draft opened. Review it and submit there; sign-in may be required.' if opened
-                        else 'Could not open browser. Your draft is saved locally for later.')
+    def feedback_waiting(self):
+        try: return sum(1 for _ in FEEDBACK_OUTBOX.glob('*.json'))
+        except OSError: return 0
 
     def draw_feedback(self):
         d = self.d
@@ -1788,9 +1787,10 @@ class Game:
             lines.extend(textwrap.wrap(paragraph,89) or [''])
         for i,line in enumerate(lines[-11:]): d.text(45,215+i*25,line)
         d.text(45,490,f'{len(self.feedback_text)}/1500 characters',GOLD)
-        d.text(35,535,'Saved drafts work offline. GitHub opens a preview for you to submit.')
+        d.text(35,535,'Each report is logged separately and sent to the developers when you play online.')
         d.text(35,570,'Includes version, platform, screen and system; no save file attached.')
-        if self.feedback_path: d.text(35,610,'Draft folder: '+str(SAVE.parent/'feedback'))
+        waiting = self.feedback_waiting()
+        if waiting: d.text(35,610,f'{waiting} report{"s" if waiting > 1 else ""} waiting to send.',GOLD)
 
     def finish_rename(self):
         self.p.name = self.p.name.strip()
@@ -3234,8 +3234,8 @@ class Game:
             for i,(label,kind) in enumerate([('Bug report','bug'),('Suggestion','suggestion')]):
                 self.mouse_button(35+i*240,165,225,label,action=lambda kind=kind:setattr(self,'feedback_type',kind))
                 if self.feedback_type == kind: d.rect(35+i*240,165,225,28,GOLD)
-            for i,(label,action) in enumerate([('Save draft',self.save_feedback),('Open GitHub draft',self.open_feedback_issue),('Return',lambda:self.key(27))]):
-                self.mouse_button(35+i*345,674,330,label,action=action)
+            for i,(label,action) in enumerate([('Log report',self.save_feedback),('Return',self.mouse_back)]):
+                self.mouse_button(35+i*520,674,505,label,action=action)
         elif self.mode == 'jobs':
             if self.p.dock_job is None:
 
@@ -3737,6 +3737,7 @@ def main():
     remote = None
     game = None
     presence = None
+    feedback = None
     try:
         offline_save = SAVE
         if options.offline and options.server: raise ValueError('Choose --offline or --server')
@@ -3800,7 +3801,10 @@ def main():
         if remote:
             game.remote_save = remote
             from presence import PresenceClient
+            from save_sync import FeedbackUploader
             presence = PresenceClient(remote)
+            feedback = FeedbackUploader(remote,FEEDBACK_OUTBOX)
+            feedback.start()
             game.presence = presence
             remote.start()
             game.checkpoint()
@@ -3834,6 +3838,7 @@ def main():
         if remote and game: game.checkpoint()
         if display: display.quit()
         if presence: presence.close()
+        if feedback: feedback.close()
         if remote:
             remote.close()
             print(remote.status)

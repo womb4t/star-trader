@@ -260,10 +260,9 @@ I or the Back button returns to the map. The main header shows your current syst
 name, economy and technology level, with credits/kills below.
 
 FEEDBACK: click Feedback 0 or press 0, choose Bug report or Suggestion,
-then type a description. Save draft keeps an offline copy under the game data
-folder in feedback/. Open GitHub draft opens a prefilled issue for you to
-review and submit (GitHub sign-in may be required). Only your text, game
-version, platform, screen and system are included; no save file is attached.
+then type a description and click Log report. Each report is saved as its own
+entry and sent to the developers the next time you play online. Only your text,
+game version, platform, screen and system are included; no save file is attached.
 
 CRYMTO (CYM): contraband sales normally pay this separate account balance.
 Crymto survives ship destruction and is exempt from salvage claims. B always
