@@ -3650,6 +3650,8 @@ def grant_testing_credits(amount):
 
 def notify(text):
     if shutil.which('notify-send'): subprocess.run(['notify-send','Star Trader',text],check=False)
+    elif sys.platform == 'darwin':
+        subprocess.run(['osascript','-e','on run argv','-e','display notification (item 1 of argv) with title "Star Trader"','-e','end run',text],check=False)
 
 
 def auto_update():

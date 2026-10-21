@@ -53,11 +53,12 @@ def main():
         print(f'Updating official checkout: {repo}',flush=True)
         print('Saved progress will be preserved. Dependency installation may ask for your password.',flush=True)
         if args.dry_run:
-            print('Dry run: would fetch origin/main, merge --ff-only, then run bash install.sh.')
+            print('Dry run: would fetch origin/main, merge --ff-only, then rerun the installer.')
             return
         subprocess.run(['git','-C',str(repo),'fetch','origin','main'],check=True)
         subprocess.run(['git','-C',str(repo),'merge','--ff-only','origin/main'],check=True)
-        subprocess.run(['bash',str(repo/'install.sh')],check=True,cwd=repo)
+        installer = 'install-mac.sh' if sys.platform == 'darwin' else 'install.sh'
+        subprocess.run(['bash',str(repo/installer)],check=True,cwd=repo)
         print('Update complete. Restart Star Trader to use the new version.')
     except (OSError,ValueError,KeyError,subprocess.CalledProcessError) as error:
         print(f'Update stopped: {error}',file=sys.stderr)

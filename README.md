@@ -18,7 +18,20 @@ The installer uses `omarchy pkg add` only for missing dependencies: Python, SDL2
 
 The native window supports Hyprland tiling, resizing and 3 fullscreen. No compositor configuration changes are needed.
 
+## Install on macOS
+
+In Terminal (Git and Python 3.9+ are needed; macOS offers to install Apple's command line tools if they are missing):
+
+```bash
+git clone https://github.com/womb4t/star-trader.git "$HOME/star-trader" &&
+bash "$HOME/star-trader/install-mac.sh"
+```
+
+The script downloads the official SDL2 and SDL2_ttf frameworks from libsdl-org (checksum-verified) into `~/Library/Frameworks`, installs the game, and adds **Star Trader** to `~/Applications`, so it opens from Launchpad or Spotlight. It works on Intel and Apple Silicon Macs without Homebrew or sudo.
+
 ## Update
+
+**From 0.5.0 onward:** the installed game installs new releases automatically when it starts, then restarts into the new version. Saves are preserved. If an update cannot be installed, the current version starts and the details are written to `update.log` beside your save.
 
 **Upgrading from the first version:** it predates update notices. From your existing checkout, run this once:
 

@@ -66,6 +66,27 @@ class UpdaterTests(unittest.TestCase):
         calls = [call.args[0] for call in run.call_args_list]
         self.assertEqual(calls,[['git','-C',str(self.repo),'fetch','origin','main'],['git','-C',str(self.repo),'merge','--ff-only','origin/main'],['bash',str(self.repo/'install.sh')]])
 
+    def test_mac_update_reruns_mac_installer(self):
+        with patch.object(update,'output',side_effect=self.answers()), patch.object(update.sys,'argv',['update.py']), patch.object(update.sys,'platform','darwin'), patch.object(update.subprocess,'run') as run, contextlib.redirect_stdout(io.StringIO()):
+            update.main()
+        self.assertEqual(run.call_args_list[-1].args[0],['bash',str(self.repo/'install-mac.sh')])
+
+
+class MacInstallTests(unittest.TestCase):
+    def test_mac_app_bundle_launches_installed_game(self):
+        import install
+        with tempfile.TemporaryDirectory() as home, patch.object(install.Path,'home',return_value=Path(home)), contextlib.redirect_stdout(io.StringIO()):
+            target = Path(home)/"Game's folder"
+            install.install_mac_app(target)
+            contents = Path(home)/'Applications'/'Star Trader.app'/'Contents'
+            self.assertIn('<string>star-trader</string>',(contents/'Info.plist').read_text())
+            launcher = contents/'MacOS'/'star-trader'
+            self.assertTrue(launcher.stat().st_mode & 0o111)
+            import subprocess
+            out = subprocess.run(['sh','-n',str(launcher)],capture_output=True)
+            self.assertEqual(out.returncode,0)
+            self.assertIn("'"+str(target).replace("'","'\\''")+"/star_trader.py'",launcher.read_text())
+
 
 class AutoUpdateTests(unittest.TestCase):
     def setUp(self):

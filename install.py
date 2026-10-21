@@ -8,6 +8,28 @@ import subprocess
 import sys
 
 
+def install_mac_app(target):
+    # A minimal app bundle in ~/Applications, so Star Trader opens from Launchpad, Spotlight or the Dock.
+    app = Path.home()/'Applications'/'Star Trader.app'/'Contents'
+    (app/'MacOS').mkdir(parents=True, exist_ok=True)
+    (app/'Info.plist').write_text('<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n'
+        '<plist version="1.0"><dict>\n'
+        '<key>CFBundleName</key><string>Star Trader</string>\n'
+        '<key>CFBundleIdentifier</key><string>io.github.womb4t.star-trader</string>\n'
+        '<key>CFBundleExecutable</key><string>star-trader</string>\n'
+        '<key>CFBundlePackageType</key><string>APPL</string>\n'
+        '<key>LSMinimumSystemVersion</key><string>10.13</string>\n'
+        '</dict></plist>\n', encoding='utf-8')
+    def quote(value): return "'" + str(value).replace("'", "'\\''") + "'"
+    launcher = app/'MacOS'/'star-trader'
+    launcher.write_text(f'#!/bin/sh\nexec {quote(sys.executable)} {quote(target/"star_trader.py")} "$@"\n', encoding='utf-8')
+    launcher.chmod(0o755)
+    print('Installed! Open Star Trader from Launchpad, Spotlight, or ~/Applications.')
+    print(f'Or run: {sys.executable} "{target / "star_trader.py"}"')
+    print('Your saved game is preserved when reinstalling. New releases install automatically at launch.')
+
+
 def install():
     source = Path(__file__).resolve().parent
     data = Path(os.environ.get('XDG_DATA_HOME') or Path.home() / '.local/share').expanduser().resolve()
@@ -26,6 +48,9 @@ def install():
     migrate_online_launcher(Path.home()/'.local/bin/star-trader-online')
     from star_trader import VERSION
     (target/'install-info.json').write_text(json.dumps(dict(source=str(source),version=VERSION)),encoding='utf-8')
+    if sys.platform == 'darwin':
+        install_mac_app(target)
+        return
     apps = data / 'applications'
     apps.mkdir(parents=True, exist_ok=True)
     # Desktop Entry Exec quoting: escape reserved characters, and literal %.
