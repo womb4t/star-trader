@@ -37,6 +37,37 @@ class GameplayTests(unittest.TestCase):
                 self.assertEqual(saved['notes'],'Keep my testing notes')
                 self.assertIn('_session',saved)
 
+    def test_backspace_goes_back_from_every_screen_without_quitting(self):
+        expected = {'money':'market','vms':'market','outfit':'market','help':'market','updates':'market','map':'market',
+                    'planet_profile':'map','jobs':'money','bank':'money','exchange':'money','trade_deal':'market',
+                    'departure':'market','engineering':'market','launch_warning':'market','menu':'market','distress':'flight'}
+        for mode,back in expected.items():
+            with self.subTest(mode=mode):
+                g = st.Game(None)
+                g.mode = mode
+                g.key(8)
+                self.assertTrue(g.running)
+                self.assertEqual(g.mode,back)
+        for mode in ('market','flight','cruise','hyperspace'):
+            with self.subTest(mode=mode):
+                g = st.Game(None); g.mode = mode
+                g.key(8)
+                self.assertTrue(g.running)
+                self.assertEqual(g.mode,mode)
+
+    def test_backspace_still_deletes_in_text_fields(self):
+        g = st.Game(None)
+        for mode,attr in (('notes','notes'),('rename','name')):
+            g.mode = mode
+            setattr(g.p,attr,'abc')
+            g.key(8)
+            self.assertEqual((g.mode,getattr(g.p,attr)),(mode,'ab'))
+        g.mode = 'redeem'; g.credit_code_text = 'XY'; g.key(8)
+        self.assertEqual((g.mode,g.credit_code_text),('redeem','X'))
+        g.mode = 'map'; g.map_input = 'search'; g.map_text = 'ab'
+        g.key(8)
+        self.assertEqual(g.mode,'map')
+
     def test_cancel_mouse_button_navigates_without_triggering_escape(self):
         g = self.game
         g.mode,g.launch_return = 'launch_warning','market'

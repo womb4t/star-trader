@@ -1471,7 +1471,7 @@ class Game:
                  'Successful assistance earns credits; failures share your cooldown.',
                  'Station R repairs hull AND resets maintenance and flight count.',
                  'Field repair progress saves at your next station; cooldown saves now.',
-                 '', '8 returns. Distress 6 is available from the cockpit.']
+                 '', 'BACKSPACE returns. Distress 6 is available from the cockpit.']
         for i,line in enumerate(lines): d.text(35,85+i*34,line,GOLD if i==0 else GREEN)
 
     def inspect_cargo(self):
@@ -1669,7 +1669,7 @@ class Game:
                 for i,choice in enumerate(j['choices']): d.text(60,350+i*55,f'{i+1}. {choice}')
             else: d.text(45,290,'Tasks finished. Waiting for the shift to end; payment follows automatically.')
             d.text(45,555,'You may return to the market. Shift progress pauses and is saved.')
-        d.text(45,610,f'Workshop experience: {self.p.workshop_xp} XP. J returns to Money.')
+        d.text(45,610,f'Workshop experience: {self.p.workshop_xp} XP. BACKSPACE returns to Money.')
 
     def exchange_available(self):
         return not self.p.deep_space and PROFILES[self.p.system][0] in ('Anarchy','Feudal')
@@ -1705,7 +1705,7 @@ class Game:
             amount = math.floor(balance if self.exchange_amount is None else min(balance,self.exchange_amount))
             net = amount*(80 if launder else 90)//100
             d.text(45,425+i*45,f'{amount} '+('Crymto -> ' if launder else 'credits -> ')+str(net)+(' credits' if launder else ' Crymto'))
-        d.text(45,550,'Select an amount, then choose a conversion. E returns to Money.')
+        d.text(45,550,'Select an amount, then choose a conversion. BACKSPACE returns to Money.')
 
     def active_text_field(self):
         if self.mode == 'redeem': return self,'credit_code_text',80
@@ -1832,7 +1832,7 @@ class Game:
 
         d.text(45,320,f'Pay fines costs {p.fine:,} credits. Code redemption is single-use per pilot.')
         d.text(45,570,'Crymto survives ship destruction. Bank funds and stored cargo are protected.')
-        d.text(45,610,'9 returns. Docking is required for financial services.' if self.money_return != 'market' else '9 returns to the market.')
+        d.text(45,610,'BACKSPACE returns. Docking is required for financial services.' if self.money_return != 'market' else 'BACKSPACE returns to the market.')
 
     def draw_notepad(self):
         d = self.d
@@ -1892,7 +1892,7 @@ class Game:
             d.text(45,535,f'Fuel refill: {p.fuel_cost()} cr / Service: {p.service_cost()} cr')
         else:
             d.text(45,535,'Fuel, station repairs and fitting require docking. Field engineering remains available.')
-        d.text(45,625,'X returns. G opens Nav. 8 opens engineering.')
+        d.text(45,625,'BACKSPACE returns. G opens Nav. 8 opens engineering.')
 
     def open_utility(self, target):
         if target == 'help':
@@ -1929,7 +1929,7 @@ class Game:
     def draw_menu(self):
         d = self.d
         d.text(35,85,'GAME MENU',GOLD)
-        d.text(35,125,'UP / DOWN selects. ENTER opens. ESC saves and closes the game.')
+        d.text(35,125,'UP / DOWN selects. ENTER opens. BACKSPACE returns. ESC saves and closes.')
         remote = getattr(self,'remote_save',None)
         status_color = RED if remote and remote.conflicted else GOLD if remote and 'unavailable' in remote.status else GREEN
         d.text(35,155,remote.status if remote else 'Offline game: progress saved on this laptop.',status_color)
@@ -1949,6 +1949,10 @@ class Game:
             # Typing an amount: digits arrive as text input, so shortcut keys are paused.
             if k == 8: self.bank_custom = self.bank_custom[:-1]
             elif k == 13: self.set_custom_bank_amount()
+            return
+        # Backspace is Back on every screen; in a text field it still deletes.
+        if k == 8 and not self.active_text_field() and not (self.mode == 'map' and self.map_input) and self.mode not in ('market','flight','cruise','hyperspace','dead','prison'):
+            self.mouse_back()
             return
         if k == 8 and self.text_selection_all and self.text_selection_mode == self.mode and self.active_text_field():
             owner,name,_ = self.active_text_field()
@@ -3468,7 +3472,7 @@ class Game:
                 'It fetches the official repository, then reruns the installer.',
                 'Release notes: github.com/womb4t/star-trader/releases',
                 '', 'If an automatic update fails, details are in update.log.',
-                'Use --no-update-check to disable network checks.', '', '2 returns. ESC saves and closes the game.']
+                'Use --no-update-check to disable network checks.', '', 'BACKSPACE returns. ESC saves and closes the game.']
             for i,line in enumerate(lines): d.text(30,80+i*31,line,GOLD if i==2 else GREEN)
         elif self.mode in ('market','outfit'):
             if self.mode == 'market':

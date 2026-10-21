@@ -330,7 +330,7 @@ Station hostility cools after 30 minutes away from the station (more than 10,000
 
 ## Emergency close
 
-Escape always saves and closes the game immediately, from every screen, including text entry and hyperspace. Click Back, Return or Cancel to navigate without quitting. In-flight logout still preserves your position and unattended recovery rules.
+Escape always saves and closes the game immediately, from every screen, including text entry and hyperspace. **Backspace** goes back one screen everywhere (in a text field it deletes a character instead), as do the Back, Return and Cancel buttons. In-flight logout still preserves your position and unattended recovery rules.
 
 ## One launcher, online or offline
 
