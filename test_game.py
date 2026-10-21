@@ -1883,6 +1883,56 @@ class LawAndPrisonTests(unittest.TestCase):
         g.key(ord('b'))
         self.assertEqual(g.p.prison['bribe_day'],-1)
 
+    def test_surrender_stands_police_down_until_docked(self):
+        g = self.game
+        g.launch()
+        g.station_struck(); g.station_strikes = st.STRAY_SHOT_LIMIT; g.station_struck()
+        self.assertEqual(g.enemy_kind,'police')
+        g.dispatch_station_police() if g.enemy is None else None
+        g.destroy_enemy()
+        g.dispatch_station_police()
+        reserve = g.p.station_police_remaining[0]
+        g.key(ord('7'))
+        self.assertTrue(g.surrendering)
+        self.assertIsNone(g.enemy)
+        self.assertEqual(g.p.station_police_remaining[0],reserve+1)
+        g.p.credits = 10000  # fines paid in full, so only the police kill and hostility count
+        g.security_dispatch = 0
+        g.update_station_security(1)
+        self.assertIsNone(g.enemy)
+        g.dock()
+        self.assertEqual(g.mode,'prison')
+        self.assertEqual(g.p.prison['days'],2)  # one police kill plus hostility
+        self.assertFalse(g.surrendering)
+
+    def test_firing_or_leaving_voids_surrender(self):
+        g = self.game
+        g.launch()
+        g.station_hostilities[0] = True
+        g.request_docking()
+        self.assertTrue(g.surrendering)
+        g.station = [0.,0.,5000.]
+        g.fire_laser()
+        self.assertFalse(g.surrendering)
+        self.assertIn('VOID',g.message)
+        g.enemy = None
+        g.update_station_security(.1)
+        self.assertEqual(g.enemy_kind,'police')
+        g.enemy = None; g.request_docking()
+        self.assertTrue(g.surrendering)
+        g.station = [0.,0.,20000.]
+        g.update_station_security(.1)
+        self.assertFalse(g.surrendering)
+
+    def test_anarchy_station_will_not_take_surrender(self):
+        g = self.game
+        g.p.system = 4
+        g.launch()
+        g.station_hostilities[4] = True
+        g.request_docking()
+        self.assertFalse(g.surrendering)
+        self.assertIn('refused',g.message)
+
     def test_invalid_prison_record_is_rejected(self):
         pilot = st.Pilot()
         pilot.prison = dict(system=0,days=9,start=0.,release_at=1.,bribe_day=-1,work_day=-1)

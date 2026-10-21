@@ -557,6 +557,7 @@ class Game:
         self.security_dispatch = 0.
         self.station_strikes = 0
         self.station_strike_at = 0.
+        self.surrendering = False
         self.station_laser_warning = False
         self.station_laser_timer = 15.
         self.enemy_police_system = None
@@ -693,7 +694,7 @@ class Game:
 
     def checkpoint(self):
         if getattr(self,'_restoring',False): return
-        fields = ('world_basis','world_epoch','shield','speed','station','roll','station_angle','station_hostilities','station_hostile_until','security_elapsed','security_warning','security_dispatch','station_laser_warning','station_laser_timer','enemy_police_system','autodock','course_assist','fine_control','enemy','enemy_kind',
+        fields = ('world_basis','world_epoch','shield','speed','station','roll','station_angle','station_hostilities','station_hostile_until','security_elapsed','security_warning','security_dispatch','station_laser_warning','station_laser_timer','enemy_police_system','surrendering','autodock','course_assist','fine_control','enemy','enemy_kind',
                   'asteroids','fragments','sun','heat','nav','rear_view','planet','planet_radius',
                   'assist_speed','mine_objects','jamming','jammer_cooldown','cloaked','customs_checked',
                   'cruise','jump_warp','npc_mine_timer','spawn','cooldown','enemy_shot','broken_down','breakdown_in',
@@ -1142,6 +1143,7 @@ class Game:
         self.p.station_police_remaining[system] = STATION_POLICE_CAPACITY
         self.p.station_police_defeated[system] = 0
         self.enemy = self.ship_target = self.enemy_police_system = None
+        self.surrendering = False
         settled = f'{paid+from_bank} cr fines collected'+(f', {unpaid} cr unpaid' if unpaid else '')+(f', {seized}t contraband seized' if seized else '')
         if not days:
             self.mode = 'market'
@@ -1220,6 +1222,8 @@ class Game:
             self.dock_clearance = 0
             self.docking_pending = 0
             self.message = 'Docking refused: hostile or wanted status. Seek another accepting port.'
+        elif self.station_hostilities[self.p.system] and not self.surrendering:
+            self.surrender()
         elif self.dock_clearance > 0:
             self.message = f'Docking clearance remains valid for {math.ceil(self.dock_clearance)}s.'
         else:
@@ -1236,6 +1240,27 @@ class Game:
         self.autodock = self.course_assist = False
         self.message = 'STATION DEFENCE: '+reason+' Docking revoked; police response authorised!'
         self.checkpoint()
+
+    def surrender(self):
+        self.surrendering = True
+        if self.enemy_kind == 'police' and self.enemy is not None:
+            # The police ship returns to the station reserve; it was not defeated.
+            if self.enemy_police_system is not None:
+                system = self.enemy_police_system
+                self.p.station_police_remaining[system] = min(STATION_POLICE_CAPACITY,self.p.station_police_remaining[system]+1)
+            self.enemy = self.ship_target = self.enemy_police_system = None
+        self.station_laser_warning,self.station_laser_timer = False,15.
+        self.dock_clearance,self.docking_pending = 120,0
+        self.message = 'SURRENDER ACCEPTED: police stand down. Fly straight in and dock to be arrested. Firing or leaving cancels it.'
+        self.checkpoint()
+
+    def cancel_surrender(self, reason):
+        if not self.surrendering: return
+        self.surrendering = False
+        self.dock_clearance = 0
+        self.security_dispatch = 0
+        self.message = f'SURRENDER VOID: {reason} Police response resumes!'
+        self.alert = dict(text=self.message,remaining=5.,elapsed=0.)
 
     def station_struck(self):
         if self.station_hostilities[self.p.system]: return
@@ -1270,7 +1295,10 @@ class Game:
     def update_station_security(self, dt):
         if self.p.deep_space: return
         self.security_dispatch = max(0,self.security_dispatch-dt)
+        if self.surrendering and math.sqrt(sum(v*v for v in self.station)) > 10000:
+            self.cancel_surrender('you left the station area.')
         if self.station_hostilities[self.p.system]:
+            if self.surrendering: return
             self.update_station_lasers(dt)
             if self.enemy is None and self.security_dispatch <= 0:
                 self.dispatch_station_police()
@@ -2223,6 +2251,7 @@ class Game:
             if self.p.mines:
                 self.p.mines -= 1
                 self.cloaked = False
+                self.cancel_surrender('mine deployed.')
                 self.mine_objects.append([0.,0.,-40.,1.5,75.,'player'])
                 self.message = 'Mine deployed astern. Arming in 1.5 seconds. Keep clear!'
             else: self.message = 'No mines aboard. Buy them in outfitting.'
@@ -2284,6 +2313,7 @@ class Game:
             elif not self.p.missiles: self.message = 'No missiles. Buy replacements at a station.'
             else:
                 self.cloaked = False
+                self.cancel_surrender('missile fired.')
                 self.p.missiles -= 1
                 self.destroy_enemy()
         if k == ord('a'):
@@ -2400,6 +2430,7 @@ class Game:
         self.p.deep_space = system is None
         if system is not None: self.p.system = system
         self.security_elapsed = self.security_dispatch = 0.
+        self.surrendering = False
         self.station_laser_warning,self.station_laser_timer = False,15.
         self.enemy_police_system = None
         self.security_warning = 0
@@ -2964,6 +2995,7 @@ class Game:
             self.message = 'No rear laser fitted. U opens outfitting when docked.'
             return
         self.cloaked = False
+        self.cancel_surrender('weapons fired.')
         weapon = 'pulse' if self.rear_view else self.p.laser
         delay,power = LASERS[weapon]
         self.cooldown,self.laser_flash = delay,.09
@@ -3227,7 +3259,7 @@ class Game:
             groups=[('Flight', [('Thrust W',ord('w'),True),('Brake S',ord('s'),True),('Fire Spc',32,True),('Left',LEFT,True),('Up',UP,True),('Right',RIGHT,True),('Roll Q',ord('q'),True),('Down',DOWN,True),('Roll E',ord('e'),True)]),
                 ('Nav',[('Nav G',ord('g'),False),('Hold jump',ord('h'),True),('Cruise',ord('t'),False),('Station',ord('d'),False),('Planet',ord('p'),False),('Rocks',ord('a'),False),('Sun',ord('j'),False),('Scoop',ord('o'),False),('Guide ON' if self.course_assist else 'Guide Y',ord('y'),False)]),
                 ('Combat',[('Fire',32,True),('View 4',ord('4'),False),('Laser',ord('v'),False),('Missile',ord('m'),False),('Mine',ord('b'),False),('Jammer',ord('z'),False),('Cloak',ord('k'),False),('Target',ord('5'),False)]),
-                ('Safety',[('Radio 7',ord('7'),False),('Autodock',ord('c'),False),('Skills',ord('8'),False),('Distress',ord('6'),False),('Fine ON' if self.fine_control else 'Fine I',ord('i'),False)])]
+                ('Safety',[('Surrender 7' if not self.p.deep_space and self.station_hostilities[self.p.system] and self.arrest_pending() and not self.surrendering else 'Radio 7',ord('7'),False),('Autodock',ord('c'),False),('Skills',ord('8'),False),('Distress',ord('6'),False),('Fine ON' if self.fine_control else 'Fine I',ord('i'),False)])]
             d.fill(30,105,350,270,(5,16,27));d.rect(30,105,350,270,GREEN)
             d.text(40,112,'FLIGHT CONTROLS',GOLD)
             for i,(title,_) in enumerate(groups):
