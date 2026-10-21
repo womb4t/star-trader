@@ -72,7 +72,23 @@ fi
 
 "$python" "$source_dir/install.py"
 app="$HOME/Applications/Star Trader.app"
-# The bundle holds a copy of Python's app binary; re-sign it ad hoc so its signature matches this bundle.
-codesign --force --sign - "$app" >/dev/null 2>&1 || echo 'Note: could not sign the app bundle; if it will not open, run the game with the command above.'
+# The bundle holds a copy of Python's app binary. Its original signature binds Python.app's
+# Info.plist, so macOS kills it here: re-sign it ad hoc first, then the bundle around it.
+interpreter="$app/Contents/MacOS/Star Trader"
+signed=1
+if [[ -f "$interpreter" ]]; then
+  codesign --force --sign - "$interpreter" >/dev/null 2>&1 || signed=0
+fi
+codesign --force --sign - "$app" >/dev/null 2>&1 || signed=0
+if ((signed)) && codesign --verify --deep --strict "$app" >/dev/null 2>&1; then
+  echo 'App bundle signed.'
+elif [[ -f "$interpreter" ]]; then
+  # Fall back to running Python directly: the Dock then shows Python, but the game opens.
+  rm -f "$interpreter"
+  game="${XDG_DATA_HOME:-$HOME/.local/share}/star-trader/star_trader.py"
+  printf '#!/bin/sh\nexec "%s" "%s" "$@"\n' "$python" "$game" > "$app/Contents/MacOS/star-trader"
+  codesign --force --sign - "$app" >/dev/null 2>&1 || true
+  echo 'Note: could not sign the app bundle, so the Dock will show Python instead of Star Trader.'
+fi
 # Finder caches app icons; touching the bundle makes it pick up a new one.
 touch "$app"
