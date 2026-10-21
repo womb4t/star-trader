@@ -1317,6 +1317,14 @@ class Game:
         self.message = f'SURRENDER VOID: {reason} Police response resumes!'
         self.alert = dict(text=self.message,remaining=5.,elapsed=0.)
 
+    def systems_in_range(self):
+        return [j for j in range(len(SYSTEMS)) if j != self.p.system and hyperspace_cost(galactic_distance(self.p.position,coordinates(j))) <= self.p.fuel]
+
+    def best_sale_in_range(self, good):
+        """Highest sale price for a commodity among systems reachable on the fuel aboard."""
+        offers = [(quote(j,good,False),j) for j in self.systems_in_range()]
+        return max(offers) if offers else None
+
     def in_patrol_zone(self):
         if self.p.deep_space or PROFILES[self.p.system][0] in ('Anarchy','Feudal') or self.station_hostilities[self.p.system]: return False
         return math.sqrt(sum(v*v for v in self.station)) <= PATROL_RADIUS
@@ -3692,14 +3700,20 @@ class Game:
         elif self.mode in ('market','outfit'):
             if self.mode == 'market':
                 d.text(35,85,'ORBITAL EXCHANGE / '+SYSTEMS[p.system][1].upper())
-                for x,label in [(35,'COMMODITY'),(280,'BUY'),(380,'SELL'),(480,'STOCK'),(580,'HOLD')]:
+                for x,label in [(35,'COMMODITY'),(270,'BUY'),(340,'SELL'),(415,'STOCK'),(495,'HOLD'),(565,'BEST IN RANGE')]:
                     d.text(x,130,label)
                 for i,g in enumerate(GOODS):
                     color = GOLD if i == self.selected else GREEN
                     d.text(35,170+i*35,('> ' if i == self.selected else '  ')+g+(' *' if i in ILLEGAL else ''),color)
-                    for x,value in [(280,quote(p.system,i)),(380,quote(p.system,i,False)),(480,p.stock[p.system][i]),(580,p.cargo[i])]:
+                    for x,value in [(270,quote(p.system,i)),(340,quote(p.system,i,False)),(415,p.stock[p.system][i]),(495,p.cargo[i])]:
                         d.text(x,170+i*35,str(value),color)
+                    best = self.best_sale_in_range(i)
+                    if best:
+                        price,system = best
+                        d.text(565,170+i*35,f'{price:>3} {SYSTEMS[system][0][:7]}',(120,220,140) if price > quote(p.system,i) else (120,140,150))
+                    else: d.text(565,170+i*35,'-',(120,140,150))
                 d.text(35,470,'BUY = you pay. * Contraband sales pay Crymto (CYM).')
+                d.text(35,500,'BEST IN RANGE: top sale price at systems your fuel can reach.',(135,175,185))
             else:
                 d.text(35,85,f'SHIP OUTFITTING / LOCAL TECH {TECH[p.system]} / U market')
                 start = max(0,min(self.shop_selected-4,len(EQUIPMENT)-8))

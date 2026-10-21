@@ -1025,6 +1025,18 @@ class GameplayTests(unittest.TestCase):
         self.assertGreater(math.sqrt(sum(v*v for v in g.station)),st.PATROL_RADIUS)
         self.assertFalse(g.in_patrol_zone())
 
+    def test_market_shows_best_sale_within_fuel_range(self):
+        g = self.game
+        g.p.fuel = 7
+        reach = g.systems_in_range()
+        self.assertTrue(reach)
+        self.assertNotIn(g.p.system,reach)
+        price,system = g.best_sale_in_range(3)
+        self.assertIn(system,reach)
+        self.assertEqual(price,max(st.quote(j,3,False) for j in reach))
+        g.p.fuel = 0
+        self.assertIsNone(g.best_sale_in_range(3))
+
     def test_can_pass_station_at_safe_distance_and_reverse(self):
         g = self.game
         g.launch(); g.station = [500,0,66]; g.speed = 50
