@@ -72,23 +72,36 @@ fi
 
 "$python" "$source_dir/install.py"
 app="$HOME/Applications/Star Trader.app"
-# The bundle holds a copy of Python's app binary. Its original signature binds Python.app's
-# Info.plist, so macOS kills it here: re-sign it ad hoc first, then the bundle around it.
 interpreter="$app/Contents/MacOS/Star Trader"
-signed=1
+game="${XDG_DATA_HOME:-$HOME/.local/share}/star-trader/star_trader.py"
+works=1
 if [[ -f "$interpreter" ]]; then
-  codesign --force --sign - "$interpreter" >/dev/null 2>&1 || signed=0
+  # The bundle holds a copy of Python's app binary. Some Pythons (Apple's Command Line Tools)
+  # find their library relative to where that binary lives; point those links at the real files.
+  original="$("$python" -c 'import sys, pathlib; print(pathlib.Path(sys.base_prefix)/"Resources/Python.app/Contents/MacOS/Python")')"
+  while read -r dependency; do
+    relative="${dependency#@executable_path/}"
+    relative="${relative#@loader_path/}"
+    target="$("$python" -c 'import os, sys; print(os.path.realpath(os.path.join(os.path.dirname(sys.argv[1]), sys.argv[2])))' "$original" "$relative")"
+    install_name_tool -change "$dependency" "$target" "$interpreter" 2>/dev/null || works=0
+  done < <(otool -L "$interpreter" | awk 'NR > 1 && ($1 ~ /^@executable_path\// || $1 ~ /^@loader_path\//) {print $1}')
+  # Its original signature binds Python.app's Info.plist, so macOS would kill it here:
+  # re-sign it ad hoc first, then the bundle around it.
+  codesign --force --sign - "$interpreter" >/dev/null 2>&1 || works=0
+  codesign --force --sign - "$app" >/dev/null 2>&1 || works=0
+  codesign --verify --deep --strict "$app" >/dev/null 2>&1 || works=0
+  # Signing can pass while the binary still cannot start, so check it really runs.
+  ((works)) && "$interpreter" -c 'import ctypes, json, ssl' >/dev/null 2>&1 || works=0
 fi
-codesign --force --sign - "$app" >/dev/null 2>&1 || signed=0
-if ((signed)) && codesign --verify --deep --strict "$app" >/dev/null 2>&1; then
-  echo 'App bundle signed.'
-elif [[ -f "$interpreter" ]]; then
+if [[ -f "$interpreter" ]] && ((works)); then
+  echo 'App bundle signed and checked.'
+else
   # Fall back to running Python directly: the Dock then shows Python, but the game opens.
   rm -f "$interpreter"
-  game="${XDG_DATA_HOME:-$HOME/.local/share}/star-trader/star_trader.py"
   printf '#!/bin/sh\nexec "%s" "%s" "$@"\n' "$python" "$game" > "$app/Contents/MacOS/star-trader"
+  chmod 755 "$app/Contents/MacOS/star-trader"
   codesign --force --sign - "$app" >/dev/null 2>&1 || true
-  echo 'Note: could not sign the app bundle, so the Dock will show Python instead of Star Trader.'
+  echo 'Note: using Python directly, so the Dock may show Python instead of Star Trader.'
 fi
 # Finder caches app icons; touching the bundle makes it pick up a new one.
 touch "$app"

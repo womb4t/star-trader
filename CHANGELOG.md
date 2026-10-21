@@ -1,3 +1,13 @@
+# 0.5.1 — Mac launch fix for Apple's Python
+
+- Fix the Mac app crashing at launch when the installer used Apple's Command Line Tools Python (common on new Macs): its library link is now repointed after copying, and the installer checks that the bundled interpreter really starts, falling back to launching Python directly if not.
+
+If Star Trader would not open on your Mac, run this once in Terminal:
+
+```bash
+cd "$HOME/star-trader" && git pull --ff-only && bash install-mac.sh
+```
+
 # 0.5.0 — shared universe preview, Mac support, law and order
 
 - **See other pilots online.** Players on the same server see each other's ships, names and radar contacts in every system. This is an early preview: no combat, trading or collisions between players yet, and positions are reported by each game, not checked by the server.

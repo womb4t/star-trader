@@ -22,7 +22,7 @@ import shutil
 import subprocess
 import textwrap
 
-VERSION = '0.5.0'
+VERSION = '0.5.1'
 HOSTILITY_COOLDOWN_SECONDS = 30*60
 STATION_POLICE_CAPACITY = 6
 # Career points needed for each commander rank: kills, trade profit and hyperspace jumps all count.
