@@ -77,6 +77,23 @@ class GameplayTests(unittest.TestCase):
                 self.assertTrue(g.running)
                 self.assertEqual(g.mode,base)
 
+    def test_new_pilots_see_the_introduction_once(self):
+        from unittest.mock import MagicMock
+        g = st.Game(MagicMock())
+        self.assertEqual(g.mode,'intro')
+        for _ in range(len(g.INTRO)-1): g.key(13)
+        self.assertEqual(g.intro_page,len(g.INTRO)-1)
+        g.key(LEFT := st.LEFT); self.assertEqual(g.intro_page,len(g.INTRO)-2)
+        g.key(13); g.key(13)
+        self.assertEqual(g.mode,'market')
+        self.assertTrue(g.p.intro_seen)
+        again = st.Game(MagicMock())
+        self.assertEqual(again.mode,'market')
+        again.open_utility('menu'); again.choose_menu_action(len(again.menu_actions())-1)
+        self.assertEqual((again.mode,again.intro_page),('intro',0))
+        again.key(8)
+        self.assertEqual(again.mode,'market')
+
     def test_backspace_still_deletes_in_text_fields(self):
         g = st.Game(None)
         for mode,attr in (('notes','notes'),('rename','name')):

@@ -22,7 +22,7 @@ import shutil
 import subprocess
 import textwrap
 
-VERSION = '0.6.2'
+VERSION = '0.6.3'
 HOSTILITY_COOLDOWN_SECONDS = 30*60
 STATION_POLICE_CAPACITY = 6
 # Career points needed for each commander rank: kills, trade profit and hyperspace jumps all count.
@@ -162,6 +162,7 @@ class Pilot:
         self.bank_balance = 0
         self.storage = [dict(owned=False,rented_until=0.,cargo=[0]*len(GOODS)) for _ in SYSTEMS]
         self.prison = None
+        self.intro_seen = False
 
     @property
     def career_points(self):
@@ -289,6 +290,7 @@ class Pilot:
         if type(self.notes) is not str or len(self.notes)>4000: raise ValueError('notes')
         if type(self.name) is not str or len(self.name)>24 or not all(c.isprintable() for c in self.name): raise ValueError('name')
         if not integer(self.trade_profit) or not integer(self.jumps): raise ValueError('career')
+        if type(self.intro_seen) is not bool: raise ValueError('introduction')
         if self.prison is not None:
             j = self.prison
             if not isinstance(j,dict) or not integer(j.get('system')) or j['system'] >= len(SYSTEMS): raise ValueError('prison')
@@ -612,6 +614,8 @@ class Game:
         self.menu_selected = 0
         self.notes_scroll = 0
         self.rename_return = 'market'
+        self.intro_return = 'market'
+        self.intro_page = 0
         self.text_selection_all = False
         self.text_selection_mode = None
         self.credit_code_text = ""
@@ -629,6 +633,8 @@ class Game:
         if self.p.prison:
             self.mode = 'prison'
             self.update_prison()
+        elif not self.p.intro_seen and self.mode == 'market' and display is not None:
+            self.open_utility('intro')
 
     def save(self):
         self.checkpoint()
@@ -697,7 +703,7 @@ class Game:
         for _ in range(6):
             if mode in ('market','outfit','departure','launch_warning','bank','jobs','exchange','trade_deal','redeem','prison'): return 'market'
             if mode in ('flight','cruise','hyperspace','dead'): return mode
-            attr = {'money':'money_return','vms':'vms_return','help':'help_return','updates':'update_return','map':'map_return','menu':'menu_return','notes':'notes_return','rename':'rename_return','feedback':'feedback_return','planet_profile':'map_return','engineering':'engineering_return'}.get(mode)
+            attr = {'money':'money_return','vms':'vms_return','help':'help_return','updates':'update_return','map':'map_return','menu':'menu_return','notes':'notes_return','rename':'rename_return','intro':'intro_return','feedback':'feedback_return','planet_profile':'map_return','engineering':'engineering_return'}.get(mode)
             if not attr: return 'flight'
             mode = getattr(self,attr,'flight')
         return 'flight'
@@ -1800,6 +1806,48 @@ class Game:
         waiting = self.feedback_waiting()
         if waiting: d.text(35,610,f'{waiting} report{"s" if waiting > 1 else ""} waiting to send.',GOLD)
 
+    INTRO = [
+        ('WELCOME, COMMANDER',[
+            'You are a freelance starship commander. You start docked at Halvora station with a small trading ship, 150 credits, a pulse laser and three missiles. Nobody knows your name yet.',
+            'Eight star systems lie within reach, each with its own government, economy and technology. Lawful stations are patrolled and police their space; Anarchy and Feudal ports are frontier territory where anything goes.',
+            'Set your commander name any time under Menu, Commander name.']),
+        ('THE POINT OF THE GAME',[
+            'Make your fortune and your name. Buy low and sell high, upgrade your ship, and climb the ranks from Newbie to Legend. Kills, trading profit and hyperspace jumps all count.',
+            'Trade honestly, smuggle contraband for Crymto, or hunt pirates for bounties. Break the law and you face fines, station police and even prison.',
+            'Online, other commanders fly in the same universe: you will see their ships on your scanner.']),
+        ('HOW TO PLAY',[
+            'Docked: select cargo with UP / DOWN, then B buys and S sells. Food is cheap on agricultural worlds and sells well at industrial ones.',
+            'Money (9), Nav (G), VMS (X) and Menu run along the top. VMS refuels, repairs and fits equipment.',
+            'L launches. In flight W / S set the throttle, the arrows steer and Q / E roll. In Nav, lock a destination, then hold H for 3 seconds to jump. Watch your fuel.',
+            'Near a station press 7 for docking clearance, then fly slowly into the slot, matching its roll. Within 5,000 m of a lawful station, pirates leave you alone.',
+            'BACKSPACE goes back. ESC saves and closes the game at any time. Menu, Controls has the full pilot handbook.']),
+        ('BUGS AND SUGGESTIONS',[
+            'Star Trader is being built with its players. Found a bug or have an idea? Press 0 (or Menu, Report a bug), choose Bug report or Suggestion, describe it and click Log report.',
+            'Each report is logged on your computer and reaches the developers the next time you play online.',
+            'The game updates itself when a new version is released, so your idea might arrive in the next one. Good luck, Commander.'])]
+
+    def intro_next(self):
+        if self.intro_page < len(self.INTRO)-1:
+            self.intro_page += 1
+            return
+        self.p.intro_seen = True
+        self.mode = self.intro_return
+        self.message = 'Welcome aboard, Commander. Press 0 any time to send a suggestion.'
+        self.checkpoint()
+
+    def draw_intro(self):
+        d = self.d
+        title,paragraphs = self.INTRO[self.intro_page]
+        d.text(35,85,title,GOLD)
+        d.text(900,85,f'{self.intro_page+1} / {len(self.INTRO)}',GOLD)
+        y = 140
+        for paragraph in paragraphs:
+            for line in textwrap.wrap(paragraph,88):
+                d.text(45,y,line)
+                y += 26
+            y += 16
+        d.text(45,615,'ENTER or RIGHT continues. LEFT goes back a page. You can reopen this from Menu.',(135,175,185))
+
     def finish_rename(self):
         self.p.name = self.p.name.strip()
         self.mode = self.rename_return
@@ -1910,6 +1958,8 @@ class Game:
             self.notes_return,self.mode = self.mode,'notes'
         elif target == 'rename':
             self.rename_return,self.mode = self.mode,'rename'
+        elif target == 'intro':
+            self.intro_return,self.mode,self.intro_page = self.mode,'intro',0
         elif target == 'updates':
             self.update_return,self.mode = self.mode,'updates'
         elif target == 'feedback':
@@ -1928,7 +1978,8 @@ class Game:
             ('Check updates / 2',lambda:self.open_utility('updates')),
             ('Fullscreen / 3',self.mouse_fullscreen),
             ('Save and quit',self.request_exit),
-            ('Commander name',lambda:self.open_utility('rename'))]
+            ('Commander name',lambda:self.open_utility('rename')),
+            ('Introduction',lambda:self.open_utility('intro'))]
 
     def choose_menu_action(self, index):
         self.mode = self.menu_return
@@ -1943,7 +1994,7 @@ class Game:
         d.text(35,155,remote.status if remote else 'Offline game: progress saved on this laptop.',status_color)
         presence = getattr(self,'presence',None)
         if presence: d.text(35,180,presence.status,(140,185,255))
-        descriptions = ['Key bindings and flight help','Your saved private notes','Bug reports and suggestions','Check for game updates','Toggle display size','Save current state and close','Name shown on your status panel']
+        descriptions = ['Key bindings and flight help','Your saved private notes','Bug reports and suggestions','Check for game updates','Toggle display size','Save current state and close','Name shown on your status panel','Who you are and how to play']
         for i,description in enumerate(descriptions):
             x,y = 35+(i%2)*515,200+(i//2)*110
             d.text(x+10,y+42,description,(135,175,185))
@@ -1985,6 +2036,10 @@ class Game:
             elif k == 27: self.mode = self.notes_return; self.checkpoint()
             elif k == 8: self.p.notes = self.p.notes[:-1]
             elif k == 13: self.text_input('\n')
+            return
+        if self.mode == 'intro':
+            if k in (13,RIGHT,32): self.intro_next()
+            elif k == LEFT: self.intro_page = max(0,self.intro_page-1)
             return
         if self.mode == 'prison':
             if k == ord('w'): self.prison_work()
@@ -3169,7 +3224,7 @@ class Game:
         self.buttons = []
         self.footer_actions = []
         d = self.d
-        if self.mode not in ('feedback','notes','redeem','rename','menu','prison'):
+        if self.mode not in ('feedback','notes','redeem','rename','menu','prison','intro'):
             self.mouse_button(155,18,95,'Money',action=lambda:self.open_hub('money'))
             self.mouse_button(365,18,75,'VMS',action=lambda:self.open_hub('vms'))
             self.mouse_button(260,18,95,'Nav',action=self.open_navigation)
@@ -3222,6 +3277,9 @@ class Game:
             self.mouse_button(385,315,160,'Select all',action=lambda:self.handle_clipboard('select_all'))
             self.mouse_button(35,674,490,'Redeem code',action=self.redeem_credit_code)
             self.mouse_button(550,674,490,'Return to Money',action=lambda:setattr(self,'mode','money'))
+        elif self.mode == 'intro':
+            if self.intro_page: self.mouse_button(35,674,300,'Previous',LEFT)
+            self.mouse_button(735,674,300,'Start flying' if self.intro_page == len(self.INTRO)-1 else 'Next',13)
         elif self.mode == 'prison':
             self.mouse_button(35,674,490,'Work a shift W',ord('w'))
             self.mouse_button(550,674,490,'Bribe a guard B',ord('b'))
@@ -3333,7 +3391,7 @@ class Game:
             self.message = 'Recovery offers declined. No salvage payment made.'
         else:
             returns = {'map':'map_return','help':'help_return','updates':'update_return',
-                       'menu':'menu_return','notes':'notes_return','rename':'rename_return','feedback':'feedback_return',
+                       'menu':'menu_return','notes':'notes_return','rename':'rename_return','intro':'intro_return','feedback':'feedback_return',
                        'money':'money_return','vms':'vms_return','outfit':'outfit_return',
                        'engineering':'engineering_return','launch_warning':'launch_return'}
             fixed = {'planet_profile':'map','redeem':'money','bank':'money','jobs':'money',
@@ -3424,6 +3482,8 @@ class Game:
             self.draw_money()
         elif self.mode == 'notes':
             self.draw_notepad()
+        elif self.mode == 'intro':
+            self.draw_intro()
         elif self.mode == 'prison':
             self.draw_prison()
         elif self.mode == 'rename':

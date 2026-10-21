@@ -1,3 +1,7 @@
+# 0.6.3 — game introduction
+
+- New pilots get a four-page introduction: who you are, the point of the game, how to play, and how to send bug reports and suggestions. Reopen it any time from Menu, Introduction.
+
 # 0.6.2 — fallback server addresses
 
 - Online play tries each address in `fallback_servers` (Connection settings file) when the main server address does not answer, so a host's home-network name keeps working when the public link is down.
