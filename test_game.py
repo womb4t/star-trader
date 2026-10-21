@@ -92,7 +92,7 @@ class GameplayTests(unittest.TestCase):
         g = self.game
         g.mode = 'flight'
         g.nav = 'course'
-        g.p.waypoint = dict(position=st.coordinates(1),system=1,name='Zaonce')
+        g.p.waypoint = dict(position=st.coordinates(1),system=1,name='Corvant')
         g.key(ord('y'))
         g.update(.1)
         self.assertFalse(g.course_assist)
@@ -510,14 +510,14 @@ class GameplayTests(unittest.TestCase):
         g = self.game
         g.p.system = 4  # Anarchy: fines do not hold the ship.
         g.p.fine,g.p.fuel = 1200,7
-        g.p.waypoint = dict(name='Zaonce',position=st.coordinates(1),system=1)
+        g.p.waypoint = dict(name='Corvant',position=st.coordinates(1),system=1)
         g.key(ord('l'))
         self.assertEqual(g.mode,'launch_warning')
         self.assertTrue(any('ARREST' in warning for warning in g.launch_warnings()))
         g.station_hostilities[6] = True
-        g.p.waypoint = dict(name='Orerve',position=st.coordinates(6),system=6)
+        g.p.waypoint = dict(name='Duskholt',position=st.coordinates(6),system=6)
         self.assertTrue(any('REFUSE' in warning for warning in g.launch_warnings()))
-        g.p.waypoint = dict(name='Zaonce',position=st.coordinates(1),system=1)
+        g.p.waypoint = dict(name='Corvant',position=st.coordinates(1),system=1)
         g.key(ord('f'))
         self.assertEqual(g.mode,'launch_warning')
         g.key(ord('g'))
@@ -608,13 +608,13 @@ class GameplayTests(unittest.TestCase):
         self.assertIn('already redeemed',g.message)
         g.mouse_back()
         g.key(ord('-'))
-        g.text_input('Buy medicine on Zaonce.')
+        g.text_input('Buy medicine on Corvant.')
         g.key(13)
         g.text_input('Avoid hostile ports.')
         g.mouse_back()
         self.assertEqual(g.mode,'money')
         restored = st.Game(None)
-        self.assertEqual(restored.p.notes,'Buy medicine on Zaonce.\nAvoid hostile ports.')
+        self.assertEqual(restored.p.notes,'Buy medicine on Corvant.\nAvoid hostile ports.')
         self.assertIn('STAR-TEST-100K',restored.p.redeemed_credit_codes)
         self.assertEqual(restored.p.credits,100150)
 
@@ -683,7 +683,7 @@ class GameplayTests(unittest.TestCase):
         p.system,p.credits = 4,1000
         mine = next(i for i,item in enumerate(st.EQUIPMENT) if item[0] == 'mine')
         message = p.buy_equipment(mine)
-        self.assertIn('Riedquat is tech 3',message)
+        self.assertIn('Skarrow is tech 3',message)
         self.assertEqual((p.mines,p.credits),(0,1000))
         p.system = 0
         p.buy_equipment(mine)
@@ -920,7 +920,7 @@ class GameplayTests(unittest.TestCase):
     def test_search_and_coordinate_waypoints(self):
         g = self.game
         g.key(ord('g')); g.key(ord('/'))
-        for c in 'zaonce': g.key(ord(c))
+        for c in 'corvant': g.key(ord(c))
         g.key(13)
         self.assertEqual(g.p.waypoint['system'],1)
         self.assertEqual(g.p.waypoint['position'],st.coordinates(1))
@@ -946,7 +946,7 @@ class GameplayTests(unittest.TestCase):
 
     def test_cruise_costs_time_and_less_fuel_than_jump(self):
         g = self.game
-        g.launch(); g.p.waypoint = dict(name='Zaonce',position=st.coordinates(1),system=1)
+        g.launch(); g.p.waypoint = dict(name='Corvant',position=st.coordinates(1),system=1)
         dist = st.distance(0,1); initial = g.p.fuel
         g.begin_cruise()
         self.assertEqual(g.mode,'cruise')
@@ -962,7 +962,7 @@ class GameplayTests(unittest.TestCase):
 
     def test_cancel_cruise_and_jump_from_deep_space(self):
         g = self.game
-        g.launch(); g.p.waypoint = dict(name='Zaonce',position=st.coordinates(1),system=1)
+        g.launch(); g.p.waypoint = dict(name='Corvant',position=st.coordinates(1),system=1)
         g.begin_cruise(); g.update(20); position = g.p.position[:]
         g.key(ord('t'))
         self.assertEqual(g.mode,'flight')
@@ -1000,7 +1000,7 @@ class GameplayTests(unittest.TestCase):
         light.update(.5); heavy.update(.5)
         self.assertGreater(heavy.speed,light.speed)
         for g in (light,heavy):
-            g.p.waypoint = dict(name='Zaonce',position=st.coordinates(1),system=1)
+            g.p.waypoint = dict(name='Corvant',position=st.coordinates(1),system=1)
             g.begin_cruise()
         self.assertGreater(heavy.cruise['duration'],light.cruise['duration'])
         self.assertGreater(heavy.cruise['fuel'],light.cruise['fuel'])
@@ -1194,7 +1194,7 @@ class GameplayTests(unittest.TestCase):
     def test_hyperspace_requires_continuous_hold_and_cancels_without_jump_fuel(self):
         g = self.game
         g.launch(); g.speed = 0
-        g.p.waypoint = dict(name='Zaonce',position=st.coordinates(1),system=1)
+        g.p.waypoint = dict(name='Corvant',position=st.coordinates(1),system=1)
         fuel = g.p.fuel
         g.keys = {ord('h')}; g.key(ord('h'))
         g.update(1.5)
@@ -1217,13 +1217,13 @@ class GameplayTests(unittest.TestCase):
         g.update(1.11)
         self.assertEqual(g.p.system,1)
         self.assertIsNotNone(g.arrival)
-        self.assertEqual(g.arrival['name'],'Zaonce')
+        self.assertEqual(g.arrival['name'],'Corvant')
         g.update(5.1)
         self.assertIsNone(g.arrival)
 
     def test_charge_rechecks_fuel_and_cannot_be_started_while_docked(self):
         g = self.game
-        g.p.waypoint = dict(name='Zaonce',position=st.coordinates(1),system=1)
+        g.p.waypoint = dict(name='Corvant',position=st.coordinates(1),system=1)
         g.jump(); self.assertIsNone(g.jump_charge)
         g.launch(); g.speed = 0; g.keys = {ord('h')}; g.jump()
         g.p.fuel = 0
@@ -1237,7 +1237,7 @@ class GameplayTests(unittest.TestCase):
         g.launch(); g.speed = 0; g.key(ord('g')); g.target = 1
         g.keys = {ord('h')}; g.key(ord('h'))
         self.assertEqual(g.mode,'flight')
-        g.p.waypoint = dict(name='Diso',position=st.coordinates(2),system=2)
+        g.p.waypoint = dict(name='Meridel',position=st.coordinates(2),system=2)
         self.finish_jump(g)
         self.assertEqual(g.p.system,1)
         self.assertIsNone(g.jump_charge)
@@ -1273,7 +1273,7 @@ class GameplayTests(unittest.TestCase):
         g.target = 1; g.lock_waypoint(); g.launch()
         obj,label = g.active_navigation()
         self.assertEqual(g.nav,'course')
-        self.assertIn('Zaonce',label)
+        self.assertIn('Corvant',label)
         g.key(ord('d'))
         self.assertIs(g.active_navigation()[0],g.station)
         g.arrive(st.coordinates(1),1)
@@ -1290,7 +1290,7 @@ class GameplayTests(unittest.TestCase):
         self.assertEqual(g.mode,'launch_warning')
         g.mouse_back(); self.assertEqual(g.mode,'market')
         g.p.fuel = 2
-        g.p.waypoint = dict(name='Zaonce',position=st.coordinates(1),system=1)
+        g.p.waypoint = dict(name='Corvant',position=st.coordinates(1),system=1)
         g.key(ord('l')); self.assertEqual(g.mode,'launch_warning')
         g.key(ord('f')); self.assertEqual(g.p.fuel,7)
         self.assertEqual(g.mode,'market')
@@ -1383,7 +1383,7 @@ class GameplayTests(unittest.TestCase):
         g.update(.1)
         self.assertTrue(g.broken_down)
         self.assertEqual(g.speed,0)
-        g.p.waypoint = dict(name='Zaonce',position=st.coordinates(1),system=1)
+        g.p.waypoint = dict(name='Corvant',position=st.coordinates(1),system=1)
         g.jump(); self.assertIsNone(g.jump_charge)
         g.key(ord('8')); g.p.credits = 500
         with patch.object(st.random,'random',return_value=0): g.key(ord('r'))
@@ -1478,7 +1478,7 @@ class GameplayTests(unittest.TestCase):
 
     def test_fuel_warning_includes_approach_reserve_and_mouse_release_cancels_thrust(self):
         g = self.game
-        g.p.waypoint = dict(name='Zaonce',position=st.coordinates(1),system=1)
+        g.p.waypoint = dict(name='Corvant',position=st.coordinates(1),system=1)
         g.p.fuel = st.hyperspace_cost(st.distance(0,1))+.1
         g.request_launch(); self.assertEqual(g.mode,'launch_warning')
         g.mouse_back(); g.p.fuel = 7; g.launch(); g.speed = 0
@@ -1743,6 +1743,18 @@ class CommanderStatusTests(unittest.TestCase):
         pilot = st.Pilot()
         self.assertTrue(pilot.load())
         self.assertEqual((pilot.kills,pilot.trade_profit,pilot.jumps,pilot.name,pilot.rank),(3,0,0,'','Greenhorn'))
+
+    def test_saved_waypoints_and_courses_use_renamed_systems(self):
+        g = self.game
+        g.p.waypoint = dict(name='Corvant',position=st.coordinates(1),system=1)
+        g.mode = 'hyperspace'
+        g.jump_warp = dict(destination=dict(name='Corvant',position=st.coordinates(1),system=1),elapsed=0.)
+        g.checkpoint()
+        raw = st.SAVE.read_text().replace('Corvant','Zaonce')
+        st.SAVE.write_text(raw)
+        restored = st.Game(None)
+        self.assertEqual(restored.p.waypoint['name'],'Corvant')
+        self.assertEqual(restored.jump_warp['destination']['name'],'Corvant')
 
     def test_invalid_career_fields_are_rejected(self):
         for key,value in (('name','x'*25),('trade_profit',-1),('jumps',1.5),('cargo_paid',[0])):

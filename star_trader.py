@@ -60,10 +60,12 @@ LASERS = {'pulse': (0.30, 1), 'beam': (0.14, 1), 'military': (0.12, 2), 'mining'
 UP, DOWN, LEFT, RIGHT = 1073741906, 1073741905, 1073741904, 1073741903
 GREEN, GOLD, RED = (68, 227, 182), (255, 206, 113), (255, 112, 100)
 SYSTEMS = [
-    ('Lave', 'Agricultural', 0.15, 0.40), ('Zaonce', 'Industrial', 0.40, 0.20),
-    ('Diso', 'Agricultural', 0.34, 0.64), ('Leesti', 'Industrial', 0.60, 0.46),
-    ('Riedquat', 'Frontier', 0.76, 0.76), ('Tionisla', 'Industrial', 0.72, 0.16),
-    ('Orerve', 'Frontier', 0.14, 0.84), ('Reorte', 'Agricultural', 0.90, 0.43)]
+    ('Halvora', 'Agricultural', 0.15, 0.40), ('Corvant', 'Industrial', 0.40, 0.20),
+    ('Meridel', 'Agricultural', 0.34, 0.64), ('Brennix', 'Industrial', 0.60, 0.46),
+    ('Skarrow', 'Frontier', 0.76, 0.76), ('Velmora', 'Industrial', 0.72, 0.16),
+    ('Duskholt', 'Frontier', 0.14, 0.84), ('Ambrell', 'Agricultural', 0.90, 0.43)]
+# Earlier releases used other names; saved waypoints and courses are renamed on load.
+RENAMED_SYSTEMS = {'Lave':'Halvora','Zaonce':'Corvant','Diso':'Meridel','Leesti':'Brennix','Riedquat':'Skarrow','Tionisla':'Velmora','Orerve':'Duskholt','Reorte':'Ambrell'}
 PROFILES = [
     ('Dictatorship', 4.2, 6400), ('Corporate state', 5.8, 9100),
     ('Democracy', 3.1, 5800), ('Confederacy', 4.9, 7600),
@@ -260,6 +262,8 @@ class Pilot:
             for key in vars(candidate):
                 if key in data: setattr(candidate, key, data[key])
             if 'position' not in data: candidate.position = coordinates(candidate.system)
+            if isinstance(candidate.waypoint,dict) and candidate.waypoint.get('name') in RENAMED_SYSTEMS:
+                candidate.waypoint['name'] = RENAMED_SYSTEMS[candidate.waypoint['name']]
             if len(candidate.cargo) == 6: candidate.cargo += [0] * (len(GOODS)-6)
             if len(candidate.cargo_paid) == 6: candidate.cargo_paid += [0] * (len(GOODS)-6)
             if isinstance(candidate.stock,list):
@@ -744,6 +748,10 @@ class Game:
             if state.get('enemy') is not None and (not isinstance(state['enemy'],list) or len(state['enemy']) != 5): raise ValueError('contact')
             if mode == 'cruise' and (not isinstance(state.get('cruise'),dict) or state['cruise'].get('duration',0) <= 0): raise ValueError('cruise')
             if mode == 'hyperspace' and not isinstance(state.get('jump_warp'),dict): raise ValueError('warp')
+            for key in ('cruise','jump_warp'):
+                destination = state.get(key,{}).get('destination') if isinstance(state.get(key),dict) else None
+                if isinstance(destination,dict) and destination.get('name') in RENAMED_SYSTEMS:
+                    destination['name'] = RENAMED_SYSTEMS[destination['name']]
             # Only restore fields already belonging to the simulation; never arbitrary attributes.
             allowed = set(vars(self)) - {'d','p','keys','buttons','updates','running','_message','alert','_restoring'}
             for key,value in state.items():
@@ -3302,7 +3310,7 @@ class Game:
     def help_sections(self):
         return [
             ('Quick start',[
-                ('First trade','B / S','Buy food on Lave. Sell it at an industrial port such as Zaonce.'),
+                ('First trade','B / S','Buy food on Halvora. Sell it at an industrial port such as Corvant.'),
                 ('Mouse flight controls','Flight controls','Open the bottom-left panel. Flight, Nav, Combat and Safety group the actions.'),
                 ('Plan a trip','G / ENTER','Choose a planet or coordinate, check fuel, then lock your course.'),
                 ('Leaving the station','L','Request clearance, wait for approval, then launch. Read fuel warnings.'),

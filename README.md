@@ -58,7 +58,7 @@ The updater checks the official origin and clean `main` branch, fetches, fast-fo
 
 ## Play
 
-You start docked with 150 credits, a full 7-unit fuel tank, a pulse laser, three missiles and a 20-tonne hold. Food is cheap on agricultural Lave and more valuable on industrial Zaonce. Industrial exports tend to sell well on agricultural worlds. Keep enough credits for fuel and repairs.
+You start docked with 150 credits, a full 7-unit fuel tank, a pulse laser, three missiles and a 20-tonne hold. Food is cheap on agricultural Halvora and more valuable on industrial Corvant. Industrial exports tend to sell well on agricultural worlds. Keep enough credits for fuel and repairs.
 
 | Screen | Controls |
 | --- | --- |

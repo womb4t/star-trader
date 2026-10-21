@@ -122,7 +122,7 @@ class ProgressTests(unittest.TestCase):
         client = self.client(); client.prepare()
         with patch.object(game,'SAVE',client.save_path):
             original = game.Game(None)
-            original.p.notes = 'Meet at Diso'
+            original.p.notes = 'Meet at Meridel'
             original.p.crymto = 321
             original.station_hostilities[2] = True
             original.station_hostile_until[2] = 12345678900.
@@ -131,7 +131,7 @@ class ProgressTests(unittest.TestCase):
             original.checkpoint()
             client.close()
         saved = self.store.read(self.token)['save']
-        self.assertEqual(saved['notes'],'Meet at Diso')
+        self.assertEqual(saved['notes'],'Meet at Meridel')
         self.assertEqual(saved['crymto'],321)
         self.assertIn('_session',saved)
         other_token = self.root/'other-device.token'; other_token.write_text(self.token)
@@ -140,7 +140,7 @@ class ProgressTests(unittest.TestCase):
         second.prepare()
         with patch.object(game,'SAVE',second.save_path):
             restored = game.Game(None)
-            self.assertEqual(restored.p.notes,'Meet at Diso')
+            self.assertEqual(restored.p.notes,'Meet at Meridel')
             self.assertEqual(restored.p.crymto,321)
             self.assertTrue(restored.station_hostilities[2])
             self.assertEqual(restored.station_hostile_until[2],12345678900.)
