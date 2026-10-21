@@ -21,7 +21,7 @@ class GameplayTests(unittest.TestCase):
         modes = ('market','flight','cruise','hyperspace','dead','menu','notes','redeem',
                  'money','vms','outfit','help','updates','map','planet_profile','jobs',
                  'bank','exchange','trade_deal','departure','engineering','launch_warning',
-                 'distress','feedback')
+                 'distress','feedback','rename')
         for mode in modes:
             with self.subTest(mode=mode):
                 st.SAVE.unlink(missing_ok=True)
@@ -1649,6 +1649,98 @@ class GameplayTests(unittest.TestCase):
         self.assertEqual(resumed.p.credits,150)
         self.assertEqual(resumed.p.bank_balance,100)
 
+
+class CommanderStatusTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.original_save = st.SAVE
+        st.SAVE = Path(self.tmp.name) / 'save.json'
+        self.game = st.Game(None)
+
+    def tearDown(self):
+        st.SAVE = self.original_save
+        self.tmp.cleanup()
+
+    def test_rank_ladder_counts_kills_trade_and_jumps(self):
+        p = self.game.p
+        self.assertEqual(p.rank,'Newbie')
+        self.assertEqual(p.next_rank,(50,'Greenhorn'))
+        p.kills = 2
+        self.assertEqual(p.rank,'Greenhorn')
+        p.kills, p.trade_profit, p.jumps = 0, 2500, 0
+        self.assertEqual(p.rank,'Operator')
+        p.trade_profit, p.jumps = 0, 150
+        self.assertEqual(p.rank,'Hand')
+        p.kills = 2000
+        self.assertEqual((p.rank,p.next_rank),('Legend',None))
+
+    def test_trade_profit_uses_purchase_price_and_ignores_losses(self):
+        p = self.game.p
+        p.credits = 1000
+        p.system = min(range(8),key=lambda i:st.quote(i,3,True))
+        p.trade(3,True); p.trade(3,True)
+        paid = st.quote(p.system,3,True)
+        self.assertEqual(p.cargo_paid[3],paid*2)
+        p.trade(3,False)
+        self.assertEqual(p.trade_profit,0)
+        p.system = next(i for i in range(8) if st.quote(i,3,False) > paid)
+        p.trade(3,False)
+        self.assertEqual(p.trade_profit,st.quote(p.system,3,False)-paid)
+        self.assertEqual(p.cargo_paid[3],0)
+
+    def test_cargo_without_purchase_price_counts_as_full_profit(self):
+        p = self.game.p
+        p.cargo[2] = 1
+        p.trade(2,False)
+        self.assertEqual(p.trade_profit,st.quote(p.system,2,False))
+
+    def test_hyperspace_arrival_counts_a_jump(self):
+        g = self.game
+        g.mode = 'hyperspace'
+        g.jump_warp = dict(destination=dict(name='Test',position=st.coordinates(1),system=1),elapsed=1.6)
+        g.update(.01)
+        self.assertEqual(g.p.jumps,1)
+
+    def test_wanted_level_from_fines_and_hostile_stations(self):
+        g = self.game
+        self.assertEqual(g.wanted_level(),0)
+        g.p.fine = 150
+        self.assertEqual(g.wanted_level(),2)
+        g.p.fine = 5000
+        self.assertEqual(g.wanted_level(),5)
+        g.p.fine = 300
+        g.station_hostilities[1] = True
+        g.station_hostile_until[1] = st.time.time()+600
+        self.assertEqual(g.wanted_level(),4)
+
+    def test_commander_name_entry_saves_and_prefers_server_account(self):
+        g = self.game
+        g.open_utility('rename')
+        g.text_input('  Kestrel\nOne')
+        g.key(13)
+        self.assertEqual(g.p.name,'KestrelOne')
+        self.assertEqual(json.loads(st.SAVE.read_text())['name'],'KestrelOne')
+        self.assertEqual(g.commander_name(),'KestrelOne')
+        g.remote_save = type('Remote',(),dict(player_name='iMacPilot'))()
+        self.assertEqual(g.commander_name(),'iMacPilot')
+
+    def test_older_saves_load_with_new_career_fields(self):
+        g = self.game
+        g.p.kills = 3
+        g.p.save()
+        data = json.loads(st.SAVE.read_text())
+        for key in ('name','trade_profit','cargo_paid','jumps'): del data[key]
+        st.SAVE.write_text(json.dumps(data))
+        pilot = st.Pilot()
+        self.assertTrue(pilot.load())
+        self.assertEqual((pilot.kills,pilot.trade_profit,pilot.jumps,pilot.name,pilot.rank),(3,0,0,'','Greenhorn'))
+
+    def test_invalid_career_fields_are_rejected(self):
+        for key,value in (('name','x'*25),('trade_profit',-1),('jumps',1.5),('cargo_paid',[0])):
+            with self.subTest(key=key):
+                pilot = st.Pilot()
+                setattr(pilot,key,value)
+                with self.assertRaises(ValueError): pilot.validate()
 
 
 if __name__ == '__main__':

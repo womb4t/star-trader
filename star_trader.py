@@ -24,6 +24,10 @@ import textwrap
 VERSION = '0.5.0'
 HOSTILITY_COOLDOWN_SECONDS = 30*60
 STATION_POLICE_CAPACITY = 6
+# Career points needed for each commander rank: kills, trade profit and hyperspace jumps all count.
+RANKS = [(0,'Newbie'),(50,'Greenhorn'),(250,'Operator'),(750,'Hand'),(2000,'Veteran'),(5000,'Ace'),(12000,'Vanguard'),(30000,'Legend')]
+# Outstanding fines (cr) at which the wanted level reaches 1..5; each hostile station adds one more.
+WANTED_FINES = [1,100,300,600,1000]
 DOCK_ROLL_TOLERANCE = math.radians(14)
 CRUISE_SECONDS_PER_LY = 45
 W, H = 1100, 760
@@ -123,6 +127,10 @@ class Pilot:
         self.fuel = 7.0
         self.hull = 100
         self.kills = 0
+        self.name = ''
+        self.trade_profit = 0
+        self.cargo_paid = [0] * len(GOODS)
+        self.jumps = 0
         self.equipment = []
         self.missiles = 3
         self.laser = 'pulse'
@@ -144,6 +152,18 @@ class Pilot:
         self.storage = [dict(owned=False,rented_until=0.,cargo=[0]*len(GOODS)) for _ in SYSTEMS]
 
     @property
+    def career_points(self):
+        return self.kills*25 + self.trade_profit//10 + self.jumps*5
+
+    @property
+    def rank(self):
+        return [name for points,name in RANKS if self.career_points >= points][-1]
+
+    @property
+    def next_rank(self):
+        return next(((points,name) for points,name in RANKS if self.career_points < points),None)
+
+    @property
     def capacity(self):
         return 35 if 'cargo' in self.equipment else 20
 
@@ -158,12 +178,17 @@ class Pilot:
             if self.credits < value-dirty: return 'Insufficient funds (Crymto is only accepted for contraband).'
             self.crymto -= dirty
             self.credits -= value-dirty
+            if self.cargo[good] == 0: self.cargo_paid[good] = 0
+            self.cargo_paid[good] += value
             self.cargo[good] += 1
             stock[good] -= 1
         else:
             if self.cargo[good] <= 0: return 'None aboard to sell.'
             if good in ILLEGAL and not clean_deal: self.crymto += value
             else: self.credits += value
+            basis = self.cargo_paid[good]//self.cargo[good]
+            self.trade_profit += max(0,value-basis)
+            self.cargo_paid[good] = 0 if self.cargo[good] == 1 else self.cargo_paid[good]-basis
             self.cargo[good] -= 1
             stock[good] += 1
         unit = ('Crymto / credits' if use_crymto and good in ILLEGAL else 'cr') if buy else ('Crymto' if good in ILLEGAL and not clean_deal else 'cr')
@@ -229,6 +254,7 @@ class Pilot:
                 if key in data: setattr(candidate, key, data[key])
             if 'position' not in data: candidate.position = coordinates(candidate.system)
             if len(candidate.cargo) == 6: candidate.cargo += [0] * (len(GOODS)-6)
+            if len(candidate.cargo_paid) == 6: candidate.cargo_paid += [0] * (len(GOODS)-6)
             if isinstance(candidate.stock,list):
                 for i,row in enumerate(candidate.stock):
                     if isinstance(row,list) and len(row) == 6:
@@ -247,6 +273,9 @@ class Pilot:
         if not isinstance(self.station_police_remaining,list) or len(self.station_police_remaining) != len(SYSTEMS) or not all(integer(n) and n <= STATION_POLICE_CAPACITY for n in self.station_police_remaining): raise ValueError('police reserve')
         if not isinstance(self.station_police_defeated,list) or len(self.station_police_defeated) != len(SYSTEMS) or not all(integer(n) and n <= STATION_POLICE_CAPACITY for n in self.station_police_defeated): raise ValueError('police defeats')
         if type(self.notes) is not str or len(self.notes)>4000: raise ValueError('notes')
+        if type(self.name) is not str or len(self.name)>24 or not all(c.isprintable() for c in self.name): raise ValueError('name')
+        if not integer(self.trade_profit) or not integer(self.jumps): raise ValueError('career')
+        if not isinstance(self.cargo_paid,list) or len(self.cargo_paid) != len(GOODS) or not all(integer(n) for n in self.cargo_paid): raise ValueError('cargo basis')
         if not isinstance(self.redeemed_credit_codes,list) or len(self.redeemed_credit_codes)>100 or any(type(code) is not str or len(code)>80 for code in self.redeemed_credit_codes) or len(set(self.redeemed_credit_codes)) != len(self.redeemed_credit_codes): raise ValueError('credit codes')
         if not integer(self.crymto): raise ValueError('Crymto balance')
         if not integer(self.workshop_xp): raise ValueError('workshop experience')
@@ -553,6 +582,7 @@ class Game:
         self.outfit_return = 'market'
         self.menu_selected = 0
         self.notes_scroll = 0
+        self.rename_return = 'market'
         self.text_selection_all = False
         self.text_selection_mode = None
         self.credit_code_text = ""
@@ -635,7 +665,7 @@ class Game:
         for _ in range(6):
             if mode in ('market','outfit','departure','launch_warning','bank','jobs','exchange','trade_deal','redeem'): return 'market'
             if mode in ('flight','cruise','hyperspace','dead'): return mode
-            attr = {'money':'money_return','vms':'vms_return','help':'help_return','updates':'update_return','map':'map_return','menu':'menu_return','notes':'notes_return','feedback':'feedback_return','planet_profile':'map_return','engineering':'engineering_return'}.get(mode)
+            attr = {'money':'money_return','vms':'vms_return','help':'help_return','updates':'update_return','map':'map_return','menu':'menu_return','notes':'notes_return','rename':'rename_return','feedback':'feedback_return','planet_profile':'map_return','engineering':'engineering_return'}.get(mode)
             if not attr: return 'flight'
             mode = getattr(self,attr,'flight')
         return 'flight'
@@ -1041,6 +1071,15 @@ class Game:
         if not self.p.deep_space and self.p.system == system and math.sqrt(sum(v*v for v in self.station)) <= 10000:
             return 'hostile: leave area'
         return f'hostile: {max(0,math.ceil((self.station_hostile_until[system]-time.time())/60))}m'
+
+    def wanted_level(self):
+        self.refresh_station_hostility()
+        return min(5,sum(self.p.fine >= n for n in WANTED_FINES)+sum(map(bool,self.station_hostilities)))
+
+    def commander_name(self):
+        # Online, other players see the server account name, so show that here too.
+        remote = getattr(self,'remote_save',None)
+        return (remote and remote.player_name) or self.p.name or 'Unnamed'
 
     def station_allows(self, system=None):
         self.refresh_station_hostility()
@@ -1480,6 +1519,7 @@ class Game:
     def active_text_field(self):
         if self.mode == 'redeem': return self,'credit_code_text',80
         if self.mode == 'notes': return self.p,'notes',4000
+        if self.mode == 'rename': return self.p,'name',24
         if self.mode == 'feedback': return self,'feedback_text',1500
         return None
 
@@ -1490,7 +1530,7 @@ class Game:
         before = '' if self.text_selection_all and self.text_selection_mode == self.mode else getattr(owner,name)
         self.text_selection_all = False
         text = text.replace('\r\n','\n').replace('\r','\n')
-        text = ''.join(c for c in text if c.isprintable() or c == '\n' and self.mode != 'redeem')
+        text = ''.join(c for c in text if c.isprintable() or c == '\n' and self.mode not in ('redeem','rename'))
         setattr(owner,name,(before+text)[:limit])
         if self.mode == 'notes': self.notes_scroll = 0
 
@@ -1506,7 +1546,7 @@ class Game:
             if action == 'paste':
                 text = self.d.clipboard_text()
                 if not text: self.message = 'Clipboard has no text.'; return
-                self.text_input(text.strip() if self.mode == 'redeem' else text)
+                self.text_input(text.strip() if self.mode in ('redeem','rename') else text)
             elif action in ('copy','cut'):
                 self.d.set_clipboard_text(getattr(owner,name))
                 if action == 'cut': setattr(owner,name,''); self.text_selection_all = False
@@ -1558,6 +1598,12 @@ class Game:
         d.text(35,535,'Saved drafts work offline. GitHub opens a preview for you to submit.')
         d.text(35,570,'Includes version, platform, screen and system; no save file attached.')
         if self.feedback_path: d.text(35,610,'Draft folder: '+str(SAVE.parent/'feedback'))
+
+    def finish_rename(self):
+        self.p.name = self.p.name.strip()
+        self.mode = self.rename_return
+        self.message = f'Commander name set: {self.p.name or "Unnamed"}.'
+        self.checkpoint()
 
     def redeem_credit_code(self):
         code = self.credit_code_text.strip().upper()
@@ -1661,6 +1707,8 @@ class Game:
             else: self.help_return,self.mode = self.mode,'help'
         elif target == 'notes':
             self.notes_return,self.mode = self.mode,'notes'
+        elif target == 'rename':
+            self.rename_return,self.mode = self.mode,'rename'
         elif target == 'updates':
             self.update_return,self.mode = self.mode,'updates'
         elif target == 'feedback':
@@ -1678,7 +1726,8 @@ class Game:
             ('Report a bug / 0',lambda:self.open_utility('feedback')),
             ('Check updates / 2',lambda:self.open_utility('updates')),
             ('Fullscreen / 3',self.mouse_fullscreen),
-            ('Save and quit',self.request_exit)]
+            ('Save and quit',self.request_exit),
+            ('Commander name',lambda:self.open_utility('rename'))]
 
     def choose_menu_action(self, index):
         self.mode = self.menu_return
@@ -1693,7 +1742,7 @@ class Game:
         d.text(35,155,remote.status if remote else 'Offline game: progress saved on this laptop.',status_color)
         presence = getattr(self,'presence',None)
         if presence: d.text(35,180,presence.status,(140,185,255))
-        descriptions = ['Key bindings and flight help','Your saved private notes','Bug reports and suggestions','Check for game updates','Toggle display size','Save current state and close']
+        descriptions = ['Key bindings and flight help','Your saved private notes','Bug reports and suggestions','Check for game updates','Toggle display size','Save current state and close','Name shown on your status panel']
         for i,description in enumerate(descriptions):
             x,y = 35+(i%2)*515,200+(i//2)*110
             d.text(x+10,y+42,description,(135,175,185))
@@ -1714,7 +1763,7 @@ class Game:
                 self.menu_selected = (self.menu_selected+(-1 if k in (UP,LEFT) else 1))%len(self.menu_actions())
             elif k == 13: self.choose_menu_action(self.menu_selected)
             return
-        if k == 96 and self.mode not in ('feedback','notes','redeem') and not (self.mode == 'map' and self.map_input):
+        if k == 96 and self.mode not in ('feedback','notes','redeem','rename') and not (self.mode == 'map' and self.map_input):
             self.menu_return,self.mode = self.mode,'menu'
             self.release_mouse()
             self.keys.clear()
@@ -1726,6 +1775,10 @@ class Game:
             elif k == 27: self.mode = self.notes_return; self.checkpoint()
             elif k == 8: self.p.notes = self.p.notes[:-1]
             elif k == 13: self.text_input('\n')
+            return
+        if self.mode == 'rename':
+            if k == 8: self.p.name = self.p.name[:-1]
+            elif k == 13: self.finish_rename()
             return
         if self.mode == 'redeem':
             if k == 27: self.mode = 'money'
@@ -2585,6 +2638,7 @@ class Game:
             self.jump_warp['elapsed'] += dt
             if self.jump_warp['elapsed'] >= 1.6:
                 destination = self.jump_warp['destination']
+                self.p.jumps += 1
                 self.arrive(destination['position'],destination['system'])
                 self.message = 'Arrived at '+destination['name']+'.'
             return
@@ -2889,7 +2943,7 @@ class Game:
         self.buttons = []
         self.footer_actions = []
         d = self.d
-        if self.mode not in ('feedback','notes','redeem','menu'):
+        if self.mode not in ('feedback','notes','redeem','rename','menu'):
             self.mouse_button(155,18,95,'Money',action=lambda:self.open_hub('money'))
             self.mouse_button(365,18,75,'VMS',action=lambda:self.open_hub('vms'))
             self.mouse_button(260,18,95,'Nav',action=self.open_navigation)
@@ -2942,6 +2996,10 @@ class Game:
             self.mouse_button(385,315,160,'Select all',action=lambda:self.handle_clipboard('select_all'))
             self.mouse_button(35,674,490,'Redeem code',action=self.redeem_credit_code)
             self.mouse_button(550,674,490,'Return to Money',action=lambda:setattr(self,'mode','money'))
+        elif self.mode == 'rename':
+            self.mouse_button(35,315,160,'Paste',action=lambda:self.handle_clipboard('paste'))
+            self.mouse_button(210,315,160,'Select all',action=lambda:self.handle_clipboard('select_all'))
+            self.mouse_button(35,674,1000,'Save name',action=self.finish_rename)
         elif self.mode == 'notes':
             self.mouse_button(35,674,240,'Earlier',UP)
             self.mouse_button(290,674,240,'Later',DOWN)
@@ -3045,7 +3103,7 @@ class Game:
             self.message = 'Recovery offers declined. No salvage payment made.'
         else:
             returns = {'map':'map_return','help':'help_return','updates':'update_return',
-                       'menu':'menu_return','notes':'notes_return','feedback':'feedback_return',
+                       'menu':'menu_return','notes':'notes_return','rename':'rename_return','feedback':'feedback_return',
                        'money':'money_return','vms':'vms_return','outfit':'outfit_return',
                        'engineering':'engineering_return','launch_warning':'launch_return'}
             fixed = {'planet_profile':'map','redeem':'money','bank':'money','jobs':'money',
@@ -3136,6 +3194,15 @@ class Game:
             self.draw_money()
         elif self.mode == 'notes':
             self.draw_notepad()
+        elif self.mode == 'rename':
+            d.text(35,85,'MENU / COMMANDER NAME',GOLD)
+            d.text(45,180,'Type a name (up to 24 characters), then press ENTER or click Save name.')
+            d.rect(35,245,1030,60,GREEN)
+            if self.text_selection_all and self.text_selection_mode == 'rename': d.fill(40,250,max(20,len(p.name)*11+20),42,(20,65,70))
+            d.text(45,265,p.name+'_',GOLD)
+            remote = getattr(self,'remote_save',None)
+            if remote and remote.player_name: d.text(45,360,f'Online, other pilots see your server account name: {remote.player_name}.')
+            d.text(45,415,'ESC saves and closes.')
         elif self.mode == 'redeem':
             d.text(35,85,'MONEY / REDEEM CREDIT CODE',GOLD)
             d.text(45,180,'Type a code or paste with CTRL+V, then press ENTER to redeem.')
@@ -3212,7 +3279,8 @@ class Game:
                 item,label,cost,required,_ = EQUIPMENT[self.shop_selected]
                 d.text(35,490,f'Selected: {label} / needs tech {required} / local tech {TECH[p.system]}',GOLD if required <= TECH[p.system] else RED)
                 d.text(35,520,'UP/DOWN select; B or ENTER buys. Mines and missiles: maximum 4 each.')
-            for i,t in enumerate(['COMMANDER STATUS',f'Cargo {sum(p.cargo)}/{p.capacity} t',f'Fuel  {p.fuel:.2f}/7',f'Hull  {p.hull:.0f}%',f'Refill {p.fuel_cost()} cr',f'Service {p.service_cost()} cr',f'Mines {p.mines}/4',f'Fine {p.fine} cr',f'Wear {p.maintenance:.0f}%',f'Eng. {p.engineering_level}/5']): d.text(790,135+i*40,t)
+            wanted = self.wanted_level()
+            for i,t in enumerate(['COMMANDER STATUS',f'Cmdr  {self.commander_name()[:16]}',f'Rank  {p.rank}',f'Wanted {"*"*wanted}{"-"*(5-wanted)} {wanted}/5',f'Cargo {sum(p.cargo)}/{p.capacity} t',f'Fuel  {p.fuel:.2f}/7',f'Hull  {p.hull:.0f}%',f'Refill {p.fuel_cost()} cr',f'Service {p.service_cost()} cr',f'Mines {p.mines}/4',f'Fine {p.fine} cr',f'Wear {p.maintenance:.0f}%',f'Eng. {p.engineering_level}/5']): d.text(790,130+i*35,t,RED if i == 3 and wanted else GREEN)
             d.text(35,550,'Ship fuel, service, fitting and engineering: open VMS above.')
             d.text(35,590,'9 Money / station jobs   X VMS   G Nav')
         elif self.mode == 'planet_profile':

@@ -55,6 +55,7 @@ class RemoteSave:
         self.meta_path = self.save_path.with_name('sync.json')
         self.opener = urllib.request.build_opener(urllib.request.ProxyHandler({}),NoRedirect())
         self.revision = 0
+        self.player_name = None
         self.status = 'Server: connecting'
         self.pending = None
         self.condition = threading.Condition()
@@ -90,6 +91,7 @@ class RemoteSave:
             self.status = 'Server: unavailable; saving locally, retrying'
             return
         self.revision = remote['revision']
+        if type(remote.get('player')) is str and 0 < len(remote['player']) <= 32: self.player_name = remote['player']
         remote_save = remote['save']
         local_hash = digest(canonical(local)) if local is not None else None
         remote_hash = digest(canonical(remote_save)) if remote_save is not None else None
