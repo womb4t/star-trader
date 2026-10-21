@@ -132,11 +132,13 @@ class GameplayTests(unittest.TestCase):
         g.update_station_security(20)
         self.assertFalse(g.station_hostilities[0])
 
-    def test_station_fire_immediately_hostile_once_and_survives_reload(self):
+    def test_repeated_station_fire_turns_hostile_once_and_survives_reload(self):
         g = self.game
         g.mode = 'flight'
         g.station = [0.,0.,600.]
-        g.fire_laser()
+        for _ in range(st.STRAY_SHOT_LIMIT+1):
+            g.cooldown = 0
+            g.fire_laser()
         self.assertTrue(g.station_hostilities[0])
         self.assertEqual(g.enemy_kind,'police')
         fine = g.p.fine
@@ -280,14 +282,14 @@ class GameplayTests(unittest.TestCase):
         g.station = [0.,0.,500.]
         g.enemy = [0.,0.,1000.,6,0]
         g.fire_laser()
-        self.assertTrue(g.station_hostilities[0])
+        self.assertEqual((g.station_strikes,g.p.fine),(1,st.STRAY_SHOT_FINE))
         self.assertEqual(g.enemy[3],6)
-        g.station_hostilities[0] = False
+        g.station_strikes = 0
         g.station = [0.,0.,1500.]
         g.enemy = [0.,0.,1000.,6,0]
         g.asteroids = [[0.,0.,300.,3]]
         g.fire_laser()
-        self.assertFalse(g.station_hostilities[0])
+        self.assertEqual(g.station_strikes,0)
         self.assertEqual(g.enemy[3],6)
 
     def test_incoming_enemy_fire_has_visible_timed_beam(self):
@@ -506,11 +508,16 @@ class GameplayTests(unittest.TestCase):
 
     def test_departure_warns_for_refused_destination_even_with_fuel(self):
         g = self.game
+        g.p.system = 4  # Anarchy: fines do not hold the ship.
         g.p.fine,g.p.fuel = 1200,7
         g.p.waypoint = dict(name='Zaonce',position=st.coordinates(1),system=1)
         g.key(ord('l'))
         self.assertEqual(g.mode,'launch_warning')
+        self.assertTrue(any('ARREST' in warning for warning in g.launch_warnings()))
+        g.station_hostilities[6] = True
+        g.p.waypoint = dict(name='Orerve',position=st.coordinates(6),system=6)
         self.assertTrue(any('REFUSE' in warning for warning in g.launch_warnings()))
+        g.p.waypoint = dict(name='Zaonce',position=st.coordinates(1),system=1)
         g.key(ord('f'))
         self.assertEqual(g.mode,'launch_warning')
         g.key(ord('g'))
@@ -1300,10 +1307,12 @@ class GameplayTests(unittest.TestCase):
         self.assertGreater(g.dock_clearance,0)
         g.speed = 15; g.roll = g.station_angle
         self.assertTrue(g.docking_safe())
-        g.p.fine = 200; self.assertFalse(g.docking_safe())
+        g.p.fine = 200; self.assertTrue(g.docking_safe())  # lawful station: dock to surrender
+        g.dock_clearance = 0; g.request_docking(); g.update(2)
+        self.assertIn('ARRESTED',g.message)
+        g.p.system = 4; g.station_hostilities[4] = True
         g.request_docking(); self.assertEqual(g.dock_clearance,0)
         self.assertIn('refused',g.message)
-        g.p.system = 4; g.request_docking(); self.assertEqual(g.docking_pending,2)
 
     def test_regulated_rescue_salvage_and_single_settlement(self):
         g = self.game
@@ -1741,6 +1750,143 @@ class CommanderStatusTests(unittest.TestCase):
                 pilot = st.Pilot()
                 setattr(pilot,key,value)
                 with self.assertRaises(ValueError): pilot.validate()
+
+
+class LawAndPrisonTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.original_save = st.SAVE
+        st.SAVE = Path(self.tmp.name) / 'save.json'
+        self.game = st.Game(None)
+        self.game.spawn = 10000
+
+    def tearDown(self):
+        st.SAVE = self.original_save
+        self.tmp.cleanup()
+
+    def test_stray_hits_warn_and_fine_before_police(self):
+        g = self.game
+        g.launch()
+        for hit in range(1,st.STRAY_SHOT_LIMIT+1):
+            g.station_struck()
+            self.assertFalse(g.station_hostilities[0])
+            self.assertIn('STATION CONTROL',g.message)
+            self.assertEqual(g.p.fine,hit*st.STRAY_SHOT_FINE)
+        self.assertIsNone(g.enemy)
+        g.station_struck()
+        self.assertTrue(g.station_hostilities[0])
+        self.assertEqual(g.enemy_kind,'police')
+
+    def test_stray_hit_count_resets_after_quiet_period(self):
+        g = self.game
+        g.launch()
+        for _ in range(st.STRAY_SHOT_LIMIT): g.station_struck()
+        g.station_strike_at -= st.STRAY_SHOT_RESET+1
+        g.station_struck()
+        self.assertFalse(g.station_hostilities[0])
+        self.assertEqual(g.station_strikes,1)
+
+    def test_lawful_station_holds_launch_until_fines_paid(self):
+        g = self.game
+        g.p.fine, g.p.credits = 50, 500
+        g.key(ord('l'))
+        self.assertEqual(g.mode,'market')
+        self.assertIn('withheld',g.message)
+        g.key(ord('9')); g.key(ord('4')); g.key(ord('9'))
+        self.assertEqual((g.mode,g.p.fine),('market',0))
+        g.key(ord('l'))
+        self.assertIn(g.mode,('departure','launch_warning'))
+
+    def test_anarchy_station_does_not_hold_launch(self):
+        g = self.game
+        g.p.system, g.p.fine = 4, 50
+        g.request_launch()
+        self.assertIn(g.mode,('departure','launch_warning'))
+
+    def test_minor_fines_are_collected_on_arrest_without_prison(self):
+        g = self.game
+        g.launch()
+        g.p.fine, g.p.credits = 150, 400
+        g.p.cargo[6] = 2
+        g.dock()
+        self.assertEqual(g.mode,'market')
+        self.assertIsNone(g.p.prison)
+        self.assertEqual((g.p.fine,g.p.credits,g.p.cargo[6]),(0,250,0))
+        self.assertIn('ARRESTED',g.message)
+
+    def test_destroying_police_brings_a_sentence(self):
+        g = self.game
+        g.launch()
+        g.station_hostilities[0] = True
+        for _ in range(st.STATION_POLICE_CAPACITY):
+            g.dispatch_station_police(); g.destroy_enemy()
+        g.p.credits = 100000
+        g.dock()
+        self.assertEqual(g.mode,'prison')
+        self.assertEqual(g.p.prison['days'],st.PRISON_MAX_DAYS)
+        self.assertEqual(g.p.fine,0)
+        self.assertFalse(g.station_hostilities[0])
+        self.assertEqual(g.p.station_police_remaining[0],st.STATION_POLICE_CAPACITY)
+
+    def test_unpaid_fines_add_prison_days(self):
+        g = self.game
+        g.launch()
+        g.p.fine, g.p.credits, g.p.bank_balance = 600, 50, 50
+        g.dock()
+        self.assertEqual(g.p.prison['days'],2)
+        self.assertEqual((g.p.credits,g.p.bank_balance),(0,0))
+
+    def test_prison_survives_reload_and_releases_when_time_is_served(self):
+        g = self.game
+        g.launch(); g.p.fine = 400; g.dock()
+        self.assertEqual(g.mode,'prison')
+        g.key(ord('l'))
+        self.assertEqual(g.mode,'prison')
+        g.checkpoint()
+        restored = st.Game(None)
+        self.assertEqual(restored.mode,'prison')
+        restored.p.prison['release_at'] = st.time.time()-1
+        restored.update(.01)
+        self.assertEqual(restored.mode,'market')
+        self.assertIsNone(restored.p.prison)
+
+    def test_prison_work_once_per_day_shortens_sentence(self):
+        g = self.game
+        g.launch(); g.p.fine = 400; g.dock()
+        before = g.p.prison['release_at']
+        g.key(ord('w'))
+        self.assertAlmostEqual(g.p.prison['release_at'],before-st.PRISON_WORK_SECONDS)
+        g.key(ord('w'))
+        self.assertAlmostEqual(g.p.prison['release_at'],before-st.PRISON_WORK_SECONDS)
+
+    def test_bribe_costs_money_and_sometimes_escapes(self):
+        g = self.game
+        g.launch(); g.p.fine = 400; g.dock()
+        g.p.credits, g.p.crymto = 0, 300
+        with patch('star_trader.random.random',return_value=.5): g.key(ord('b'))
+        self.assertEqual((g.mode,g.p.crymto),('prison',100))
+        g.key(ord('b'))
+        self.assertEqual(g.p.crymto,100)  # one attempt per day
+        g.p.prison['bribe_day'] = -1
+        g.p.credits = 250
+        with patch('star_trader.random.random',return_value=.05): g.key(ord('b'))
+        self.assertIsNone(g.p.prison)
+        self.assertEqual(g.p.credits,50)
+        self.assertTrue(g.station_hostilities[0])
+        self.assertGreaterEqual(g.p.fine,500)
+        self.assertEqual(g.mode,'departure')
+
+    def test_bribe_needs_money(self):
+        g = self.game
+        g.launch(); g.p.fine = 400; g.dock()
+        g.p.credits = g.p.crymto = 0
+        g.key(ord('b'))
+        self.assertEqual(g.p.prison['bribe_day'],-1)
+
+    def test_invalid_prison_record_is_rejected(self):
+        pilot = st.Pilot()
+        pilot.prison = dict(system=0,days=9,start=0.,release_at=1.,bribe_day=-1,work_day=-1)
+        with self.assertRaises(ValueError): pilot.validate()
 
 
 if __name__ == '__main__':

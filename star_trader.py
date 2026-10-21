@@ -28,6 +28,10 @@ STATION_POLICE_CAPACITY = 6
 RANKS = [(0,'Newbie'),(50,'Greenhorn'),(250,'Operator'),(750,'Hand'),(2000,'Veteran'),(5000,'Ace'),(12000,'Vanguard'),(30000,'Legend')]
 # Outstanding fines (cr) at which the wanted level reaches 1..5; each hostile station adds one more.
 WANTED_FINES = [1,100,300,600,1000]
+# Stray fire: the first few hits on a station bring a comms warning and a fine, not police.
+STRAY_SHOT_LIMIT, STRAY_SHOT_FINE, STRAY_SHOT_RESET = 3, 50, 300
+# Prison: one sentence day lasts one real hour and keeps passing while the game is closed.
+PRISON_DAY_SECONDS, PRISON_MAX_DAYS, PRISON_BRIBE, PRISON_WORK_SECONDS = 3600, 7, 200, 1800
 DOCK_ROLL_TOLERANCE = math.radians(14)
 CRUISE_SECONDS_PER_LY = 45
 W, H = 1100, 760
@@ -150,6 +154,7 @@ class Pilot:
         self.job_boards = [dict(refresh_at=0.,used=[0,0,0]) for _ in SYSTEMS]
         self.bank_balance = 0
         self.storage = [dict(owned=False,rented_until=0.,cargo=[0]*len(GOODS)) for _ in SYSTEMS]
+        self.prison = None
 
     @property
     def career_points(self):
@@ -275,6 +280,13 @@ class Pilot:
         if type(self.notes) is not str or len(self.notes)>4000: raise ValueError('notes')
         if type(self.name) is not str or len(self.name)>24 or not all(c.isprintable() for c in self.name): raise ValueError('name')
         if not integer(self.trade_profit) or not integer(self.jumps): raise ValueError('career')
+        if self.prison is not None:
+            j = self.prison
+            if not isinstance(j,dict) or not integer(j.get('system')) or j['system'] >= len(SYSTEMS): raise ValueError('prison')
+            if not integer(j.get('days')) or not 1 <= j['days'] <= PRISON_MAX_DAYS: raise ValueError('sentence')
+            for key in ('start','release_at'):
+                if type(j.get(key)) not in (int,float) or not math.isfinite(j[key]) or j[key] < 0: raise ValueError('sentence time')
+            if any(type(j.get(key)) is not int or j[key] < -1 for key in ('bribe_day','work_day')): raise ValueError('prison actions')
         if not isinstance(self.cargo_paid,list) or len(self.cargo_paid) != len(GOODS) or not all(integer(n) for n in self.cargo_paid): raise ValueError('cargo basis')
         if not isinstance(self.redeemed_credit_codes,list) or len(self.redeemed_credit_codes)>100 or any(type(code) is not str or len(code)>80 for code in self.redeemed_credit_codes) or len(set(self.redeemed_credit_codes)) != len(self.redeemed_credit_codes): raise ValueError('credit codes')
         if not integer(self.crymto): raise ValueError('Crymto balance')
@@ -539,6 +551,8 @@ class Game:
         self.security_elapsed = 0.
         self.security_warning = 0
         self.security_dispatch = 0.
+        self.station_strikes = 0
+        self.station_strike_at = 0.
         self.station_laser_warning = False
         self.station_laser_timer = 15.
         self.enemy_police_system = None
@@ -597,6 +611,9 @@ class Game:
         self.running = True
         if self.p.hull <= 0: self.mode = 'dead'
         self.resume_saved_session()
+        if self.p.prison:
+            self.mode = 'prison'
+            self.update_prison()
 
     def save(self):
         self.checkpoint()
@@ -663,7 +680,7 @@ class Game:
     def session_mode(self):
         mode = self.mode
         for _ in range(6):
-            if mode in ('market','outfit','departure','launch_warning','bank','jobs','exchange','trade_deal','redeem'): return 'market'
+            if mode in ('market','outfit','departure','launch_warning','bank','jobs','exchange','trade_deal','redeem','prison'): return 'market'
             if mode in ('flight','cruise','hyperspace','dead'): return mode
             attr = {'money':'money_return','vms':'vms_return','help':'help_return','updates':'update_return','map':'map_return','menu':'menu_return','notes':'notes_return','rename':'rename_return','feedback':'feedback_return','planet_profile':'map_return','engineering':'engineering_return'}.get(mode)
             if not attr: return 'flight'
@@ -773,6 +790,7 @@ class Game:
             self.enemy_shot['remaining'] -= dt
             if self.enemy_shot['remaining'] <= 0: self.enemy_shot = None
         self.refresh_station_hostility()
+        self.update_prison()
         self._update_simulation(dt)
         self.update_shared_presence()
         self._save_elapsed += dt
@@ -934,12 +952,18 @@ class Game:
             if system is None: warnings.append('Destination is deep space: no station, landing or services.')
             elif self.station_hostilities[system] and self.station_overwhelmed(system):
                 warnings.append(f'{SYSTEMS[system][0]} is hostile: docking possible, but station lasers may attack.')
+            elif self.arrest_pending(system):
+                reason = 'station hostility' if self.station_hostilities[system] else f'wanted status / {self.p.fine} cr fines'
+                warnings.append(f'{SYSTEMS[system][0]} will ARREST you on docking: {reason}.')
             elif not self.station_allows(system):
                 reason = 'station hostility' if self.station_hostilities[system] else f'wanted status / {self.p.fine} cr fines'
                 warnings.append(f'{SYSTEMS[system][0]} will REFUSE docking: {reason}.')
         return warnings
 
     def request_launch(self):
+        if self.p.fine and PROFILES[self.p.system][0] not in ('Anarchy','Feudal'):
+            self.message = f'STATION CONTROL: launch clearance withheld until your {self.p.fine} cr fine is paid: 9 Money, then 4 Pay fines.'
+            return
         if self.launch_warnings():
             self.launch_return = self.mode
             self.mode = 'launch_warning'
@@ -1086,6 +1110,99 @@ class Game:
         system = self.p.system if system is None else system
         return self.station_overwhelmed(system) or not self.station_hostilities[system] and (self.p.fine < 100 or PROFILES[system][0] in ('Anarchy','Feudal'))
 
+    def arrest_pending(self, system=None):
+        # Lawful stations let a wanted pilot dock, but only to surrender.
+        system = self.p.system if system is None else system
+        self.refresh_station_hostility()
+        return PROFILES[system][0] not in ('Anarchy','Feudal') and (self.station_hostilities[system] or self.p.fine >= 100)
+
+    def docking_permitted(self, system=None):
+        return self.station_allows(system) or self.arrest_pending(system)
+
+    def arrest(self):
+        system,now = self.p.system,time.time()
+        police = self.p.station_police_defeated[system]
+        days = police+int(self.station_hostilities[system])
+        seized = sum(self.p.cargo[i] for i in ILLEGAL)
+        for i in ILLEGAL: self.p.cargo[i] = 0
+        fine = self.p.fine
+        paid = min(fine,int(self.p.credits))
+        self.p.credits -= paid
+        from_bank = min(fine-paid,int(self.p.bank_balance))
+        self.p.bank_balance -= from_bank
+        unpaid = fine-paid-from_bank
+        days = min(PRISON_MAX_DAYS,days+math.ceil(unpaid/250))
+        self.p.fine = 0
+        self.station_hostilities[system] = False
+        self.station_hostile_until[system] = 0.
+        self.p.station_police_remaining[system] = STATION_POLICE_CAPACITY
+        self.p.station_police_defeated[system] = 0
+        self.enemy = self.ship_target = self.enemy_police_system = None
+        settled = f'{paid+from_bank} cr fines collected'+(f', {unpaid} cr unpaid' if unpaid else '')+(f', {seized}t contraband seized' if seized else '')
+        if not days:
+            self.mode = 'market'
+            self.message = f'ARRESTED on docking: {settled}. Released with a caution.'
+        else:
+            self.p.prison = dict(system=system,days=days,start=now,release_at=now+days*PRISON_DAY_SECONDS,bribe_day=-1,work_day=-1)
+            self.mode = 'prison'
+            self.message = f'ARRESTED: {settled}. Sentenced to {days} day{"s" if days > 1 else ""} in the station cells.'
+        self.checkpoint()
+
+    def prison_day(self):
+        return int((time.time()-self.p.prison['start'])//PRISON_DAY_SECONDS)
+
+    def update_prison(self):
+        if self.p.prison and time.time() >= self.p.prison['release_at']:
+            self.p.prison = None
+            self.mode = 'market'
+            self.message = 'Sentence served. Released with a clean record at this station.'
+            self.checkpoint()
+
+    def prison_work(self):
+        j = self.p.prison
+        if j['work_day'] == self.prison_day():
+            self.message = 'You have already worked a shift today. Next shift tomorrow.'
+            return
+        j['work_day'] = self.prison_day()
+        j['release_at'] = max(time.time(),j['release_at']-PRISON_WORK_SECONDS)
+        self.message = 'Work shift done in the station foundry: 30 minutes off your sentence.'
+        self.checkpoint()
+        self.update_prison()
+
+    def prison_bribe(self):
+        j = self.p.prison
+        if j['bribe_day'] == self.prison_day():
+            self.message = 'The guards will not risk another deal today.'
+            return
+        if self.p.credits >= PRISON_BRIBE: self.p.credits -= PRISON_BRIBE; paid = f'{PRISON_BRIBE} cr'
+        elif self.p.crymto >= PRISON_BRIBE: self.p.crymto -= PRISON_BRIBE; paid = f'{PRISON_BRIBE} Crymto'
+        else:
+            self.message = f'A bribe needs {PRISON_BRIBE} credits or {PRISON_BRIBE} Crymto.'
+            return
+        j['bribe_day'] = self.prison_day()
+        if random.random() >= .1:
+            self.message = f'The guard pocketed {paid} and looked the other way... from the wrong door. Still locked up.'
+            self.checkpoint()
+            return
+        self.p.prison = None
+        self.mode = 'market'
+        self.p.fine += 500
+        self.request_departure()
+        self.station_hostile('Prisoner escape in progress.')
+        self.message = f'ESCAPE! {paid} bought an open hangar door. Launch now: the station is hostile and your fine is {self.p.fine} cr.'
+
+    def draw_prison(self):
+        d,j = self.d,self.p.prison
+        left = max(0,j['release_at']-time.time())
+        d.text(35,85,'STATION CELLS / '+SYSTEMS[j['system']][0].upper(),RED)
+        d.text(45,150,f'Sentence: {j["days"]} day{"s" if j["days"] > 1 else ""} (1 day = 1 hour; time passes while the game is closed).')
+        d.text(45,190,f'Release in {int(left//3600)}h {int(left%3600//60):02d}m {int(left%60):02d}s.',GOLD)
+        today = self.prison_day()
+        d.text(45,260,'W  Work a shift: 30 minutes off, once per day.'+('  (done today)' if j['work_day'] == today else ''))
+        d.text(45,300,f'B  Bribe a guard: {PRISON_BRIBE} cr or {PRISON_BRIBE} Crymto, 1 in 10 chance, once per day.'+('  (tried today)' if j['bribe_day'] == today else ''))
+        d.text(45,340,'An escape makes the station hostile and adds a 500 cr fine.')
+        d.text(45,410,'Your ship, bank and stored cargo are held safely until release.')
+
     def request_departure(self):
         self.departure_remaining = 2.
         self.mode = 'departure'
@@ -1095,7 +1212,7 @@ class Game:
     def request_docking(self):
         if self.p.deep_space or math.sqrt(sum(v*v for v in self.station)) > 10000:
             self.message = 'No station traffic control in radio range (10,000m).'
-        elif not self.station_allows():
+        elif not self.docking_permitted():
             self.dock_clearance = 0
             self.docking_pending = 0
             self.message = 'Docking refused: hostile or wanted status. Seek another accepting port.'
@@ -1114,6 +1231,24 @@ class Game:
         self.dock_clearance = self.docking_pending = 0.
         self.autodock = self.course_assist = False
         self.message = 'STATION DEFENCE: '+reason+' Docking revoked; police response authorised!'
+        self.checkpoint()
+
+    def station_struck(self):
+        if self.station_hostilities[self.p.system]: return
+        now = time.time()
+        if now-self.station_strike_at > STRAY_SHOT_RESET: self.station_strikes = 0
+        self.station_strikes += 1
+        self.station_strike_at = now
+        if self.station_strikes > STRAY_SHOT_LIMIT:
+            self.station_hostile('Repeated weapons fire on station after warnings.')
+            self.update_station_security(0)
+            return
+        self.p.fine += STRAY_SHOT_FINE
+        left = STRAY_SHOT_LIMIT-self.station_strikes
+        self.message = (f'STATION CONTROL: stray fire hit our hull! {STRAY_SHOT_FINE} cr fine. Cease fire'
+                        +(f' - {left} more hit{"s" if left > 1 else ""} and police launch.' if left else ' NOW - next hit launches police.')
+                        +' Pay fines before your next launch.')
+        self.alert = dict(text=self.message,remaining=5.,elapsed=0.)
         self.checkpoint()
 
     def dispatch_station_police(self):
@@ -1297,10 +1432,11 @@ class Game:
 
     def dock(self):
         if self.p.deep_space: return
-        if not self.station_allows():
+        if not self.docking_permitted():
             self.message = 'Docking refused: wanted status.'
             return
-        inspection = self.inspect_cargo() if not self.customs_checked else ''
+        arrest = self.arrest_pending()
+        inspection = self.inspect_cargo() if not self.customs_checked and not arrest else ''
         self.mode = 'market'
         self.shield = 100
         self.speed = 0
@@ -1308,6 +1444,7 @@ class Game:
         self.keys.clear()
         self.cloaked = False
         self.message = ('Docked.' + inspection) if inspection else 'Docked. X VMS for ship services; 9 Money; G Nav.'
+        if arrest: self.arrest()
         self.save()
 
     def slot_error(self):
@@ -1318,7 +1455,7 @@ class Game:
         x,y,_ = self.station
         c,s = math.cos(self.station_angle),math.sin(self.station_angle)
         x,y = x*c+y*s,-x*s+y*c
-        return abs(x) <= 14 and abs(y) <= 6 and 0 < self.speed <= 25 and abs(self.slot_error()) <= DOCK_ROLL_TOLERANCE + 1e-12 and not self.enemy and self.dock_clearance > 0 and self.station_allows()
+        return abs(x) <= 14 and abs(y) <= 6 and 0 < self.speed <= 25 and abs(self.slot_error()) <= DOCK_ROLL_TOLERANCE + 1e-12 and not self.enemy and self.dock_clearance > 0 and self.docking_permitted()
 
     def damage(self, amount):
         absorbed = min(self.shield, amount)
@@ -1776,6 +1913,10 @@ class Game:
             elif k == 8: self.p.notes = self.p.notes[:-1]
             elif k == 13: self.text_input('\n')
             return
+        if self.mode == 'prison':
+            if k == ord('w'): self.prison_work()
+            elif k == ord('b'): self.prison_bribe()
+            return
         if self.mode == 'rename':
             if k == 8: self.p.name = self.p.name[:-1]
             elif k == 13: self.finish_rename()
@@ -2120,7 +2261,7 @@ class Game:
             elif 'docking' not in self.p.equipment: self.message = 'Buy a docking computer in outfitting (U).'
             elif self.enemy: self.message = 'Clear hostile contact before auto-docking.'
             elif not 65 < self.station[2] <= 2500: self.message = 'Docking computer range: 2500 m.'
-            elif not self.station_allows(): self.message = 'Docking refused: wanted status.'
+            elif not self.docking_permitted(): self.message = 'Docking refused: wanted status.'
             else:
                 self.course_assist = False
                 self.autodock = not self.autodock
@@ -2650,7 +2791,10 @@ class Game:
         if self.docking_pending > 0:
             self.docking_pending = max(0,self.docking_pending-dt)
             if self.docking_pending == 0:
-                if self.station_allows():
+                if self.arrest_pending():
+                    self.dock_clearance = 120
+                    self.message = 'STATION CONTROL: clearance to surrender. You will be ARRESTED on docking.'
+                elif self.station_allows():
                     self.dock_clearance = 120
                     self.message = 'Docking clearance granted for 120 seconds.'
                 else: self.message = 'Docking clearance refused: wanted status.'
@@ -2834,8 +2978,7 @@ class Game:
             obj[3] -= power
             if obj[3] <= 0: self.destroy_enemy()
         elif kind == 'station':
-            self.station_hostile('Weapons fire on station.')
-            self.update_station_security(0)
+            self.station_struck()
         elif kind == 'asteroid' and weapon == 'mining':
             obj[3] -= 1
             if obj[3] <= 0:
@@ -2943,7 +3086,7 @@ class Game:
         self.buttons = []
         self.footer_actions = []
         d = self.d
-        if self.mode not in ('feedback','notes','redeem','rename','menu'):
+        if self.mode not in ('feedback','notes','redeem','rename','menu','prison'):
             self.mouse_button(155,18,95,'Money',action=lambda:self.open_hub('money'))
             self.mouse_button(365,18,75,'VMS',action=lambda:self.open_hub('vms'))
             self.mouse_button(260,18,95,'Nav',action=self.open_navigation)
@@ -2952,7 +3095,7 @@ class Game:
             if section:
                 x,w = {'money':(155,95),'vms':(365,75),'map':(260,95)}[section]
                 d.rect(x,18,w,32,GOLD)
-        modal = self.mode not in ('market','flight','cruise','hyperspace','dead')
+        modal = self.mode not in ('market','flight','cruise','hyperspace','dead','prison')
         self.mouse_button(545,18,85,'Back' if modal else 'Quit',action=self.mouse_back)
         row_y = 674
         if self.mode == 'menu':
@@ -2996,6 +3139,9 @@ class Game:
             self.mouse_button(385,315,160,'Select all',action=lambda:self.handle_clipboard('select_all'))
             self.mouse_button(35,674,490,'Redeem code',action=self.redeem_credit_code)
             self.mouse_button(550,674,490,'Return to Money',action=lambda:setattr(self,'mode','money'))
+        elif self.mode == 'prison':
+            self.mouse_button(35,674,490,'Work a shift W',ord('w'))
+            self.mouse_button(550,674,490,'Bribe a guard B',ord('b'))
         elif self.mode == 'rename':
             self.mouse_button(35,315,160,'Paste',action=lambda:self.handle_clipboard('paste'))
             self.mouse_button(210,315,160,'Select all',action=lambda:self.handle_clipboard('select_all'))
@@ -3194,6 +3340,8 @@ class Game:
             self.draw_money()
         elif self.mode == 'notes':
             self.draw_notepad()
+        elif self.mode == 'prison':
+            self.draw_prison()
         elif self.mode == 'rename':
             d.text(35,85,'MENU / COMMANDER NAME',GOLD)
             d.text(45,180,'Type a name (up to 24 characters), then press ENTER or click Save name.')
