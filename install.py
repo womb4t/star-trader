@@ -59,6 +59,9 @@ def install():
     splash = source/'assets/star-trader-splash.bmp.gz'
     if splash.resolve() != (assets/splash.name).resolve():
         shutil.copy2(splash,assets/splash.name)
+    icon = source/'assets/star-trader-icon.png'
+    if icon.resolve() != (assets/icon.name).resolve():
+        shutil.copy2(icon,assets/icon.name)
     from startup import migrate_online_launcher
     migrate_online_launcher(Path.home()/'.local/bin/star-trader-online')
     from star_trader import VERSION
@@ -75,7 +78,7 @@ def install():
     launcher.write_text('[Desktop Entry]\nType=Application\nName=Star Trader\n'
                         'Comment=Wireframe space trading and combat for Omarchy\n'
                         f'Exec={quote(sys.executable)} {quote(target / "star_trader.py")}\n'
-                        'Icon=applications-games\nTerminal=false\nCategories=Game;Simulation;\n'
+                        f'Icon={assets / icon.name}\nTerminal=false\nCategories=Game;Simulation;\n'
                         'StartupWMClass=star-trader\n', encoding='utf-8')
     old_online = apps/'star-trader-online.desktop'
     if old_online.exists() and 'star-trader-online' in old_online.read_text():
