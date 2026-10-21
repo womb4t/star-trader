@@ -1,3 +1,13 @@
+# 0.6.0 — Mac install with nothing else needed
+
+- **One-line Mac install on a brand-new Mac.** No Xcode tools, git, Homebrew or Python needed:
+  `curl -fsSL https://raw.githubusercontent.com/womb4t/star-trader/main/install-mac.sh | bash`
+  The app carries its own Python 3.12 (Intel or Apple Silicon), SDL2 and SDL2_ttf, and the Mac's trusted certificates for online play. It opens from Launchpad with its own Dock name and icon.
+- **Updates no longer need git.** Installs that did not come from a Git checkout update from the release download.
+- Tested on a stock-configured Intel Mac (no system Python or git on PATH): installs, launches, loads SDL from inside the app, connects over HTTPS, nothing quarantined.
+
+Already have Star Trader on a Mac? Run the one-liner above once to switch to the self-contained app; saves are kept.
+
 # 0.5.1 — Mac launch fix for Apple's Python
 
 - Fix the Mac app crashing at launch when the installer used Apple's Command Line Tools Python (common on new Macs): its library link is now repointed after copying, and the installer checks that the bundled interpreter really starts, falling back to launching Python directly if not.
