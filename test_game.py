@@ -1087,6 +1087,45 @@ class GameplayTests(unittest.TestCase):
         self.assertEqual(len(q.cargo),len(st.GOODS))
         self.assertTrue(all(1 <= row[8] <= 6 for row in q.stock))
 
+    def test_hail_and_negotiate_with_a_disabled_ship(self):
+        g = self.game
+        g.launch(); g.station = [9000.,0,9000.]; g.speed = 0; g.spawn = 1e9
+        g.key(ord('n'))
+        self.assertIn('No disabled ship',g.message)
+        g.disabled_ship = dict(object=[0.,0.,800.],hull=40,budget=130)
+        g.key(ord('n'))
+        self.assertEqual(g.mode,'hail')
+        credits,fuel = g.p.credits,g.p.fuel
+        g.key(ord('3'))  # 250 is too much
+        self.assertEqual((g.mode,g.hail['counter']),('hail',130))
+        g.key(ord('4'))
+        self.assertEqual((g.mode,g.p.credits,g.p.fuel),('flight',credits+130,fuel-1))
+        self.assertIsNone(g.disabled_ship)
+
+    def test_greedy_asks_end_the_talks_and_cargo_payment_works(self):
+        g = self.game
+        g.launch(); g.station = [9000.,0,9000.]; g.speed = 0; g.spawn = 1e9
+        g.disabled_ship = dict(object=[0.,0.,800.],hull=40,budget=40)
+        g.key(ord('n'))
+        for _ in range(3): g.key(ord('2'))
+        self.assertEqual(g.mode,'flight')
+        g.key(ord('n'))
+        self.assertIn('will not talk',g.message)
+        g.disabled_ship = dict(object=[0.,0.,800.],hull=40,budget=200)
+        g.key(ord('n')); g.key(ord('5'))
+        self.assertEqual(g.mode,'flight')
+        self.assertGreater(sum(g.p.cargo),0)
+
+    def test_destroyed_disabled_ship_spills_scoopable_cargo(self):
+        g = self.game
+        g.launch(); g.station = [9000.,0,9000.]; g.speed = 0; g.p.system = 4
+        g.disabled_ship = dict(object=[0.,0.,600.],hull=8)
+        g.ship_target = g.disabled_ship['object']
+        g.fire_laser()
+        self.assertIsNone(g.disabled_ship)
+        self.assertGreaterEqual(len(g.fragments),2)
+        self.assertTrue(all(len(f) == 4 for f in g.fragments))
+
     def test_can_pass_station_at_safe_distance_and_reverse(self):
         g = self.game
         g.launch(); g.station = [500,0,66]; g.speed = 50

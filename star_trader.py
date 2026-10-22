@@ -66,6 +66,8 @@ LASERS = {'pulse': (0.30, 1), 'beam': (0.14, 1), 'military': (0.12, 2), 'mining'
 # Full strength of NPC ships; the first half of it is shields, the rest hull.
 ENEMY_STRENGTH = {'pirate': 6, 'police': 10}
 MISSILE_SPEED = 1200
+# Fees a pilot can ask a disabled ship for restarting its drive (one unit of your fuel).
+HAIL_ASKS = (50, 120, 250)
 UP, DOWN, LEFT, RIGHT = 1073741906, 1073741905, 1073741904, 1073741903
 GREEN, GOLD, RED = (68, 227, 182), (255, 206, 113), (255, 112, 100)
 SYSTEMS = [
@@ -658,7 +660,7 @@ class Game:
         self.stars = [[random.uniform(-1000,1000),random.uniform(-650,650),random.uniform(-1800,1800)] for _ in range(180)]
         self.broken_down = False
         self.breakdown_in = None
-        self.disabled_ship = None
+        self.disabled_ship = self.hail = None
         self.explosions,self.missiles_in_flight = [],[]
         self.assist_spawn_timer = 35.
         self.dock_clearance = self.docking_pending = 0.
@@ -702,7 +704,7 @@ class Game:
             self.p.maintenance = min(100,self.p.maintenance+self.p.departure_wear())
         self.breakdown_in = random.uniform(8,25) if departure and random.random() < self.breakdown_risk() else None
         self.broken_down = False
-        self.disabled_ship = None
+        self.disabled_ship = self.hail = None
         self.explosions,self.missiles_in_flight = [],[]
         self.assist_spawn_timer = 35.
         self.dock_clearance = self.docking_pending = 0.
@@ -762,6 +764,7 @@ class Game:
             if mode in ('market','outfit','departure','launch_warning','bank','jobs','exchange','trade_deal','redeem','prison'): return 'market'
             if mode == 'trades': mode = 'money'; continue
             if mode in ('flight','cruise','hyperspace','dead'): return mode
+            if mode == 'hail': return 'flight'
             attr = {'money':'money_return','vms':'vms_return','help':'help_return','updates':'update_return','map':'map_return','menu':'menu_return','notes':'notes_return','rename':'rename_return','intro':'intro_return','feedback':'feedback_return','planet_profile':'map_return','engineering':'engineering_return'}.get(mode)
             if not attr: return 'flight'
             mode = getattr(self,attr,'flight')
@@ -1603,6 +1606,67 @@ class Game:
             self.autodock = False
         if amount >= 1: self.checkpoint()
 
+    def hail_disabled_ship(self):
+        ship = self.disabled_ship
+        if not ship: self.message = 'No disabled ship to hail. They appear as gold DISABLED SHIP contacts.'; return
+        if math.sqrt(sum(v*v for v in ship['object'])) > 1500: self.message = 'Close within 1,500 m to hail the disabled ship.'; return
+        if ship.get('refused'): self.message = 'The crew will not talk to you again. They are waiting for the station service.'; return
+        # How much the stranded crew will really pay: more when their hull is failing.
+        budget = ship.setdefault('budget',random.randint(70,200)+(60 if ship['hull'] < 20 else 0))
+        self.hail = dict(budget=budget,counter=None,rounds=0)
+        self.mode = 'hail'
+        self.keys.clear()
+        self.message = 'Channel open to the disabled ship.'
+
+    def hail_ask(self, ask):
+        h = self.hail
+        if ask <= h['budget']: return self.hail_settle(ask)
+        h['rounds'] += 1
+        if h['rounds'] > 2:
+            self.disabled_ship['refused'] = True
+            self.hail = None
+            self.mode = 'flight'
+            self.message = 'Captain: "You are a pirate in all but name. We will wait for the station service." Channel closed.'
+            return
+        h['counter'] = h['budget']//10*10
+        self.message = f'Captain: "{ask} is robbery. We can pay {h["counter"]} credits." (4 accepts)'
+
+    def hail_settle(self, fee):
+        if self.p.fuel < 1: self.message = 'You need at least 1 unit of fuel to restart their drive.'; return
+        self.p.fuel = round(self.p.fuel-1,5)
+        self.p.credits += fee
+        self.end_hail(f'Drive restarted with 1 unit of your fuel. The crew paid {fee} credits and jumped clear.')
+
+    def hail_cargo(self):
+        if self.p.fuel < 1: self.message = 'You need at least 1 unit of fuel to restart their drive.'; return
+        space = self.p.capacity-sum(self.p.cargo)
+        if space <= 0: self.message = 'Your hold is full, so they cannot pay in cargo.'; return
+        good = random.choice((0,1,3,4,5))
+        tonnes = min(space,max(1,self.hail['budget']//max(1,quote(self.p.system,good,False))),6)
+        self.p.fuel = round(self.p.fuel-1,5)
+        self.p.cargo[good] += tonnes
+        self.end_hail(f'Drive restarted. The crew paid in cargo: {tonnes} t of {GOODS[good].lower()}.')
+
+    def end_hail(self, message):
+        self.explode(self.disabled_ship['object'],.4)
+        self.disabled_ship = self.ship_target = self.hail = None
+        self.assist_spawn_timer = 90
+        self.mode = 'flight'
+        self.message = message
+        self.checkpoint()
+
+    def draw_hail(self):
+        d,h = self.d,self.hail
+        d.text(35,85,'COMMS / DISABLED SHIP',GOLD)
+        d.text(45,140,'Captain: "Our drive is dead and we are a sitting target out here.')
+        d.text(45,168,'Can you restart us? It takes one unit of your fuel. Name your price."')
+        for i,ask in enumerate(HAIL_ASKS): d.text(45,230+i*36,f'{i+1}  Ask {ask} credits')
+        d.text(45,338,f'4  Accept their offer of {h["counter"]} credits' if h['counter'] else '4  (no counter-offer yet)',GREEN if h['counter'] else (120,140,150))
+        d.text(45,374,'5  Ask to be paid in cargo instead')
+        d.text(45,440,f'Asks rejected so far: {h["rounds"]} of 2. Push too hard and they stop talking.',(135,175,185))
+        d.text(45,476,'Or fire on them: a destroyed ship spills cargo you can scoop, but lawful stations fine you.',(135,175,185))
+        d.text(45,540,'BACKSPACE closes the channel.',(135,175,185))
+
     def explode(self, position, size=1.):
         self.explosions.append(dict(position=list(position[:3]),remaining=.8,size=size))
 
@@ -2173,6 +2237,11 @@ class Game:
             if k == UP: self.trades_page = min(pages-1,self.trades_page+1)
             elif k == DOWN: self.trades_page = max(0,self.trades_page-1)
             return
+        if self.mode == 'hail':
+            if k in (ord('1'),ord('2'),ord('3')): self.hail_ask(HAIL_ASKS[k-ord('1')])
+            elif k == ord('4') and self.hail['counter']: self.hail_settle(self.hail['counter'])
+            elif k == ord('5'): self.hail_cargo()
+            return
         if self.mode == 'intro':
             naming = self.intro_page == 0
             if k == 8 and naming: self.p.name = self.p.name[:-1]
@@ -2465,6 +2534,9 @@ class Game:
                 self.message = 'Cruise cancelled. Lock a new course or continue from the map.'
             return
         if self.mode != 'flight': return
+        if k == ord('n') and self.mode == 'flight':
+            self.hail_disabled_ship()
+            return
         if k == ord('7'):
             self.request_docking()
             return
@@ -3119,7 +3191,7 @@ class Game:
         self.assist_spawn_timer -= dt
         if self.assist_spawn_timer <= 0 and self.disabled_ship is None and self.enemy is None and math.sqrt(sum(v*v for v in self.station)) > 1000:
             self.disabled_ship = dict(object=[-160.,70.,850.],hull=40)
-            self.message = 'Disabled ship detected. Select its gold scanner contact; engineering 8.'
+            self.message = 'Disabled ship detected (gold contact). N hails it to offer help; 8 engineering.'
         self.cooldown = max(0,self.cooldown-dt)
         self.flash = max(0,self.flash-dt)
         self.laser_flash = max(0,self.laser_flash-dt)
@@ -3299,11 +3371,14 @@ class Game:
             self.disabled_ship['hull'] -= power*8
             if self.disabled_ship['hull'] <= 0:
                 self.explode(obj)
+                # The wreck spills cargo canisters that fitted scoops can collect.
+                spill = [random.choice((0,1,3,4,5,5,6,8)) for _ in range(random.randint(2,4))]
+                self.fragments += [[obj[0]+random.uniform(-40,40),obj[1]+random.uniform(-25,25),obj[2],good] for good in spill]
                 self.disabled_ship = self.ship_target = None
                 self.p.kills += 1
                 lawful = not self.p.deep_space and PROFILES[self.p.system][0] not in ('Anarchy','Feudal')
                 if lawful: self.p.fine += 100
-                self.message = 'Disabled ship destroyed.'+(' Attacking a helpless vessel: 100 cr fine.' if lawful else '')
+                self.message = 'Disabled ship destroyed: cargo canisters spilled.'+(' Attacking a helpless vessel: 100 cr fine.' if lawful else ' Fly slowly to scoop them.')
                 self.checkpoint()
             else: self.message = f'Disabled ship hit: hull {self.disabled_ship["hull"]/40*100:.0f}%.'
         elif kind == 'station':
@@ -3544,6 +3619,11 @@ class Game:
         elif self.mode == 'departure':
             self.mouse_button(50,row_y,300,'Launch when cleared',ord('l'))
             self.mouse_button(370,row_y,250,'Cancel',27)
+        elif self.mode == 'hail':
+            for i,ask in enumerate(HAIL_ASKS): self.mouse_button(35+i*200,600,190,f'Ask {ask}',ord('1')+i)
+            if self.hail['counter']: self.mouse_button(635,600,200,f'Accept {self.hail["counter"]}',ord('4'))
+            self.mouse_button(35,674,300,'Paid in cargo 5',ord('5'))
+            self.mouse_button(735,674,300,'Close channel',action=self.mouse_back)
         elif self.mode == 'distress':
             for i in range(len(self.rescue['offers'])):
                 self.mouse_row(35,169+i*38,1000,38,lambda i=i:self.rescue.update(selected=i))
@@ -3567,7 +3647,7 @@ class Game:
             groups=[('Flight', [('Thrust W',ord('w'),True),('Brake S',ord('s'),True),('Fire Spc',32,True),('Left',LEFT,True),('Up',UP,True),('Right',RIGHT,True),('Roll Q',ord('q'),True),('Down',DOWN,True),('Roll E',ord('e'),True)]),
                 ('Nav',[('Nav G',ord('g'),False),('Hold jump',ord('h'),True),('Cruise',ord('t'),False),('Station',ord('d'),False),('Planet',ord('p'),False),('Rocks',ord('a'),False),('Sun',ord('j'),False),('Scoop',ord('o'),False),('Guide ON' if self.course_assist else 'Guide Y',ord('y'),False)]),
                 ('Combat',[('Fire',32,True),('View 4',ord('4'),False),('Laser',ord('v'),False),('Missile',ord('m'),False),('Mine',ord('b'),False),('Jammer',ord('z'),False),('Cloak',ord('k'),False),('Target',ord('5'),False)]),
-                ('Safety',[('Surrender 7' if not self.p.deep_space and self.station_hostilities[self.p.system] and self.arrest_pending() and not self.surrendering else 'Radio 7',ord('7'),False),('Autodock',ord('c'),False),('Skills',ord('8'),False),('Distress',ord('6'),False),('Fine ON' if self.fine_control else 'Fine I',ord('i'),False)])]
+                ('Safety',[('Surrender 7' if not self.p.deep_space and self.station_hostilities[self.p.system] and self.arrest_pending() and not self.surrendering else 'Radio 7',ord('7'),False),('Hail N',ord('n'),False),('Autodock',ord('c'),False),('Skills',ord('8'),False),('Distress',ord('6'),False),('Fine ON' if self.fine_control else 'Fine I',ord('i'),False)])]
             d.fill(30,105,350,270,(5,16,27));d.rect(30,105,350,270,GREEN)
             d.text(40,112,'FLIGHT CONTROLS',GOLD)
             for i,(title,_) in enumerate(groups):
@@ -3596,7 +3676,7 @@ class Game:
                        'menu':'menu_return','notes':'notes_return','rename':'rename_return','intro':'intro_return','feedback':'feedback_return',
                        'money':'money_return','vms':'vms_return','outfit':'outfit_return',
                        'engineering':'engineering_return','launch_warning':'launch_return'}
-            fixed = {'planet_profile':'map','redeem':'money','bank':'money','jobs':'money','trades':'money',
+            fixed = {'planet_profile':'map','redeem':'money','bank':'money','jobs':'money','trades':'money','hail':'flight',
                      'exchange':'money','trade_deal':'market','departure':'market'}
             if self.mode in returns: self.mode = getattr(self,returns[self.mode],'market')
             elif self.mode in fixed: self.mode = fixed[self.mode]
@@ -3733,6 +3813,8 @@ class Game:
             self.draw_launch_warning()
         elif self.mode == 'distress':
             self.draw_distress()
+        elif self.mode == 'hail':
+            self.draw_hail()
         elif self.mode == 'hyperspace':
             self.draw_hyperspace()
         elif self.mode == 'help':
