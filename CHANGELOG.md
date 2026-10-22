@@ -1,3 +1,7 @@
+# 0.7.1 — name your commander on the welcome screen
+
+- New pilots type their commander name on the first welcome page, with a reminder that it can be changed any time under Menu, Commander name.
+
 # 0.7.0 — your bug reports and suggestions
 
 Everything here came from in-game reports.

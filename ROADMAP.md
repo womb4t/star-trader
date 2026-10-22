@@ -51,6 +51,16 @@ See [MULTIPLAYER.md](MULTIPLAYER.md) for the recorded exchange design questions.
 - Link listings to the future asset marketplace and bounty system; posting a notice alone must not transfer ownership, credits or criminal status.
 - Keep planet profiles as the entry point for local information and these future communication features. No messaging or player notices are enabled in this release.
 
+## Commander and ship scanner (future)
+
+Requested 22 October 2026. Let pilots scan for other commanders and ships within a radius:
+
+- A scanner mode listing every ship in range (other commanders, pirates, police, traders, disabled ships) with commander name, ship type, distance and bearing, nearest first.
+- Range depends on equipment: a short standard range, extended by a purchasable long-range scanner module; cloaked ships stay hidden or show only as an unidentified contact.
+- Search by commander name to find a friend (or a target) in the current system; select a result to set a navigation marker.
+- Online, the server decides who is in range from authoritative positions, so a modified client cannot reveal everyone in the galaxy. Respect privacy: a pilot could choose to fly "dark" (no name broadcast) at the cost of looking suspicious to police.
+- Later: wanted levels and bounties shown on scan results, so bounty hunters can find wanted commanders.
+
 ## Multiplayer test scope
 
 Keep all eight current systems and travel between stations, with the existing ship/equipment selection. Initial target: up to eight connected testers on a persistent authoritative server. Include cross-system trading, fuel, travel, docking and combat in the first playable test; do not lock everyone to one system. Offline play remains available.

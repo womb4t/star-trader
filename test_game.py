@@ -82,17 +82,28 @@ class GameplayTests(unittest.TestCase):
         from unittest.mock import MagicMock
         g = st.Game(MagicMock())
         self.assertEqual(g.mode,'intro')
-        for _ in range(len(g.INTRO)-1): g.key(13)
+        g.key(13)
+        self.assertEqual(g.intro_page,0)  # asked for a name first
+        self.assertIn('commander name',g.message)
+        g.text_input('Nova Jet')
+        g.key(8); g.text_input('t')
+        self.assertEqual(g.p.name,'Nova Jet')
+        g.key(13)
+        self.assertEqual(g.intro_page,1)
+        for _ in range(len(g.INTRO)-2): g.key(13)
         self.assertEqual(g.intro_page,len(g.INTRO)-1)
         g.key(LEFT := st.LEFT); self.assertEqual(g.intro_page,len(g.INTRO)-2)
         g.key(13); g.key(13)
         self.assertEqual(g.mode,'market')
         self.assertTrue(g.p.intro_seen)
+        self.assertEqual(g.commander_name(),'Nova Jet')
         again = st.Game(MagicMock())
         self.assertEqual(again.mode,'market')
         again.open_utility('menu'); again.choose_menu_action(len(again.menu_actions())-1)
         self.assertEqual((again.mode,again.intro_page),('intro',0))
-        again.key(8)
+        again.key(8)  # the welcome page's name box takes Backspace as a delete
+        self.assertEqual((again.mode,again.p.name),('intro','Nova Je'))
+        again.mouse_back()
         self.assertEqual(again.mode,'market')
 
     def test_backspace_still_deletes_in_text_fields(self):

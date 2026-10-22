@@ -22,7 +22,7 @@ import shutil
 import subprocess
 import textwrap
 
-VERSION = '0.7.0'
+VERSION = '0.7.1'
 HOSTILITY_COOLDOWN_SECONDS = 30*60
 STATION_POLICE_CAPACITY = 6
 # Career points needed for each commander rank: kills, trade profit and hyperspace jumps all count.
@@ -671,6 +671,7 @@ class Game:
         self.rename_return = 'market'
         self.intro_return = 'market'
         self.intro_page = 0
+        self.intro_name_skipped = False
         self.trades_page = 0
         self.text_selection_all = False
         self.text_selection_mode = None
@@ -1822,7 +1823,7 @@ class Game:
     def active_text_field(self):
         if self.mode == 'redeem': return self,'credit_code_text',80
         if self.mode == 'notes': return self.p,'notes',4000
-        if self.mode == 'rename': return self.p,'name',24
+        if self.mode == 'rename' or (self.mode == 'intro' and self.intro_page == 0): return self.p,'name',24
         if self.mode == 'feedback': return self,'feedback_text',1500
         if self.mode == 'bank' and self.bank_custom is not None: return self,'bank_custom',9
         return None
@@ -1834,7 +1835,7 @@ class Game:
         before = '' if self.text_selection_all and self.text_selection_mode == self.mode else getattr(owner,name)
         self.text_selection_all = False
         text = text.replace('\r\n','\n').replace('\r','\n')
-        text = ''.join(c for c in text if c.isprintable() or c == '\n' and self.mode not in ('redeem','rename'))
+        text = ''.join(c for c in text if c.isprintable() or c == '\n' and self.mode not in ('redeem','rename','intro'))
         if name == 'bank_custom': text = ''.join(c for c in text if c.isdigit())
         setattr(owner,name,(before+text)[:limit])
         if self.mode == 'notes': self.notes_scroll = 0
@@ -1907,7 +1908,7 @@ class Game:
         ('WELCOME, COMMANDER',[
             'You are a freelance starship commander. You start docked at Halvora station with a small trading ship, 150 credits, a pulse laser and three missiles. Nobody knows your name yet.',
             'Eight star systems lie within reach, each with its own government, economy and technology. Lawful stations are patrolled and police their space; Anarchy and Feudal ports are frontier territory where anything goes.',
-            'Set your commander name any time under Menu, Commander name.']),
+            'First, what should we call you? Type your commander name below.']),
         ('THE POINT OF THE GAME',[
             'Make your fortune and your name. Buy low and sell high, upgrade your ship, and climb the ranks from Newbie to Legend. Kills, trading profit and hyperspace jumps all count.',
             'Trade honestly, smuggle contraband for Crymto, or hunt pirates for bounties. Break the law and you face fines, station police and even prison.',
@@ -1924,6 +1925,12 @@ class Game:
             'The game updates itself when a new version is released, so your idea might arrive in the next one. Good luck, Commander.'])]
 
     def intro_next(self):
+        if self.intro_page == 0:
+            self.p.name = self.p.name.strip()
+            if not self.p.name and not self.intro_name_skipped:
+                self.intro_name_skipped = True
+                self.message = 'Type a commander name first, or press ENTER again to stay Unnamed for now.'
+                return
         if self.intro_page < len(self.INTRO)-1:
             self.intro_page += 1
             return
@@ -1943,6 +1950,12 @@ class Game:
                 d.text(45,y,line)
                 y += 26
             y += 16
+        if self.intro_page == 0:
+            d.text(45,y,'COMMANDER NAME',GOLD)
+            d.rect(45,y+28,620,46,GOLD)
+            if self.text_selection_all and self.text_selection_mode == 'intro' and self.p.name: d.fill(50,y+34,len(self.p.name)*11+8,34,(20,65,70))
+            d.text(57,y+40,self.p.name+('_' if int(time.monotonic()*2)%2 == 0 else ''),GOLD)
+            d.text(45,y+90,'You can change it any time under Menu, Commander name.',(135,175,185))
         d.text(45,615,'ENTER or RIGHT continues. LEFT goes back a page. You can reopen this from Menu.',(135,175,185))
 
     def finish_rename(self):
@@ -2077,6 +2090,7 @@ class Game:
             self.rename_return,self.mode = self.mode,'rename'
         elif target == 'intro':
             self.intro_return,self.mode,self.intro_page = self.mode,'intro',0
+            self.intro_name_skipped = False
         elif target == 'updates':
             self.update_return,self.mode = self.mode,'updates'
         elif target == 'feedback':
@@ -2160,7 +2174,9 @@ class Game:
             elif k == DOWN: self.trades_page = max(0,self.trades_page-1)
             return
         if self.mode == 'intro':
-            if k in (13,RIGHT,32): self.intro_next()
+            naming = self.intro_page == 0
+            if k == 8 and naming: self.p.name = self.p.name[:-1]
+            elif k in (13,RIGHT) or (k == 32 and not naming): self.intro_next()
             elif k == LEFT: self.intro_page = max(0,self.intro_page-1)
             return
         if self.mode == 'prison':
