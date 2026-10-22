@@ -22,7 +22,7 @@ import shutil
 import subprocess
 import textwrap
 
-VERSION = '0.8.0'
+VERSION = '0.8.1'
 HOSTILITY_COOLDOWN_SECONDS = 30*60
 STATION_POLICE_CAPACITY = 6
 # Career points needed for each commander rank: kills, trade profit and hyperspace jumps all count.
@@ -1684,6 +1684,24 @@ class Game:
         self.faults = {name for name,limit in DAMAGE_FAULTS.items() if self.p.hull < limit and random.random() < .2+.6*(limit-self.p.hull)/limit}
         new = self.faults-before
         if new: self.message = 'DAMAGE: '+', '.join(FAULT_LABELS[name] for name in sorted(new))+'. Repairs at a station fix it.'
+
+    def disabled_ship_struck(self):
+        # Like stations, a stranded crew allows for stray fire from a fight nearby before shooting back.
+        ship,now = self.disabled_ship,time.time()
+        if ship.get('hostile'):
+            self.message = f'Disabled ship hit: hull {ship["hull"]/40*100:.0f}%.'
+            return
+        if now-ship.get('strike_at',0) > STRAY_SHOT_RESET: ship['strikes'] = 0
+        ship['strikes'] = ship.get('strikes',0)+1
+        ship['strike_at'] = now
+        if ship['strikes'] > STRAY_SHOT_LIMIT:
+            ship['hostile'] = True
+            self.message = f'Disabled ship hit: hull {ship["hull"]/40*100:.0f}%. "That was no accident!" They are turning to fight.'
+            return
+        left = STRAY_SHOT_LIMIT-ship['strikes']
+        self.message = (f'RADIO, disabled ship: "Cease fire! You hit us, we are a stranded vessel." Hull {ship["hull"]/40*100:.0f}%. '
+                        +(f'{left} more hit{"s" if left > 1 else ""} and they fire back.' if left else 'One more hit and they fire back.'))
+        self.alert = dict(text=self.message,remaining=5.,elapsed=0.)
 
     def update_disabled_ship(self, dt):
         # A crew under attack swings what little thrust they have to aim back at you.
@@ -3427,9 +3445,7 @@ class Game:
                 if lawful: self.p.fine += 100
                 self.message = 'Disabled ship destroyed: cargo canisters spilled.'+(' Attacking a helpless vessel: 100 cr fine.' if lawful else ' Fly slowly to scoop them.')
                 self.checkpoint()
-            else:
-                self.disabled_ship['hostile'] = True
-                self.message = f'Disabled ship hit: hull {self.disabled_ship["hull"]/40*100:.0f}%. They are turning to fight!'
+            else: self.disabled_ship_struck()
         elif kind == 'station':
             self.station_struck()
         elif kind == 'asteroid' and weapon == 'mining':

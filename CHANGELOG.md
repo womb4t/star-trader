@@ -1,3 +1,7 @@
+# 0.8.1 — disabled ships allow for stray fire
+
+- Like stations, a disabled ship treats its first three hits as stray fire from a nearby fight: the crew radios "Cease fire!" with a count of hits left. A fourth hit within five minutes and they fire back. Quiet for five minutes and the count resets. They will still negotiate after stray hits.
+
 # 0.8.0 — salvage, negotiation and battle damage
 
 - **Hail disabled ships (N).** Offer to restart a stranded ship's drive with one unit of your fuel and name your price: 50, 120 or 250 cr. The crew accepts what they can afford (more when their hull is failing), counters with their limit, and stops talking if you push too hard. They can pay in cargo instead.

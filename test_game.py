@@ -1116,6 +1116,16 @@ class GameplayTests(unittest.TestCase):
         self.assertEqual(g.mode,'flight')
         self.assertGreater(sum(g.p.cargo),0)
 
+    def test_stray_hits_on_a_disabled_ship_reset_after_a_quiet_spell(self):
+        g = self.game
+        g.launch(); g.station = [9000.,0,9000.]; g.speed = 0
+        g.disabled_ship = dict(object=[0.,0.,600.],hull=400)
+        for _ in range(st.STRAY_SHOT_LIMIT): g.disabled_ship_struck()
+        g.disabled_ship['strike_at'] -= st.STRAY_SHOT_RESET+1
+        g.disabled_ship_struck()
+        self.assertFalse(g.disabled_ship.get('hostile'))
+        self.assertEqual(g.disabled_ship['strikes'],1)
+
     def test_destroyed_disabled_ship_spills_scoopable_cargo(self):
         g = self.game
         g.launch(); g.station = [9000.,0,9000.]; g.speed = 0; g.p.system = 4
@@ -1147,9 +1157,13 @@ class GameplayTests(unittest.TestCase):
     def test_attacked_disabled_ship_fires_back_and_refuses_to_talk(self):
         g = self.game
         g.launch(); g.station = [9000.,0,9000.]; g.speed = 0; g.spawn = 1e9; g.p.system = 4
-        g.disabled_ship = dict(object=[0.,0.,600.],hull=40)
+        g.disabled_ship = dict(object=[0.,0.,600.],hull=400)  # tough enough to survive the test volley
         g.ship_target = g.disabled_ship['object']
-        g.fire_laser()
+        for hit in range(st.STRAY_SHOT_LIMIT):
+            g.cooldown = 0; g.fire_laser()
+            self.assertFalse(g.disabled_ship.get('hostile'))
+            self.assertIn('Cease fire',g.message)
+        g.cooldown = 0; g.fire_laser()
         self.assertTrue(g.disabled_ship['hostile'])
         g.disabled_ship['shot_timer'] = 0
         shield,hull = g.shield,g.p.hull
