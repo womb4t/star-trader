@@ -1,3 +1,7 @@
+# 0.8.2 — clearer damage wording
+
+- A damaged laser now shows LASER MALFUNCTIONING (and "LASER MALFUNCTION" when a shot misfires), so it is not confused with the signal jammer.
+
 # 0.8.1 — disabled ships allow for stray fire
 
 - Like stations, a disabled ship treats its first three hits as stray fire from a nearby fight: the crew radios "Cease fire!" with a count of hits left. A fourth hit within five minutes and they fire back. Quiet for five minutes and the count resets. They will still negotiate after stray hits.

@@ -22,7 +22,7 @@ import shutil
 import subprocess
 import textwrap
 
-VERSION = '0.8.1'
+VERSION = '0.8.2'
 HOSTILITY_COOLDOWN_SECONDS = 30*60
 STATION_POLICE_CAPACITY = 6
 # Career points needed for each commander rank: kills, trade profit and hyperspace jumps all count.
@@ -70,7 +70,7 @@ MISSILE_SPEED = 1200
 HAIL_ASKS = (50, 120, 250)
 # Ship systems that start failing below these hull levels (%), worse the lower it goes.
 DAMAGE_FAULTS = {'scanner': 60, 'bearing': 45, 'laser': 30}
-FAULT_LABELS = {'scanner': 'SCANNER FAULT', 'bearing': 'BEARING OFFLINE', 'laser': 'LASER JAMMING'}
+FAULT_LABELS = {'scanner': 'SCANNER FAULT', 'bearing': 'BEARING OFFLINE', 'laser': 'LASER MALFUNCTIONING'}
 UP, DOWN, LEFT, RIGHT = 1073741906, 1073741905, 1073741904, 1073741903
 GREEN, GOLD, RED = (68, 227, 182), (255, 206, 113), (255, 112, 100)
 SYSTEMS = [
@@ -3413,7 +3413,7 @@ class Game:
         self.cancel_surrender('weapons fired.')
         if 'laser' in self.faults and random.random() < .5:
             self.cooldown = .8
-            self.message = 'LASER JAMMED: damaged emitter misfired.'
+            self.message = 'LASER MALFUNCTION: damaged emitter misfired.'
             return
         weapon = 'pulse' if self.rear_view else self.p.laser
         delay,power = LASERS[weapon]

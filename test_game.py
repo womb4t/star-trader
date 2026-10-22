@@ -1150,7 +1150,7 @@ class GameplayTests(unittest.TestCase):
         with patch('star_trader.random.random',return_value=0.):
             g.cooldown = 0; g.fire_laser()
         self.assertEqual(g.enemy[3],6)
-        self.assertIn('JAMMED',g.message)
+        self.assertIn('MALFUNCTION',g.message)
         g.p.hull = 100; g.fault_timer = 0; g.update_faults(.1)
         self.assertEqual(g.faults,set())
 
