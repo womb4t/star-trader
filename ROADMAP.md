@@ -60,6 +60,7 @@ Requested 22 October 2026. Let pilots scan for other commanders and ships within
 - Search by commander name to find a friend (or a target) in the current system; select a result to set a navigation marker.
 - Online, the server decides who is in range from authoritative positions, so a modified client cannot reveal everyone in the galaxy. Respect privacy: a pilot could choose to fly "dark" (no name broadcast) at the cost of looking suspicious to police.
 - Later: wanted levels and bounties shown on scan results, so bounty hunters can find wanted commanders.
+- **Deployable watch beacons (tripwires).** Drop a small device in space, set to watch for chosen commander names, ship types or wanted levels within its radius. When something matching passes, it sends a deep space message to its owner (wherever they are, delivered next time they are online if not). Questions to settle before building: purchase cost and limits per pilot, battery life or expiry, whether other pilots can detect, destroy or salvage a beacon, a minimum spacing from stations and routes, and false-alarm and spam limits on messages. Online, the server owns beacons and does the matching.
 
 ## Multiplayer test scope
 
