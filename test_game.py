@@ -1126,6 +1126,39 @@ class GameplayTests(unittest.TestCase):
         self.assertGreaterEqual(len(g.fragments),2)
         self.assertTrue(all(len(f) == 4 for f in g.fragments))
 
+    def test_damage_slows_handling_and_breaks_systems(self):
+        g = self.game
+        g.launch(); g.station = [9000.,0,9000.]; g.spawn = 1e9
+        self.assertEqual(g.handling(),1.)
+        g.p.hull = 0; self.assertAlmostEqual(g.handling(),.4)
+        g.p.hull = 10; g.fault_timer = 0
+        with patch('star_trader.random.random',return_value=0.):
+            g.update_faults(.1)
+        self.assertEqual(g.faults,{'scanner','bearing','laser'})
+        self.assertIn('DAMAGE',g.message)
+        g.enemy_kind = 'pirate'; g.enemy = [0.,0.,800.,6,0.]
+        with patch('star_trader.random.random',return_value=0.):
+            g.cooldown = 0; g.fire_laser()
+        self.assertEqual(g.enemy[3],6)
+        self.assertIn('JAMMED',g.message)
+        g.p.hull = 100; g.fault_timer = 0; g.update_faults(.1)
+        self.assertEqual(g.faults,set())
+
+    def test_attacked_disabled_ship_fires_back_and_refuses_to_talk(self):
+        g = self.game
+        g.launch(); g.station = [9000.,0,9000.]; g.speed = 0; g.spawn = 1e9; g.p.system = 4
+        g.disabled_ship = dict(object=[0.,0.,600.],hull=40)
+        g.ship_target = g.disabled_ship['object']
+        g.fire_laser()
+        self.assertTrue(g.disabled_ship['hostile'])
+        g.disabled_ship['shot_timer'] = 0
+        shield,hull = g.shield,g.p.hull
+        with patch('star_trader.random.random',return_value=0.):
+            g.update_disabled_ship(.1)
+        self.assertLess(g.shield+g.p.hull,shield+hull)
+        g.key(ord('n'))
+        self.assertIn('after you fired',g.message)
+
     def test_can_pass_station_at_safe_distance_and_reverse(self):
         g = self.game
         g.launch(); g.station = [500,0,66]; g.speed = 50

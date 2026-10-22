@@ -22,7 +22,7 @@ import shutil
 import subprocess
 import textwrap
 
-VERSION = '0.7.1'
+VERSION = '0.8.0'
 HOSTILITY_COOLDOWN_SECONDS = 30*60
 STATION_POLICE_CAPACITY = 6
 # Career points needed for each commander rank: kills, trade profit and hyperspace jumps all count.
@@ -68,6 +68,9 @@ ENEMY_STRENGTH = {'pirate': 6, 'police': 10}
 MISSILE_SPEED = 1200
 # Fees a pilot can ask a disabled ship for restarting its drive (one unit of your fuel).
 HAIL_ASKS = (50, 120, 250)
+# Ship systems that start failing below these hull levels (%), worse the lower it goes.
+DAMAGE_FAULTS = {'scanner': 60, 'bearing': 45, 'laser': 30}
+FAULT_LABELS = {'scanner': 'SCANNER FAULT', 'bearing': 'BEARING OFFLINE', 'laser': 'LASER JAMMING'}
 UP, DOWN, LEFT, RIGHT = 1073741906, 1073741905, 1073741904, 1073741903
 GREEN, GOLD, RED = (68, 227, 182), (255, 206, 113), (255, 112, 100)
 SYSTEMS = [
@@ -662,6 +665,7 @@ class Game:
         self.breakdown_in = None
         self.disabled_ship = self.hail = None
         self.explosions,self.missiles_in_flight = [],[]
+        self.faults,self.fault_timer = set(),3.
         self.assist_spawn_timer = 35.
         self.dock_clearance = self.docking_pending = 0.
         self.rescue = None
@@ -706,6 +710,7 @@ class Game:
         self.broken_down = False
         self.disabled_ship = self.hail = None
         self.explosions,self.missiles_in_flight = [],[]
+        self.faults,self.fault_timer = set(),3.
         self.assist_spawn_timer = 35.
         self.dock_clearance = self.docking_pending = 0.
         self.world_basis = [[1.,0.,0.],[0.,1.,0.],[0.,0.,1.]]
@@ -1610,7 +1615,7 @@ class Game:
         ship = self.disabled_ship
         if not ship: self.message = 'No disabled ship to hail. They appear as gold DISABLED SHIP contacts.'; return
         if math.sqrt(sum(v*v for v in ship['object'])) > 1500: self.message = 'Close within 1,500 m to hail the disabled ship.'; return
-        if ship.get('refused'): self.message = 'The crew will not talk to you again. They are waiting for the station service.'; return
+        if ship.get('refused') or ship.get('hostile'): self.message = 'The crew will not talk to you'+(' after you fired on them.' if ship.get('hostile') else ' again. They are waiting for the station service.'); return
         # How much the stranded crew will really pay: more when their hull is failing.
         budget = ship.setdefault('budget',random.randint(70,200)+(60 if ship['hull'] < 20 else 0))
         self.hail = dict(budget=budget,counter=None,rounds=0)
@@ -1666,6 +1671,32 @@ class Game:
         d.text(45,440,f'Asks rejected so far: {h["rounds"]} of 2. Push too hard and they stop talking.',(135,175,185))
         d.text(45,476,'Or fire on them: a destroyed ship spills cargo you can scoop, but lawful stations fine you.',(135,175,185))
         d.text(45,540,'BACKSPACE closes the channel.',(135,175,185))
+
+    def handling(self):
+        # A battered hull answers the controls slowly: 100% at full hull, 40% at zero.
+        return .4+.6*max(0,min(100,self.p.hull))/100
+
+    def update_faults(self, dt):
+        self.fault_timer -= dt
+        if self.fault_timer > 0: return
+        self.fault_timer = 3.
+        before = set(self.faults)
+        self.faults = {name for name,limit in DAMAGE_FAULTS.items() if self.p.hull < limit and random.random() < .2+.6*(limit-self.p.hull)/limit}
+        new = self.faults-before
+        if new: self.message = 'DAMAGE: '+', '.join(FAULT_LABELS[name] for name in sorted(new))+'. Repairs at a station fix it.'
+
+    def update_disabled_ship(self, dt):
+        # A crew under attack swings what little thrust they have to aim back at you.
+        ship = self.disabled_ship
+        if not ship or not ship.get('hostile'): return
+        if math.sqrt(sum(v*v for v in ship['object'])) > 1200: return
+        ship['shot_timer'] = ship.get('shot_timer',1.5)-dt
+        if ship['shot_timer'] > 0: return
+        ship['shot_timer'] = 2.8
+        self.enemy_shot = dict(position=ship['object'][:3],kind='disabled',remaining=.25)
+        if random.random() < .3+.5*max(0,ship['hull'])/40:
+            self.damage(5)
+            self.message = 'The disabled ship is returning fire!'
 
     def explode(self, position, size=1.):
         self.explosions.append(dict(position=list(position[:3]),remaining=.8,size=size))
@@ -3006,10 +3037,15 @@ class Game:
         d.line(955,160,960,171,(235,245,250))
         d.text(920,105,'AHEAD',GREEN)
         d.text(920,203,'BEHIND',GREEN)
-        for kind,obj,label,color in self.scanner_contacts():
-            x,y = self.scanner_position(obj)
-            d.fill(x-3,y-3,6,6,color)
-            if kind in ('ship','disabled','player') and obj is self.ship_target: d.rect(x-7,y-7,14,14,GOLD)
+        if 'scanner' in self.faults:
+            for _ in range(14):
+                d.fill(random.randint(860,1048),random.randint(112,214),3,2,(70,90,95))
+            d.text(890,150,'SCANNER FAULT',RED)
+        else:
+            for kind,obj,label,color in self.scanner_contacts():
+                x,y = self.scanner_position(obj)
+                d.fill(x-3,y-3,6,6,color)
+                if kind in ('ship','disabled','player') and obj is self.ship_target: d.rect(x-7,y-7,14,14,GOLD)
         d.text(850,224,'TOP VIEW / click',(135,175,185))
         self.draw_bearing()
 
@@ -3021,6 +3057,9 @@ class Game:
         d.line(885,340,1025,340,(45,105,115))
         d.line(955,290,955,385,(45,105,115))
         d.rect(949,334,12,12,GREEN)
+        if 'bearing' in self.faults:
+            d.text(875,325,'BEARING OFFLINE',RED)
+            return
         obj,label = (self.ship_target,'SHIP') if self.ship_target is not None else self.active_navigation()
         if obj is None: return
         x,y,z = self.camera_vector(obj)
@@ -3196,6 +3235,9 @@ class Game:
         self.flash = max(0,self.flash-dt)
         self.laser_flash = max(0,self.laser_flash-dt)
         self.update_explosions_and_missiles(dt)
+        if self.mode == 'flight':
+            self.update_faults(dt)
+            self.update_disabled_ship(dt)
         if self.p.hull <= 0:
             self.mode = 'dead'
             return
@@ -3222,7 +3264,7 @@ class Game:
             self.speed += max(-70*dt/mass,min(70*dt/mass,desired-self.speed))
         else:
             self.speed = max(-60/mass,min(180/mass+self.assist_speed,self.speed+((ord('w') in self.keys)-(ord('s') in self.keys))*70*dt/mass))
-            precision = .2 if self.fine_control else 1.
+            precision = (.2 if self.fine_control else 1.)*self.handling()
             self.roll += ((ord('e') in self.keys)-(ord('q') in self.keys))*dt/mass*precision
             yaw = ((RIGHT in self.keys)-(LEFT in self.keys))*.65*dt/mass*precision
             pitch = ((DOWN in self.keys)-(UP in self.keys))*.5*dt/mass*precision
@@ -3239,8 +3281,9 @@ class Game:
                 x,y,z = target[:3]
                 c,s = math.cos(self.roll),math.sin(self.roll)
                 x,y = x*c+y*s,-x*s+y*c
-                yaw = max(-.65*dt/mass,min(.65*dt/mass,math.atan2(x,z)))
-                pitch = max(-.5*dt/mass,min(.5*dt/mass,math.atan2(y,math.hypot(x,z))))
+                turn = self.handling()
+                yaw = max(-.65*dt/mass*turn,min(.65*dt/mass*turn,math.atan2(x,z)))
+                pitch = max(-.5*dt/mass*turn,min(.5*dt/mass*turn,math.atan2(y,math.hypot(x,z))))
                 if not self.broken_down and self.p.fuel > 0: self.turn_world(yaw,pitch)
         if self.broken_down: self.speed,dx,dy = 0,0,0
         dz = self.speed*dt
@@ -3350,6 +3393,10 @@ class Game:
             return
         self.cloaked = False
         self.cancel_surrender('weapons fired.')
+        if 'laser' in self.faults and random.random() < .5:
+            self.cooldown = .8
+            self.message = 'LASER JAMMED: damaged emitter misfired.'
+            return
         weapon = 'pulse' if self.rear_view else self.p.laser
         delay,power = LASERS[weapon]
         self.cooldown,self.laser_flash = delay,.09
@@ -3380,7 +3427,9 @@ class Game:
                 if lawful: self.p.fine += 100
                 self.message = 'Disabled ship destroyed: cargo canisters spilled.'+(' Attacking a helpless vessel: 100 cr fine.' if lawful else ' Fly slowly to scoop them.')
                 self.checkpoint()
-            else: self.message = f'Disabled ship hit: hull {self.disabled_ship["hull"]/40*100:.0f}%.'
+            else:
+                self.disabled_ship['hostile'] = True
+                self.message = f'Disabled ship hit: hull {self.disabled_ship["hull"]/40*100:.0f}%. They are turning to fight!'
         elif kind == 'station':
             self.station_struck()
         elif kind == 'asteroid' and weapon == 'mining':
@@ -3964,6 +4013,7 @@ class Game:
         self.draw_scanner()
         self.draw_heat_instrument()
         d.text(35,73,'REAR VIEW' if self.rear_view else 'FORWARD VIEW',GOLD)
+        if self.faults: d.text(35,127,'DAMAGE: '+'  '.join(FAULT_LABELS[name] for name in sorted(self.faults)),RED)
         status = self.target_status()
         if status:
             name,shield,hull = status

@@ -1,3 +1,10 @@
+# 0.8.0 — salvage, negotiation and battle damage
+
+- **Hail disabled ships (N).** Offer to restart a stranded ship's drive with one unit of your fuel and name your price: 50, 120 or 250 cr. The crew accepts what they can afford (more when their hull is failing), counters with their limit, and stops talking if you push too hard. They can pay in cargo instead.
+- **Or take it by force.** A destroyed disabled ship spills 2–4 cargo canisters your scoops collect, but a lawful station fines you for attacking a helpless vessel.
+- **Disabled ships fight back.** Fire on one and its crew swings what thrust it has left to return fire; the more damaged it is, the worse it aims.
+- **Battle damage.** Your ship turns more slowly as the hull weakens (down to 40% at zero), and damaged systems fail intermittently: scanner faults below 60% hull, target bearing offline below 45%, laser jams below 30%. Station repairs fix everything.
+
 # 0.7.1 — name your commander on the welcome screen
 
 - New pilots type their commander name on the first welcome page, with a reminder that it can be changed any time under Menu, Commander name.
