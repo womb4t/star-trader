@@ -1,3 +1,10 @@
+# 0.8.4 — fuel and course bearing fixes
+
+From your bug reports:
+
+- **Normal flight burns a quarter of the fuel it did.** Flying out past a station's 5,000 m mass lock and in from a hyperspace arrival used to cost about 1.4 units per trip; it now costs about 0.4. The launch check reserves enough for that flight as well as the jump, so it no longer passes you and then leaves you short.
+- **You can fly toward a galaxy course.** The course arrow and target bearing now stay fixed in space, so turning toward them brings the course ahead. Before, the bearing turned with the ship and could never be reached.
+
 # 0.8.3 — new community server
 
 - The game now connects to the new community server at https://141-147-67-78.sslip.io. Paste your new invite code in Connection settings to join it.

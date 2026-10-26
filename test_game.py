@@ -1246,6 +1246,34 @@ class GameplayTests(unittest.TestCase):
         self.assertAlmostEqual(initial-g.p.fuel,dist*.25)
         self.assertLess(dist*.25,st.hyperspace_cost(dist))
 
+    def test_launch_fuel_check_covers_mass_lock_and_arrival_flight(self):
+        g = self.game
+        g.launch(); g.enemy = None; g.station = [0.,0.,-20000.]
+        g.p.cargo = [0]*len(g.p.cargo); g.p.cargo[0] = 20
+        g.p.fuel,g.speed = 7,100
+        g.update(1)
+        per_metre = (7-g.p.fuel)/100
+        # Out past the mass lock, then in from the farthest hyperspace arrival point.
+        local = per_metre*(st.PATROL_RADIUS+st.PATROL_RADIUS+2000)
+        self.assertLessEqual(local,.5*g.p.mass_factor)
+        g.mode = 'station'; g.p.waypoint = dict(name='Corvant',position=st.coordinates(1),system=1)
+        g.p.fuel = st.hyperspace_cost(st.distance(0,1))+local-.01
+        self.assertTrue(any('Insufficient fuel' in w for w in g.launch_warnings()))
+
+    def test_turning_toward_a_course_bearing_brings_it_ahead(self):
+        g = self.game
+        g.launch(); g.enemy = None; g.nav = 'course'
+        g.p.waypoint = dict(name='Corvant',position=st.coordinates(1),system=1)
+        def off_axis():
+            x,y,z = g.camera_vector(g.active_navigation()[0])
+            return math.atan2(math.hypot(x,y),z)
+        before = off_axis()
+        self.assertGreater(before,.05)
+        for _ in range(200):
+            x,y,z = g.camera_vector(g.active_navigation()[0])
+            g.turn_world(max(-.02,min(.02,math.atan2(x,z))),max(-.02,min(.02,math.atan2(y,math.hypot(x,z)))))
+        self.assertLess(off_axis(),.05)
+
     def test_cancel_cruise_and_jump_from_deep_space(self):
         g = self.game
         g.launch(); g.p.waypoint = dict(name='Corvant',position=st.coordinates(1),system=1)

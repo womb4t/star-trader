@@ -22,7 +22,7 @@ import shutil
 import subprocess
 import textwrap
 
-VERSION = '0.8.3'
+VERSION = '0.8.4'
 HOSTILITY_COOLDOWN_SECONDS = 30*60
 STATION_POLICE_CAPACITY = 6
 # Career points needed for each commander rank: kills, trade profit and hyperspace jumps all count.
@@ -35,6 +35,10 @@ STRAY_SHOT_LIMIT, STRAY_SHOT_FINE, STRAY_SHOT_RESET = 3, 50, 300
 PRISON_DAY_SECONDS, PRISON_MAX_DAYS, PRISON_BRIBE, PRISON_WORK_SECONDS = 3600, 7, 200, 1800
 # Lawful stations patrol this radius (m): pirates do not attack inside it.
 PATROL_RADIUS = 5000
+# Fuel per metre of sub-light flight, per unit of ship mass.
+THRUST_FUEL_PER_METRE = .00003
+# Sub-light flight per jump: out past the mass lock, then in from the farthest arrival point.
+LOCAL_TRIP_METRES = PATROL_RADIUS+PATROL_RADIUS+2000
 # The sun's visible radius (m) and the altitude band above it where fitted scoops collect fuel.
 SUN_RADIUS, SCOOP_ALTITUDE, SCOOP_SPEEDS = 220, 280, (10, 60)
 TRADE_LOG_SIZE = 60
@@ -1049,7 +1053,7 @@ class Game:
         warnings = []
         w = self.p.waypoint
         distance = galactic_distance(self.p.position,w['position']) if w else 0
-        required = hyperspace_cost(distance)+(.4*self.p.mass_factor if distance > .001 else 0) if w else 0
+        required = hyperspace_cost(distance)+(LOCAL_TRIP_METRES*THRUST_FUEL_PER_METRE*self.p.mass_factor if distance > .001 else 0) if w else 0
         if self.p.fuel < 1 or required > self.p.fuel:
             warnings.append(f'Insufficient fuel reserve: aboard {self.p.fuel:.2f}; planned trip {required:.2f}.')
         if w:
@@ -2931,8 +2935,10 @@ class Game:
             w = self.p.waypoint
             delta = [b-a for a,b in zip(self.p.position,w['position'])]
             if math.hypot(*delta) > .001:
-                # Galactic X/Y map axes are shown as a compass bearing, not metres.
-                return [delta[0]*10000,0.,-delta[1]*10000],w['name']+' / COURSE'
+                # Galactic X/Y map axes are shown as a compass bearing, not metres,
+                # fixed in the world frame so turning the ship moves the bearing.
+                bearing = (delta[0]*10000,0.,-delta[1]*10000)
+                return [sum(bearing[i]*self.world_basis[i][j] for i in range(3)) for j in range(3)],w['name']+' / COURSE'
             if not self.p.deep_space: return self.station,w['name']+' / STATION'
             return [0.,0.,500.],w['name']+' / ARRIVED'
         if self.nav == 'asteroid':
@@ -3305,7 +3311,7 @@ class Game:
                 if not self.broken_down and self.p.fuel > 0: self.turn_world(yaw,pitch)
         if self.broken_down: self.speed,dx,dy = 0,0,0
         dz = self.speed*dt
-        required = math.sqrt(dx*dx+dy*dy+dz*dz)*.00012*mass
+        required = math.sqrt(dx*dx+dy*dy+dz*dz)*THRUST_FUEL_PER_METRE*mass
         if required > self.p.fuel and required:
             factor = self.p.fuel/required
             dx,dy,dz = dx*factor,dy*factor,dz*factor
