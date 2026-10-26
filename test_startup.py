@@ -214,5 +214,19 @@ class StartupTests(unittest.TestCase):
         screen.invite_from_signup('not an invite')
         self.assertIsNotNone(screen.signup)
 
+    def test_default_server_is_the_cloud_server(self):
+        self.assertEqual(startup.DEFAULT_SERVER,'https://141-147-67-78.sslip.io')
+
+    def test_invite_starts_a_new_commander_and_forgets_old_fallbacks(self):
+        config = startup.load_connection()
+        config.update(server='https://kentons-imac.tail8cde7d.ts.net',import_local_save=True,
+                      fallback_servers=['http://kentons-imac.local:8766'])
+        startup.save_connection(config)
+        startup.apply_invite(config,startup.make_invite('https://141-147-67-78.sslip.io','Frank','f'*43))
+        saved = startup.load_connection()
+        self.assertFalse(saved['import_local_save'])
+        self.assertEqual(saved['fallback_servers'],[])
+        self.assertEqual(saved['server'],'https://141-147-67-78.sslip.io')
+
 
 if __name__ == '__main__': unittest.main()

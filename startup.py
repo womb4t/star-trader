@@ -11,7 +11,7 @@ import time
 import urllib.parse
 
 # The one community server for now; an invite code fills in everything else.
-DEFAULT_SERVER = 'https://kentons-imac.tail8cde7d.ts.net'
+DEFAULT_SERVER = 'https://141-147-67-78.sslip.io'
 INVITE_PREFIX = 'STAR-TRADER-INVITE:'
 
 
@@ -67,7 +67,8 @@ def store_account(config, server, name, token):
     fd = os.open(token_file,os.O_WRONLY|os.O_CREAT|os.O_TRUNC,0o600)
     with os.fdopen(fd,'w') as out: out.write(token+'\n')
     token_file.chmod(0o600)
-    config.update(server=server,token_file=str(token_file),allow_lan=True,import_local_save=True)
+    # A new account starts a new commander; fallbacks belonged to the previous server.
+    config.update(server=server,token_file=str(token_file),allow_lan=True,import_local_save=False,fallback_servers=[])
     save_connection(config)
 
 

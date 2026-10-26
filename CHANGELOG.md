@@ -1,3 +1,8 @@
+# 0.8.3 — new community server
+
+- The game now connects to the new community server at https://141-147-67-78.sslip.io. Paste your new invite code in Connection settings to join it.
+- Accepting an invite starts a new commander on that server; it no longer copies in an offline pilot.
+
 # 0.8.2 — clearer damage wording
 
 - A damaged laser now shows LASER MALFUNCTIONING (and "LASER MALFUNCTION" when a shot misfires), so it is not confused with the signal jammer.

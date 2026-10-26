@@ -17,7 +17,7 @@ def call(server, token, path, data=None):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--server',default='https://kentons-imac.tail8cde7d.ts.net')
+    parser.add_argument('--server',default='https://141-147-67-78.sslip.io')
     parser.add_argument('--token-file',type=Path,default=Path.home()/'.config/star-trader/admin.token')
     parser.add_argument('--status',choices=('new','seen','done'),default='new')
     parser.add_argument('--json',action='store_true',help='print raw JSON')

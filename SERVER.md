@@ -89,16 +89,17 @@ Then `python3 feedback_report.py` lists new reports, and `--mark seen` marks wha
 
 ## Invite a tester
 
-New installs already point at the community server (`https://kentons-imac.tail8cde7d.ts.net`, through Tailscale Funnel). Create the player, then write an invite code file for them:
+New installs already point at the community server (`https://141-147-67-78.sslip.io`, an Oracle Cloud free-tier VM running the Docker setup in HOSTING.md). On that machine, create the player and write an invite code file for them:
 
 ```bash
-cd "$HOME/star-trader" &&
-python3 save_server.py create-player FriendName --token-file "$HOME/.star-trader-server/friendname.token" &&
-python3 save_server.py invite --server http://192.168.1.45:8766 \
-  --token-file "$HOME/.star-trader-server/friendname.token" --out "$HOME/friendname-invite.txt"
+cd ~/star-trader &&
+sudo docker compose exec server python save_server.py create-player FriendName --token-file /data/friendname.token &&
+sudo docker compose exec server python save_server.py invite --server https://141-147-67-78.sslip.io \
+  --token-file /data/friendname.token --out /data/friendname-invite.txt &&
+sudo docker compose cp server:/data/friendname-invite.txt .
 ```
 
-Send the code in that file privately: it works like a password. The tester copies it, opens **Connection settings**, clicks **Paste invite**, then chooses **Online play**. The game saves the token to its own private file. Delete the invite file once it has been used.
+Send the code in that file privately: it works like a password. The tester copies it, opens **Connection settings**, clicks **Paste invite**, then chooses **Online play**. Accepting an invite starts a new commander on that server; it does not import an offline pilot. The game saves the token to its own private file. Delete the invite file once it has been used.
 
 ## Connect the Omarchy laptop
 
