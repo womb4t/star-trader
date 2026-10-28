@@ -50,7 +50,7 @@ def install_mac_app(target):
         (app/'Resources').mkdir(exist_ok=True)
         shutil.copy2(icon, app/'Resources'/'StarTrader.icns')
     print('Installed! Open Star Trader from Launchpad, Spotlight, or ~/Applications.')
-    print('Your saved game is preserved when reinstalling. New releases install automatically at launch.')
+    print('Your saved game is preserved when reinstalling. When a new release is out, the start screen offers to install it.')
 
 
 def install():

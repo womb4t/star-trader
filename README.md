@@ -30,7 +30,7 @@ The installer downloads the latest release, a private Python and the official SD
 
 ## Update
 
-**From 0.5.0 onward:** the installed game installs new releases automatically when it starts, then restarts into the new version. Saves are preserved. If an update cannot be installed, the current version starts and the details are written to `update.log` beside your save.
+**The game asks before updating.** When the installed game starts and a newer release is out, the start screen shows `Update vX.Y.Z is available · Enter: update now · Esc: play vCURRENT`. Enter (or a click on that line) installs it and restarts into the new version; Esc plays the current version and the game asks again next launch. Linux and macOS behave the same. Saves are preserved. If an update cannot be installed, the start screen says so, the current version stays playable and the details are written to `update.log` beside your save. With `--offline` there is no start screen, so the game only shows a desktop notification that an update is available.
 
 **Upgrading from the first version:** it predates update notices. From your existing checkout, run this once:
 

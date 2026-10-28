@@ -1,3 +1,7 @@
+# 0.8.5 — updates ask first
+
+- **Updates ask first.** The game no longer installs a new release by itself. When one is out, the start screen says "Update vX.Y.Z is available · Enter: update now · Esc: play vCURRENT". Enter (or a click on that line) installs it, shows "Installing update… your saved game is kept" and restarts into the new version; Esc plays the current version and the game asks again next launch. A failed update is reported on the start screen and the current version stays playable (details in update.log). Works the same on Linux and macOS. With --offline, the game only notifies you that an update is available.
+
 # 0.8.4 — fuel and course bearing fixes
 
 From your bug reports:

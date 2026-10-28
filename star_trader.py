@@ -22,7 +22,7 @@ import shutil
 import subprocess
 import textwrap
 
-VERSION = '0.8.4'
+VERSION = '0.8.5'
 HOSTILITY_COOLDOWN_SECONDS = 30*60
 STATION_POLICE_CAPACITY = 6
 # Career points needed for each commander rank: kills, trade profit and hyperspace jumps all count.
@@ -3894,7 +3894,8 @@ class Game:
             latest = self.updates.latest
             lines = ['STAR TRADER / UPDATES',f'Installed version: {VERSION}',
                 'New release: '+latest if latest else ('No newer release detected.' if self.updates.checked else 'Offline, disabled, or check still pending.'),
-                '', 'New releases install automatically when Star Trader starts.',
+                '', 'When a new release is out, the start screen offers it at launch:',
+                'Enter installs it and restarts; Esc plays this version for now.',
                 'Saved games are preserved. To update by hand, in a terminal:',
                 '    python3 update.py', '',
                 'Or run the installed updater:',
@@ -3902,7 +3903,7 @@ class Game:
                 '', 'The updater requires a clean main branch and stops on local edits.',
                 'It fetches the official repository, then reruns the installer.',
                 'Release notes: github.com/womb4t/star-trader/releases',
-                '', 'If an automatic update fails, details are in update.log.',
+                '', 'If an update fails, details are in update.log.',
                 'Use --no-update-check to disable network checks.', '', 'BACKSPACE returns. ESC saves and closes the game.']
             for i,line in enumerate(lines): d.text(30,80+i*31,line,GOLD if i==2 else GREEN)
         elif self.mode in ('market','outfit'):
@@ -4146,29 +4147,32 @@ def notify(text):
         subprocess.run(['osascript','-e','on run argv','-e','display notification (item 1 of argv) with title "Star Trader"','-e','end run',text],check=False)
 
 
-def auto_update():
-    """Install a newer published release before the game opens, then restart into it."""
+def update_available():
+    """A newer published release for an installed copy, or None. Checked before the window opens; failures stay silent."""
     here = Path(__file__).resolve().parent
     # Only installed copies update themselves; source checkouts are left to Git.
-    if not (here/'install-info.json').is_file() or not (here/'update.py').is_file(): return
-    if os.environ.get('STAR_TRADER_NO_UPDATE_CHECK') == '1' or '--no-update-check' in sys.argv: return
+    if not (here/'install-info.json').is_file() or not (here/'update.py').is_file(): return None
+    if os.environ.get('STAR_TRADER_NO_UPDATE_CHECK') == '1' or '--no-update-check' in sys.argv: return None
     latest = UpdateNotice.fetch_latest()
-    if not UpdateNotice.newer(latest): return
-    notify(f'Installing update {latest}. Your saved game is preserved.')
+    return latest if UpdateNotice.newer(latest) else None
+
+
+def install_update(latest):
+    """Run update.py once the player has agreed. The log goes beside the save; True when installed."""
+    here = Path(__file__).resolve().parent
     try:
         result = subprocess.run([sys.executable,str(here/'update.py')],stdin=subprocess.DEVNULL,capture_output=True,text=True,timeout=300)
-        ok = result.returncode == 0
-        log = result.stdout+result.stderr
-    except (OSError,subprocess.TimeoutExpired) as error:
-        ok,log = False,str(error)
+        ok,log = result.returncode == 0,result.stdout+result.stderr
+    except (OSError,subprocess.TimeoutExpired) as error: ok,log = False,str(error)
     try:
         SAVE.parent.mkdir(parents=True,exist_ok=True)
         (SAVE.parent/'update.log').write_text(f'{time.ctime()} update to {latest}\n{log}',encoding='utf-8')
     except OSError: pass
-    if not ok:
-        notify(f'Update {latest} could not be installed; starting {VERSION}. Details: {SAVE.parent/"update.log"}')
-        return
-    notify(f'Updated to {latest}.')
+    return ok
+
+
+def restart_updated():
+    here = Path(__file__).resolve().parent
     os.execv(sys.executable,[sys.executable,str(here/'star_trader.py'),*sys.argv[1:],'--no-update-check'])
 
 
@@ -4203,7 +4207,10 @@ def main():
         if not options.server and (options.token_file or options.import_local_save or options.restore_server_save):
             raise ValueError('Server options require --server')
         testing = '--smoke-test' in sys.argv or '--grant-test-credits' in sys.argv
-        if not testing: auto_update()
+        # Nothing installs without the player's yes on the start screen; --offline has no start screen, so it only notifies.
+        latest = None if testing else update_available()
+        if latest and options.offline:
+            notify(f'Update {latest} is available. Start Star Trader without --offline and press Enter to install it, or run update.py.')
         if testing and options.server: raise ValueError('Testing CLI tools require offline mode')
         if '--smoke-test' in sys.argv:
             scratch = tempfile.TemporaryDirectory(prefix='star-trader-smoke-')
@@ -4216,12 +4223,17 @@ def main():
                 config.update(server=options.server,token_file=str(options.token_file),
                               allow_lan=options.allow_lan,import_local_save=options.import_local_save)
             display = Display()
-            screen = StartScreen(display,config)
+            screen = StartScreen(display,config,update=latest)
             if options.server: screen.selected = 0
             try:
                 while True:
                     choice = screen.choose()
                     if choice == 'quit': return
+                    if choice == 'update':
+                        if screen.install(install_update):
+                            screen.close(); display.quit(); display = None
+                            restart_updated()
+                        continue
                     SAVE = offline_save
                     remote = None
                     try:

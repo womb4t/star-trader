@@ -168,12 +168,20 @@ class AutoUpdateTests(unittest.TestCase):
         with patch.object(self.st.UpdateNotice,'fetch_latest',return_value=latest), \
              patch.object(self.st.subprocess,'run',return_value=result) as run, \
              patch.object(self.st.os,'execv') as execv:
-            self.st.auto_update()
-        return run,execv
+            found = self.st.update_available()
+            ok = self.st.install_update(found) if found else None
+            if ok: self.st.restart_updated()
+        return found,run,execv
 
-    def test_installs_newer_release_and_restarts(self):
+    def test_check_finds_release_without_installing(self):
         self.install()
-        run,execv = self.run_update('v99.0.0')
+        with patch.object(self.st.UpdateNotice,'fetch_latest',return_value='v99.0.0'), patch.object(self.st.subprocess,'run') as run, patch.object(self.st.os,'execv') as execv:
+            self.assertEqual(self.st.update_available(),'v99.0.0')
+        run.assert_not_called(); execv.assert_not_called()
+
+    def test_installs_agreed_release_and_restarts(self):
+        self.install()
+        found,run,execv = self.run_update('v99.0.0')
         self.assertEqual(run.call_args.args[0][1],str(self.root/'update.py'))
         self.assertIs(run.call_args.kwargs['stdin'],self.st.subprocess.DEVNULL)
         self.assertTrue(execv.called)
@@ -181,17 +189,26 @@ class AutoUpdateTests(unittest.TestCase):
 
     def test_failed_update_starts_current_version(self):
         self.install()
-        run,execv = self.run_update('v99.0.0',returncode=1)
+        found,run,execv = self.run_update('v99.0.0',returncode=1)
         self.assertTrue(run.called)
         self.assertFalse(execv.called)
         self.assertIn('out',(self.root/'data'/'update.log').read_text())
 
-    def test_same_version_or_source_checkout_does_nothing(self):
-        run,execv = self.run_update('v99.0.0')
-        self.assertFalse(run.called)
+    def test_same_version_source_checkout_or_disabled_finds_nothing(self):
+        self.assertIsNone(self.run_update('v99.0.0')[0])
         self.install()
-        run,execv = self.run_update('v'+self.st.VERSION)
-        self.assertFalse(run.called)
+        self.assertIsNone(self.run_update('v'+self.st.VERSION)[0])
+        self.assertIsNone(self.run_update(None)[0])
+        with patch.object(self.st.sys,'argv',['star_trader.py','--no-update-check']): self.assertIsNone(self.run_update('v99.0.0')[0])
 
+    def test_offline_launch_only_notifies(self):
+        import os
+        self.install()
+        with patch.object(self.st.UpdateNotice,'fetch_latest',return_value='v99.0.0'), patch.object(self.st.sys,'argv',['star_trader.py','--offline']), \
+             patch.object(self.st,'install_update') as install, patch.object(self.st,'Display',side_effect=RuntimeError('no window')), \
+             patch.object(self.st.os,'execv') as execv, contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit): self.st.main()
+        install.assert_not_called(); execv.assert_not_called()
+        self.assertIn('v99.0.0 is available',self.st.notify.call_args.args[0])
 
 if __name__ == '__main__': unittest.main()

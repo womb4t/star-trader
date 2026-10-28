@@ -53,6 +53,8 @@ Save: ${XDG_DATA_HOME:-~/.local/share}/star-trader/save.json
 
 Offline play works without Internet. Optional daily release checks
 can be disabled with --no-update-check. Updates preserve saves.
+When a newer release is out, the start screen asks first: Enter updates,
+Esc plays this version (it asks again next launch).
 Multiplayer, fleets, chat, player police and bases are future plans.
 
 Approach guidance: Y toggles centring on the selected local navigation target ahead.

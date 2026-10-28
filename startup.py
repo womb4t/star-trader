@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import re
 import shlex
+import threading
 import time
 import urllib.parse
 
@@ -94,14 +95,16 @@ def migrate_online_launcher(script):
 
 
 class StartScreen:
-    def __init__(self, display, config, error=''):
+    def __init__(self, display, config, error='', update=None):
         self.d,self.config,self.error = display,dict(config),error
+        # A newer release waits for the player's yes: Enter installs, Esc plays this version until next launch.
+        self.update,self.installing = update,False
         self.selected = 0
         self.settings = False
         self.signup = None
         # Players who last played online go straight back in unless they press something.
         ready = self.config.get('last_mode') == 'online' and self.config['server'] and Path(self.config['token_file']).expanduser().is_file()
-        self.auto_at = time.monotonic()+2.5 if ready and not error else None
+        self.auto_at = time.monotonic()+2.5 if ready and not error and not update else None
         self.field = 0
         self.replace_field = False
         self.texture = None
@@ -179,7 +182,11 @@ class StartScreen:
 
     def event(self, kind, value):
         from star_trader import UP,DOWN,LEFT,RIGHT
-        if kind == 'quit' or (kind == 'down' and value == 27): return 'quit'
+        if kind == 'quit': return 'quit'
+        if self.update and self.signup is None and not self.settings:
+            if kind == 'down' and value == 27: self.update = None; return None
+            if (kind == 'down' and value == 13) or (kind == 'click' and 110 <= value[0] <= 990 and 678 <= value[1] <= 714): return 'update'
+        if kind == 'down' and value == 27: return 'quit'
         if kind in ('down','click','text'): self.auto_at = None
         if self.signup is not None:
             if kind == 'click':
@@ -316,10 +323,33 @@ class StartScreen:
                 x = 110+index*300
                 d.rect(x,615,280,48,GOLD if index == self.selected else GREEN)
                 d.text(x+15,630,label,GOLD if index == self.selected else GREEN)
-            if self.auto_at: d.text(110,685,f'Connecting to online play in {max(0,self.auto_at-time.monotonic()):.0f}s - press any key to choose',GOLD)
+            if self.installing: pass
+            elif self.update:
+                from star_trader import VERSION
+                d.rect(110,678,880,36,GOLD); d.text(125,685,f'Update {self.update} is available · Enter: update now · Esc: play v{VERSION}',GOLD)
+            elif self.auto_at: d.text(110,685,f'Connecting to online play in {max(0,self.auto_at-time.monotonic()):.0f}s - press any key to choose',GOLD)
             else: d.text(110,685,'Arrows choose / Enter opens / Click to play / ESC closes')
-        if self.error: d.text(45,727,self.error[:94],GOLD if self.error.startswith(('Welcome','Invite accepted','Signing up')) else RED)
+        if self.error: d.text(45,727,self.error[:94],GOLD if self.error.startswith(('Welcome','Invite accepted','Signing up','Installing')) else RED)
         d.present(d.r)
+
+    def install(self, run):
+        """Run the update in the background while the window keeps drawing; False leaves the current version playable."""
+        from star_trader import VERSION
+        latest,done = self.update,[]
+        self.update,self.installing,self.auto_at = None,True,None
+        self.error = f'Installing update {latest}… your saved game is kept'
+        def work():
+            try: done.append(run(latest))
+            except Exception: done.append(False)
+        threading.Thread(target=work,daemon=True).start()
+        while not done:
+            for _ in self.d.events(): pass  # The installer cannot be safely interrupted.
+            self.draw()
+            time.sleep(1/30)
+        self.installing = False
+        if done[0]: return True
+        self.error = f'Update {latest} could not be installed; playing v{VERSION}. Details: update.log'
+        return False
 
     def remember(self, mode):
         self.auto_at = None

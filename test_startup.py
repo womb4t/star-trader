@@ -2,6 +2,7 @@
 import os
 from pathlib import Path
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 import startup
@@ -32,7 +33,38 @@ class StartupTests(unittest.TestCase):
         screen.replace_field = False
         screen.signup = None
         screen.auto_at = None
+        screen.update,screen.installing = None,False
         return screen
+
+    def test_update_prompt_asks_before_installing(self):
+        screen = self.screen(); screen.update = 'v99.0.0'
+        self.assertEqual(screen.event('down',13),'update')
+        self.assertEqual(screen.event('click',(500,695)),'update')
+        self.assertIsNone(screen.event('down',27))  # Esc skips the update for this launch, not the game
+        self.assertIsNone(screen.update)
+        self.assertEqual(screen.event('down',13),'online')
+        self.assertEqual(screen.event('down',27),'quit')
+
+    def test_choosing_a_mode_plays_without_updating_and_settings_keep_escape(self):
+        screen = self.screen(); screen.update = 'v99.0.0'
+        self.assertEqual(screen.event('click',(500,640)),'offline')
+        screen.settings = True
+        self.assertEqual(screen.event('down',27),'quit')
+
+    def test_install_reports_progress_and_failure_keeps_current_version(self):
+        class Display:
+            def events(self): return iter([('down',27),('quit',0)])
+        screen = self.screen(); screen.d = Display(); screen.update = 'v99.0.0'
+        seen = []
+        screen.draw = lambda: seen.append(screen.error)
+        self.assertTrue(screen.install(lambda latest: time.sleep(0.05) or latest == 'v99.0.0'))
+        self.assertTrue(seen and seen[0].startswith('Installing update v99.0.0') and 'saved game is kept' in seen[0])
+        screen.update = 'v99.0.0'
+        self.assertFalse(screen.install(lambda latest: False))
+        self.assertIn('could not be installed; playing v'+st.VERSION,screen.error)
+        self.assertIsNone(screen.update)
+        screen.update = 'v99.0.0'
+        self.assertFalse(screen.install(lambda latest: 1/0))
 
     def test_keyboard_and_mouse_select_both_modes(self):
         screen = self.screen()
@@ -193,6 +225,7 @@ class StartupTests(unittest.TestCase):
             self.assertIsNone(screen.auto_at)
             self.assertIsNone(startup.StartScreen(display,dict(config,last_mode='offline')).auto_at)
             self.assertIsNone(startup.StartScreen(display,config,error='Server unavailable').auto_at)
+            self.assertIsNone(startup.StartScreen(display,config,update='v99.0.0').auto_at)  # never auto-connect past an unanswered update
 
     def test_chosen_mode_is_remembered(self):
         from unittest.mock import MagicMock
