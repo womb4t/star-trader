@@ -120,7 +120,7 @@ Use the same launch command on later visits; `--import-local-save` does not repl
 
 If the iMac is temporarily unavailable, append `--offline-if-unavailable` to the server launch command. This works only with an existing local server save and its revision metadata. Reconnection uploads your unsynced progress unless another computer has changed the server copy. This explicitly chosen offline mode keeps the same account's local slot; it does not mix in your ordinary offline pilot.
 
-If two computers play the same account, revision conflicts stop uploads and preserve the local save. Quit both games and decide which copy to keep. To deliberately load the server copy, append `--restore-server-save`; the local save is backed up as `save.before-restore-<timestamp>.json` before replacement. There is no automatic merging or silent overwrite. A server-rejected save stays local; consult the Menu status and server terminal.
+If the local and server saves have both changed (two computers on one account, or an upload whose reply was lost on a bad connection), the most recently played copy wins when you connect. If the local copy is newer it is uploaded and the server copy is kept beside it as `save.server-copy-<timestamp>.json`; if the server copy is newer it is loaded and the local save is kept as `save.before-restore-<timestamp>.json`. While playing, a rejected upload is resent if the server copy is not newer; if it is newer, uploads stop until you reconnect. To load the server copy regardless, append `--restore-server-save`. Saves are never merged, and the losing copy is always kept. A server-rejected save stays local; consult the Menu status and server terminal.
 
 ## Start the iMac server again
 

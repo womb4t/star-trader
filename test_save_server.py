@@ -94,14 +94,67 @@ class ProgressTests(unittest.TestCase):
         client.prepare()
         self.assertEqual(json.loads(client.save_path.read_text()),newer)
 
-    def test_diverged_save_requires_explicit_restore_and_keeps_backup(self):
-        self.store.write(self.token,0,self.save)
+    def stamped(self, when, **changes):
+        return dict(self.save,_session=dict(schema=1,commander=self.save['commander_id'],saved_at=when,mode='market',state={}),**changes)
+
+    def test_diverged_saves_keep_the_newer_local_copy_and_back_up_the_server(self):
+        self.store.write(self.token,0,self.stamped(100))
         client = self.client(); client.prepare()
-        local = dict(self.save,credits=111)
+        local = self.stamped(300,credits=111)
         client.save_path.write_bytes(canonical(local))
-        self.store.write(self.token,1,dict(self.save,credits=222))
-        with self.assertRaises(Conflict): client.prepare()
+        self.store.write(self.token,1,self.stamped(200,credits=222))
+        client.prepare()
         self.assertEqual(json.loads(client.save_path.read_text()),local)
+        backups = list(client.save_path.parent.glob('save.server-copy-*.json'))
+        self.assertEqual(json.loads(backups[0].read_text())['credits'],222)
+        client.start(); client.offer(local); client.close()
+        self.assertEqual(self.store.read(self.token)['save']['credits'],111)
+
+    def test_diverged_saves_load_the_newer_server_copy_and_back_up_local(self):
+        self.store.write(self.token,0,self.stamped(100))
+        client = self.client(); client.prepare()
+        local = self.stamped(200,credits=111)
+        client.save_path.write_bytes(canonical(local))
+        self.store.write(self.token,1,self.stamped(300,credits=222))
+        client.prepare()
+        self.assertEqual(json.loads(client.save_path.read_text())['credits'],222)
+        backups = list(client.save_path.parent.glob('save.before-restore-*.json'))
+        self.assertEqual(json.loads(backups[0].read_text()),local)
+
+    def test_lost_upload_reply_does_not_cause_a_conflict_on_relaunch(self):
+        self.store.write(self.token,0,self.stamped(100))
+        client = self.client(); client.prepare()
+        sent = self.stamped(200,credits=150)
+        self.store.write(self.token,1,sent)  # The server stored it but the reply never arrived.
+        later = self.stamped(300,credits=300)
+        client.save_path.write_bytes(canonical(later))
+        client.prepare()
+        self.assertEqual(json.loads(client.save_path.read_text()),later)
+        client.start(); client.offer(later); client.close()
+        self.assertEqual(self.store.read(self.token)['save'],later)
+
+    def test_lost_upload_reply_mid_game_recovers_and_keeps_syncing(self):
+        self.store.write(self.token,0,self.stamped(100))
+        client = self.client(); client.prepare()
+        self.store.write(self.token,1,self.stamped(200,credits=150))  # Lost reply: client still at revision 1.
+        client.start(); client.offer(self.stamped(300,credits=300)); client.close()
+        self.assertFalse(client.conflicted)
+        self.assertEqual(self.store.read(self.token)['save']['credits'],300)
+
+    def test_newer_server_save_mid_game_stops_sync_without_overwriting(self):
+        self.store.write(self.token,0,self.stamped(100))
+        client = self.client(); client.prepare()
+        self.store.write(self.token,1,self.stamped(500,credits=500))
+        client.start(); client.offer(self.stamped(300,credits=300)); client.close()
+        self.assertTrue(client.conflicted)
+        self.assertEqual(self.store.read(self.token)['save']['credits'],500)
+
+    def test_restore_server_save_still_backs_up_local(self):
+        self.store.write(self.token,0,self.stamped(100))
+        client = self.client(); client.prepare()
+        local = self.stamped(300,credits=111)
+        client.save_path.write_bytes(canonical(local))
+        self.store.write(self.token,1,self.stamped(200,credits=222))
         client.prepare(restore=True)
         backups = list(client.save_path.parent.glob('save.before-restore-*.json'))
         self.assertEqual(json.loads(backups[0].read_text()),local)

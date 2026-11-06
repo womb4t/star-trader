@@ -1,3 +1,8 @@
+# 0.8.6 — the newest save wins
+
+- **No more "Local and server saves differ".** When the copy on your computer and the copy on the server have both changed, the game now keeps whichever was played most recently and uploads or loads it automatically. The other copy is kept as a backup beside your save (`save.server-copy-…` or `save.before-restore-…`).
+- **A dropped connection no longer stops syncing.** If the server saved your progress but the reply was lost, the game used to treat its next upload as a conflict and stop syncing for the rest of the session. It now picks up the server's revision and carries on.
+
 # 0.8.5 — updates ask first
 
 - **Updates ask first.** The game no longer installs a new release by itself. When one is out, the start screen says "Update vX.Y.Z is available · Enter: update now · Esc: play vCURRENT". Enter (or a click on that line) installs it, shows "Installing update… your saved game is kept" and restarts into the new version; Esc plays the current version and the game asks again next launch. A failed update is reported on the start screen and the current version stays playable (details in update.log). Works the same on Linux and macOS. With --offline, the game only notifies you that an update is available.

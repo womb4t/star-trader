@@ -27,6 +27,12 @@ def canonical(data):
     return json.dumps(data,sort_keys=True,separators=(',',':'),allow_nan=False).encode()
 
 
+def saved_at(save):
+    """When the game wrote this save; 0 for saves from before timestamps."""
+    try: return float(save['_session']['saved_at'])
+    except (KeyError,TypeError,ValueError): return 0.
+
+
 def atomic(path, data):
     path.parent.mkdir(parents=True,exist_ok=True)
     temp = path.with_suffix('.tmp')
@@ -135,15 +141,24 @@ class RemoteSave:
         remote_save = remote['save']
         local_hash = digest(canonical(local)) if local is not None else None
         remote_hash = digest(canonical(remote_save)) if remote_save is not None else None
+        replace_local = restore
         if local is not None and not restore:
             if local_hash == remote_hash:
                 self.metadata(local_hash)
             elif meta is None or (meta['revision'] != self.revision and local_hash != meta['hash']):
-                raise Conflict('Local and server saves differ. Local progress is untouched. Use --restore-server-save to back up the local copy and load the server save.')
+                # Both copies changed (or a reply was lost). The most recently played one wins;
+                # the other is kept beside the save as a backup.
+                if remote_save is None or saved_at(local) >= saved_at(remote_save):
+                    if remote_save is not None:
+                        atomic(self.save_path.with_name(f'save.server-copy-{time.time_ns()}.json'),canonical(remote_save))
+                    atomic(self.meta_path,canonical(dict(revision=self.revision,hash=None)))
+                    self.status = 'Server: newer local progress waiting to upload'
+                    return
+                replace_local = True
             elif meta['revision'] == self.revision:
                 self.status = 'Server: local progress waiting to upload'
                 return
-        if restore and local is not None:
+        if replace_local and local is not None:
             backup = self.save_path.with_name(f'save.before-restore-{time.time_ns()}.json')
             atomic(backup,self.save_path.read_bytes())
         if remote_save is not None:
@@ -184,8 +199,26 @@ class RemoteSave:
                 self.metadata(digest(canonical(data)))
                 self.status = 'Server: progress saved'
             except Conflict:
+                # Usually our own earlier upload whose reply was lost. If the server copy is
+                # not newer than this one, take over its revision and send ours straight away.
+                try:
+                    remote = self.request()
+                    theirs = remote['save']
+                    if theirs is None or saved_at(theirs) <= saved_at(data):
+                        self.revision = remote['revision']
+                        with self.condition:
+                            if self.pending is None: self.pending = data
+                        next_attempt = time.monotonic()+.5
+                        continue
+                except (OSError,RuntimeError,ValueError,KeyError,TypeError):
+                    self.status = 'Server: unavailable — progress saved locally'
+                    with self.condition:
+                        if self.pending is None: self.pending = data
+                        if self.stopping: return
+                    next_attempt = time.monotonic()+5
+                    continue
                 self.conflicted = True
-                self.status = 'Server: CONFLICT — local save retained; reconnect'
+                self.status = 'Server: newer save on another computer — local save retained; reconnect'
                 return
             except (OSError,RuntimeError,ValueError,KeyError):
                 self.status = 'Server: unavailable — progress saved locally'
