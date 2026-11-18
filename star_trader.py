@@ -4287,8 +4287,9 @@ class Game:
                         d.text(565,170+i*30,f'{price:>3} {SYSTEMS[system][0][:7]}',(120,220,140) if price > quote(p.system,i) else (120,140,150))
                     else: d.text(565,170+i*30,'-',(120,140,150))
                 d.text(35,470,'BUY = you pay. * Contraband sales pay Crymto (CYM).')
+                # Kept short so they stay clear of the Commander Status panel on the right.
                 if flare:
-                    d.text(35,500,f'SOLAR FLARE: no signal from other systems. Comms back in about {math.ceil(flare/60)} min.',(220,110,80))
+                    d.text(35,500,f'SOLAR FLARE: no signal. Comms back in about {math.ceil(flare/60)} min.',(220,110,80))
                 else: d.text(35,500,'BEST IN RANGE: best sale within a full tank (refuel in VMS).',(135,175,185))
                 line = self.economy_line(p.system)
                 d.text(35,525,line,WANTED_COLOR if line.split(':')[0].isupper() else (135,175,185))
@@ -4304,11 +4305,11 @@ class Game:
                 d.text(35,455,EQUIPMENT[self.shop_selected][4],GOLD)
                 item,label,cost,required,_ = EQUIPMENT[self.shop_selected]
                 d.text(35,490,f'Selected: {label} / needs tech {required} / local tech {TECH[p.system]}',GOLD if required <= TECH[p.system] else RED)
-                d.text(35,520,'UP/DOWN select; B or ENTER buys. Mines and missiles: maximum 4 each.')
+                d.text(35,520,'UP/DOWN select; B or ENTER buys. Max 4 mines and 4 missiles.')
             wanted = self.wanted_level()
             for i,t in enumerate(['COMMANDER STATUS',f'Cmdr  {self.commander_name()[:16]}',f'Rank  {p.rank}',f'Wanted {"*"*wanted}{"-"*(5-wanted)} {wanted}/5',f'Cargo {sum(p.cargo)}/{p.capacity} t',f'Fuel  {p.fuel:.2f}/7',f'Hull  {p.hull:.0f}%',f'Refill {p.fuel_cost()} cr',f'Service {p.service_cost()} cr',f'Mines {p.mines}/4',f'Fine {p.fine} cr',f'Wear {p.maintenance:.0f}%',f'Eng. {p.engineering_level}/5']): d.text(790,130+i*35,t,RED if i == 3 and wanted else GREEN)
-            d.text(35,550,'Ship fuel, service, fitting and engineering: open VMS above.')
-            d.text(35,590,'9 Money / station jobs   X VMS   G Nav')
+            d.text(35,562,'Ship fuel, service, fitting and engineering: open VMS above.')
+            d.text(35,598,'9 Money / station jobs   X VMS   G Nav')
         elif self.mode == 'planet_profile':
             self.draw_planet_profile()
         elif self.mode == 'map':
