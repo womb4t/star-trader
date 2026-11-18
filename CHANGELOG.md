@@ -1,3 +1,11 @@
+# 0.8.7 — best in range, and a temperamental trade computer
+
+From your bug reports:
+- **BEST IN RANGE fills in when you arrive.** The market column used to list only systems the fuel left in your tank could reach, so straight after a jump (tank nearly empty) every row showed "-". It now shows the best sale price at systems a full tank can reach, since you can refuel at the station before you leave.
+
+New:
+- **The trade computer goes on the fritz now and then.** About one docking in eight, the BEST IN RANGE column turns to static and the footer reads "TRADE COMPUTER ON THE FRITZ. Rebooting…" with a countdown. It reboots by itself after 15–40 seconds. Buying, selling and prices are unaffected.
+
 # 0.8.6 — the newest save wins
 
 - **No more "Local and server saves differ".** When the copy on your computer and the copy on the server have both changed, the game now keeps whichever was played most recently and uploads or loads it automatically. The other copy is kept as a backup beside your save (`save.server-copy-…` or `save.before-restore-…`).

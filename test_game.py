@@ -1043,7 +1043,7 @@ class GameplayTests(unittest.TestCase):
         self.assertGreater(math.sqrt(sum(v*v for v in g.station)),st.PATROL_RADIUS)
         self.assertFalse(g.in_patrol_zone())
 
-    def test_market_shows_best_sale_within_fuel_range(self):
+    def test_market_shows_best_sale_within_full_tank_range(self):
         g = self.game
         g.p.fuel = 7
         reach = g.systems_in_range()
@@ -1053,7 +1053,31 @@ class GameplayTests(unittest.TestCase):
         self.assertIn(system,reach)
         self.assertEqual(price,max(st.quote(j,3,False) for j in reach))
         g.p.fuel = 0
-        self.assertIsNone(g.best_sale_in_range(3))
+        self.assertEqual(g.systems_in_range(),[])
+        # Just arrived on an empty tank: the column still fills, since you can refuel here.
+        self.assertEqual(g.best_sale_in_range(3),(price,system))
+
+    def test_best_in_range_fills_after_arriving_at_new_station(self):
+        g = self.game
+        g.p.fuel = 7
+        target = g.systems_in_range()[0]
+        g.arrive(st.coordinates(target),target,from_hyperspace=True)
+        g.p.fuel = 0.4
+        g.dock_clearance = 120
+        g.dock()
+        self.assertTrue(all(g.best_sale_in_range(i) for i in range(len(st.GOODS))))
+
+    def test_trade_computer_sometimes_fritzes_then_reboots(self):
+        g = self.game
+        g.dock_clearance = 120
+        with patch.object(st.random,'random',return_value=0.0), patch.object(st.random,'uniform',return_value=20.):
+            g.dock()
+        self.assertEqual(g.trade_computer_fritz,20.)
+        g.update(25)
+        self.assertEqual(g.trade_computer_fritz,0.)
+        with patch.object(st.random,'random',return_value=.99):
+            g.mode = 'cruise'; g.dock()
+        self.assertEqual(g.trade_computer_fritz,0.)
 
     def test_gold_and_silver_come_from_rich_asteroids(self):
         g = self.game

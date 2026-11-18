@@ -22,7 +22,7 @@ import shutil
 import subprocess
 import textwrap
 
-VERSION = '0.8.6'
+VERSION = '0.8.7'
 HOSTILITY_COOLDOWN_SECONDS = 30*60
 STATION_POLICE_CAPACITY = 6
 # Career points needed for each commander rank: kills, trade profit and hyperspace jumps all count.
@@ -149,6 +149,11 @@ def valid_coordinates(position):
 
 def galactic_distance(a,b):
     return math.hypot(a[0]-b[0],a[1]-b[1])
+
+
+FUEL_CAPACITY = 7.
+TRADE_COMPUTER_FRITZ_CHANCE = .12  # per docking: BEST IN RANGE shows static for a while
+FRITZ_GLYPHS = '#%&@?!<>/\\|*=~'
 
 
 def hyperspace_cost(distance):
@@ -690,6 +695,7 @@ class Game:
         self.feedback_text = ''
         self.feedback_type = 'bug'
         self.feedback_path = None
+        self.trade_computer_fritz = 0.  # seconds left until the glitching trade computer reboots
         self.job_selected = 0
         self.mouse_controls = False
         self.mouse_held = set()
@@ -881,6 +887,9 @@ class Game:
             self.alert['elapsed'] += dt
             if self.alert['remaining'] <= 0: self.alert = None
         self.ship_collision_cooldown = max(0,self.ship_collision_cooldown-dt)
+        if self.trade_computer_fritz > 0:
+            self.trade_computer_fritz = max(0.,self.trade_computer_fritz-dt)
+            if not self.trade_computer_fritz and self.mode == 'market': self.message = 'Trade computer rebooted. BEST IN RANGE back online.'
         self.update_job(dt)
         if self.enemy_shot:
             self.enemy_shot['remaining'] -= dt
@@ -1366,12 +1375,16 @@ class Game:
         self.message = f'SURRENDER VOID: {reason} Police response resumes!'
         self.alert = dict(text=self.message,remaining=5.,elapsed=0.)
 
-    def systems_in_range(self):
-        return [j for j in range(len(SYSTEMS)) if j != self.p.system and hyperspace_cost(galactic_distance(self.p.position,coordinates(j))) <= self.p.fuel]
+    def systems_in_range(self, fuel=None):
+        fuel = self.p.fuel if fuel is None else fuel
+        return [j for j in range(len(SYSTEMS)) if j != self.p.system and hyperspace_cost(galactic_distance(self.p.position,coordinates(j))) <= fuel]
 
     def best_sale_in_range(self, good):
-        """Highest sale price for a commodity among systems reachable on the fuel aboard."""
-        offers = [(quote(j,good,False),j) for j in self.systems_in_range()]
+        """Highest sale price for a commodity among systems a full tank reaches.
+
+        Measured on a full tank, not the fuel aboard: you dock straight after a jump
+        with the tank nearly empty, and you can refuel here before leaving."""
+        offers = [(quote(j,good,False),j) for j in self.systems_in_range(FUEL_CAPACITY)]
         return max(offers) if offers else None
 
     def in_patrol_zone(self):
@@ -1592,6 +1605,9 @@ class Game:
         self.keys.clear()
         self.cloaked = False
         self.message = ('Docked.' + inspection) if inspection else 'Docked. X VMS for ship services; 9 Money; G Nav.'
+        if random.random() < TRADE_COMPUTER_FRITZ_CHANCE:
+            self.trade_computer_fritz = random.uniform(15,40)
+            if not inspection: self.message = 'Docked. The trade computer is on the fritz; BEST IN RANGE is rebooting.'
         if arrest: self.arrest()
         self.save()
 
@@ -3917,12 +3933,17 @@ class Game:
                     for x,value in [(270,quote(p.system,i)),(340,quote(p.system,i,False)),(415,p.stock[p.system][i]),(495,p.cargo[i])]:
                         d.text(x,170+i*30,str(value),color)
                     best = self.best_sale_in_range(i)
-                    if best:
+                    if self.trade_computer_fritz > 0:
+                        static = ''.join(random.choice(FRITZ_GLYPHS) for _ in range(random.randint(3,11)))
+                        d.text(565,170+i*30,static,(200,90,70) if random.random() < .3 else (120,140,150))
+                    elif best:
                         price,system = best
                         d.text(565,170+i*30,f'{price:>3} {SYSTEMS[system][0][:7]}',(120,220,140) if price > quote(p.system,i) else (120,140,150))
                     else: d.text(565,170+i*30,'-',(120,140,150))
                 d.text(35,470,'BUY = you pay. * Contraband sales pay Crymto (CYM).')
-                d.text(35,500,'BEST IN RANGE: top sale price at systems your fuel can reach.',(135,175,185))
+                if self.trade_computer_fritz > 0:
+                    d.text(35,500,f'TRADE COMPUTER ON THE FRITZ. Rebooting... {math.ceil(self.trade_computer_fritz)}s',(220,110,80))
+                else: d.text(35,500,'BEST IN RANGE: top sale price within a full tank\'s reach (refuel in VMS).',(135,175,185))
             else:
                 d.text(35,85,f'SHIP OUTFITTING / LOCAL TECH {TECH[p.system]} / U market')
                 start = max(0,min(self.shop_selected-4,len(EQUIPMENT)-8))
