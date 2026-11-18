@@ -63,7 +63,7 @@ RATIONING = [(.95, 'A'), (.85, 'B'), (.70, 'C')]   # above this share lent out, 
 CRUNCH_MARGIN = .04   # extra margin when the bank is more than 85% lent out
 # The bank sets its own margin to maximise profit (interest earned minus bad debts), testing a nudge
 # up or down each review and keeping whichever paid; RATE_CAP is the Council's limit on it.
-MARGIN_STEP, MARGIN_RANGE, BANK_REVIEW = .005, (0., .10), 12*HOUR
+MARGIN_STEP, MARGIN_RANGE, BANK_REVIEW = .0025, (0., .10), 12*HOUR
 # A used ship has faults: a cramped hold and tired engines.
 USED_HOLD, USED_SLOWDOWN = 15, 1.2
 UPGRADE_COST, UPGRADE_STEP, MAX_HOLD = 5000, 10, 60
@@ -190,6 +190,7 @@ class Commander:
             self.refusals['lower amount: ' + ('ship value' if room <= afford else 'affordability')] += 1
             if offer < .5*amount: return 0., rate      # not enough to be worth it
         self.debt += offer; self.credits += offer; self.borrowed += offer; self.loan_times.append(now)
+        market.state['bank']['loans'] = market.state['bank'].get('loans', 0)+1
         return offer, rate
 
     def bank(self, market, now):
@@ -339,16 +340,16 @@ def run(days=5, players=2, seed='sim', start=1.8e9, setup=None, quiet=False, ada
         b['capacity'] = max(0., capital*LEVERAGE)
         b['lent'] = sum(c.debt for c in crew)
         b['use'] = b['lent']/b['capacity'] if b['capacity'] else 1.
-        if now-b['reviewed'] >= BANK_REVIEW:   # hill-climb on each period's profit; no customers means too dear
-            profit = b['interest']-b['losses']
-            period = profit-(b['last_profit'] if b['last_profit'] is not None else 0.)
+        if now-b['reviewed'] >= BANK_REVIEW:   # price by demand and scarcity, a small step at a time
             declined = sum(c.refusals['declined: too dear'] for c in crew)
-            turned_away = declined-b.get('declined', 0)
-            if b['lent'] < .02*b['capacity'] and turned_away > 0: b['step'] = -abs(b['step'])   # empty loan book: cheaper
-            elif b['last_profit'] is not None and period < b.get('last_period', 0.): b['step'] = -b['step']
+            turned_away, made = declined-b.get('declined', 0), b.get('loans', 0)-b.get('loans_seen', 0)
+            asked = turned_away+made
             lo, hi = MARGIN_RANGE
-            b['margin'] = max(lo, min(hi, b['margin']+b['step']))
-            b['last_period'], b['last_profit'], b['declined'], b['reviewed'] = period, profit, declined, now
+            if b['use'] > .7: b['margin'] += MARGIN_STEP                         # money is scarce: charge more
+            elif asked and turned_away/asked > .5: b['margin'] -= MARGIN_STEP    # most walk away: too dear
+            elif asked and turned_away/asked < .2: b['margin'] += MARGIN_STEP/2  # nearly everyone accepts: room to charge more
+            b['margin'] = max(lo, min(hi, b['margin']))
+            b['declined'], b['loans_seen'], b['reviewed'] = declined, b.get('loans', 0), now
             b['margins'].append(b['margin'])
         return b
     market.bank_state = bank_state

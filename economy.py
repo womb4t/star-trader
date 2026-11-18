@@ -53,16 +53,24 @@ INDUSTRY_RANGE = (0., 2.5)      # capacity of one industry line, as a share of a
 ELASTICITY = {g: .1 for g in range(10)}   # how much consumption falls as price rises (basics barely)
 ELASTICITY.update({1: .5, 3: .4, 5: .6, 6: .3, 7: .3, 8: .8, 9: .8})
 NATIVE = {e: set(f['output']) for e, f in FACTORIES.items()}
-OFF_SPECIALITY = .6             # a licensed line outside the economy's speciality is this efficient
+OFF_SPECIALITY = .6             # a licensed line outside the economy's speciality starts this efficient...
+LEARNED = .9                    # ...and learns towards this while it runs (learning by doing)
+LEARN_RATE = .05/(24*HOUR)      # efficiency gained per second of running (5 points a day)
+TRAFFIC_TIME = 6*HOUR           # how long a station's remembered traffic takes to follow the present
+PER_COMMANDER = .3              # each commander regularly at a station supports this much more population
+SETTLE = 1/(2*24*HOUR)          # population closes on its supportable size over about two days
 GROWTH = .04/(24*HOUR)         # population change per second for a busy, thriving world (adaptive)
-GROWTH_RANGE = (.8, 3.)         # population as a share of the founding population (adaptive)
+GROWTH_RANGE = (.8, 8.)         # population as a share of the founding population (adaptive)
 BASE_INTEREST = .05             # the galactic rate at which industries invest at the normal pace
 PRICE_POWER = .45                # base price = BASE * (use / make) ** PRICE_POWER, within PRICE_RANGE
 PRICE_RANGE = (.65, 1.45)
 
 
-def productivity(economy, good):
-    return 1. if good in NATIVE[economy] else OFF_SPECIALITY
+def productivity(economy, good, station=None):
+    """How efficient a line is: native specialities 1.0; licensed lines start lower and learn."""
+    if good in NATIVE[economy]: return 1.
+    if station is not None and 'skill' in station: return station['skill'][good]
+    return OFF_SPECIALITY
 
 
 def investment(rate):
@@ -192,7 +200,7 @@ class Economy:
         base_total = sum(factory['output'].values())
         scale = sum(industry)/base_total if base_total else 1.   # a bigger industrial base needs more inputs
         for good, out in enumerate(industry):
-            produce[good] += out*workforce*supplied*(productivity(profile['economy'], good) if ADAPTIVE else 1.)
+            produce[good] += out*workforce*supplied*(productivity(profile['economy'], good, station) if ADAPTIVE else 1.)
         for good, use in factory['inputs'].items(): consume[good] += use*workforce*scale
         if ADAPTIVE:   # dear goods are bought less
             for g in range(GOODS): consume[g] *= scarcity(levels[g], normal[g])**-ELASTICITY[g]
@@ -240,10 +248,11 @@ class Economy:
             if ADAPTIVE: self.adapt(system, levels, station, dt)
             follow = 1-math.exp(-dt/PROSPERITY_TIME)
             station['prosperity'] += (self.needs_met(system, levels)-station['prosperity'])*follow
-            if ADAPTIVE:   # people move to busy, thriving worlds and drift away from quiet, poor ones
+            if ADAPTIVE:   # people move to where the work is: a size set by regular traffic and prosperity
                 low, high = GROWTH_RANGE
-                pull = (station['prosperity']-.6)*1.5+min(1., self.commanders(system, moment)/4)-.4
-                station['population'] = max(low, min(high, station['population']*math.exp(GROWTH*pull*dt)))
+                station['traffic'] = station.get('traffic', 0.)+(self.commanders(system, moment)-station.get('traffic', 0.))*(1-math.exp(-dt/TRAFFIC_TIME))
+                size = max(low, min(high, (1+PER_COMMANDER*station['traffic'])*(.8+.4*station['prosperity'])))
+                station['population'] *= math.exp(SETTLE*math.log(size/station['population'])*dt)
             else:
                 low, high = POPULATION_RANGE
                 station['population'] = max(low, min(high, station['population']+(station['prosperity']-.5)*2*POPULATION_DRIFT*dt))
@@ -254,6 +263,9 @@ class Economy:
     def adapt(self, system, levels, station, dt):
         """Supply follows price: a line grows while its good is scarce here and shrinks in a glut."""
         industry, normal = station['industry'], [n*self.depth(system) for n in self.normal[system]]
+        skill = station.setdefault('skill', [OFF_SPECIALITY]*GOODS)
+        for g in range(GOODS):   # learning by doing: a running licensed line gets better at it
+            if industry[g] >= .2: skill[g] = min(LEARNED, skill[g]+LEARN_RATE*dt)
         low, high = INDUSTRY_RANGE
         for g in range(GOODS):
             if industry[g] <= 0: continue
