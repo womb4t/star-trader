@@ -4403,7 +4403,7 @@ class Game:
             wanted = self.wanted_level()
             for i,t in enumerate(['COMMANDER STATUS',f'Cmdr  {self.commander_name()[:16]}',f'Rank  {p.rank}',f'Wanted {"*"*wanted}{"-"*(5-wanted)} {wanted}/5',f'Cargo {sum(p.cargo)}/{p.capacity} t',f'Fuel  {p.fuel:.2f}/7',f'Hull  {p.hull:.0f}%',f'Refill {p.fuel_cost()} cr',f'Service {p.service_cost()} cr',f'Mines {p.mines}/4',f'Fine {p.fine} cr',f'Wear {p.maintenance:.0f}%',f'Eng. {p.engineering_level}/5']): d.text(790,130+i*35,t,RED if i == 3 and wanted else GREEN)
             d.text(35,562,'Ship fuel, service, fitting and engineering: open VMS above.')
-            d.text(35,598,'4 Money / station jobs   3 VMS   2 Nav')
+            d.text(35,590,'4 Money / station jobs   3 VMS   2 Nav')
         elif self.mode == 'planet_profile':
             self.draw_planet_profile()
         elif self.mode == 'map':
