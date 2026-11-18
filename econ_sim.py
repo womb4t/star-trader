@@ -61,9 +61,14 @@ SMUGGLERS = .3        # share of commanders who trade contraband
 BANK_START, PER_SHIP, LEVERAGE = 20000., 8000., 4.
 RATIONING = [(.95, 'A'), (.85, 'B'), (.70, 'C')]   # above this share lent out, only these ratings and better
 CRUNCH_MARGIN = .04   # extra margin when the bank is more than 85% lent out
-# The bank sets its own margin to maximise profit (interest earned minus bad debts), testing a nudge
-# up or down each review and keeping whichever paid; RATE_CAP is the Council's limit on it.
+# Risk-based pricing: the bank's margin over the galactic rate is its expected loss (bad debts per
+# loan-week, learned from experience, starting from a prior), plus its running costs, plus a return on
+# the capital it must hold; on top it adds what the market will bear, and a premium when money is scarce.
 MARGIN_STEP, MARGIN_RANGE, BANK_REVIEW = .0025, (0., .10), 12*HOUR
+PRIOR_LOSS, PRIOR_EXPOSURE = .01, 50000.   # 1% a week on 50,000 loan-weeks until it has its own record
+OPEX, HURDLE = .005, .01
+PREMIUM_RANGE = (0., .04)
+INSURANCE_REQUIRED = True   # a secured loan needs the ship insured, with the bank paid first
 # A used ship has faults: a cramped hold and tired engines.
 USED_HOLD, USED_SLOWDOWN = 15, 1.2
 UPGRADE_COST, UPGRADE_STEP, MAX_HOLD = 5000, 10, 60
@@ -175,6 +180,7 @@ class Commander:
             self.refusals['in arrears'] += 1; return 0., 0.
         tier = self.rating(now)
         if tier is None: self.refusals['rating E'] += 1; return 0., 0.
+        if INSURANCE_REQUIRED and not self.insured: self.insured = True; self.refusals['took out cover'] += 1   # a condition of the loan
         name, _, ltv, margin = tier
         bank = market.bank_state(now)
         for use, worst in RATIONING:   # a bank short of money only lends to the best risks
@@ -205,7 +211,9 @@ class Commander:
         self.last = now
         if self.shipless_since is None and self.debt > FORECLOSE*self.ship_value():   # repossessed: no free ship
             self.defaults += 1; self.marks.append(now)
-            market.state['bank']['losses'] += max(0., self.debt-self.ship_value()*.7)   # what the ship's sale doesn't cover
+            loss = max(0., self.debt-self.ship_value()*.7)   # what the ship's sale doesn't cover
+            market.state['bank']['losses'] += loss
+            market.state['bank'].setdefault('events', []).append((now, round(self.debt), round(self.ship_value()), round(loss)))
             self.debt = 0.
             self.wipe(now)
             return
@@ -331,7 +339,8 @@ def run(days=5, players=2, seed='sim', start=1.8e9, setup=None, quiet=False, ada
     market.crew = crew
     market.jobs = JobBoards()
     market.state['bank'] = dict(interest=0., losses=0., use=0., lent=0., capacity=0., margin=.02,
-                                step=MARGIN_STEP, reviewed=start, last_profit=None, margins=[])
+                                step=MARGIN_STEP, reviewed=start, last_profit=None, margins=[],
+                                exposure=0., at=start, premium=.005)
     def bank_state(now, market=market):
         """Capital grows with active ships and interest and falls with losses; the margin chases profit."""
         b = market.state['bank']
@@ -340,20 +349,25 @@ def run(days=5, players=2, seed='sim', start=1.8e9, setup=None, quiet=False, ada
         b['capacity'] = max(0., capital*LEVERAGE)
         b['lent'] = sum(c.debt for c in crew)
         b['use'] = b['lent']/b['capacity'] if b['capacity'] else 1.
-        if now-b['reviewed'] >= BANK_REVIEW:   # price by demand and scarcity, a small step at a time
+        b['exposure'] += b['lent']*(now-b['at'])/RATE_PERIOD; b['at'] = now
+        if now-b['reviewed'] >= BANK_REVIEW:   # cost of risk, then what the market will bear
+            b['expected_loss'] = (b['losses']+PRIOR_LOSS*PRIOR_EXPOSURE)/(b['exposure']+PRIOR_EXPOSURE)
             declined = sum(c.refusals['declined: too dear'] for c in crew)
             turned_away, made = declined-b.get('declined', 0), b.get('loans', 0)-b.get('loans_seen', 0)
             asked = turned_away+made
+            plo, phi = PREMIUM_RANGE
+            if b['use'] > .7: b['premium'] += MARGIN_STEP                         # money is scarce: charge more
+            elif asked and turned_away/asked > .5: b['premium'] -= MARGIN_STEP    # most walk away: too dear
+            elif asked and turned_away/asked < .2: b['premium'] += MARGIN_STEP/2  # nearly everyone accepts: room to charge more
+            b['premium'] = max(plo, min(phi, b['premium']))
             lo, hi = MARGIN_RANGE
-            if b['use'] > .7: b['margin'] += MARGIN_STEP                         # money is scarce: charge more
-            elif asked and turned_away/asked > .5: b['margin'] -= MARGIN_STEP    # most walk away: too dear
-            elif asked and turned_away/asked < .2: b['margin'] += MARGIN_STEP/2  # nearly everyone accepts: room to charge more
-            b['margin'] = max(lo, min(hi, b['margin']))
+            b['margin'] = max(lo, min(hi, b['expected_loss']+OPEX+HURDLE+b['premium']))
             b['declined'], b['loans_seen'], b['reviewed'] = declined, b.get('loans', 0), now
             b['margins'].append(b['margin'])
         return b
     market.bank_state = bank_state
     rates = []
+    market.treasury_log = []
     stats = defaultdict(list)
     t, end, next_sample = start, start+days*24*HOUR, start+sample
     while t < end:
@@ -365,6 +379,8 @@ def run(days=5, players=2, seed='sim', start=1.8e9, setup=None, quiet=False, ada
         for c in crew: c.act(market, t)
         if t >= next_sample:
             rates.append(market.state.get('council', {}).get('rate', .05))
+            c = market.state.get('council')
+            if c: market.treasury_log.append((t, c['treasury'], c.get('target', 0.)))
             for i in range(len(st.SYSTEMS)):
                 ops = [o for o in opportunities(market, i) if o[0] >= MARGIN]
                 stats[i].append((len(ops), ops[0][0] if ops else 0.))

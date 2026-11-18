@@ -42,10 +42,19 @@ LAWLESS_RISK = .05    # and through lawless space
 SAFETY_TARGET = {'Dictatorship': .9, 'Communist': .85, 'Corporate state': .8, 'Confederacy': .7, 'Democracy': .75}
 RESERVE_REVIEWS = 4   # the treasury aims to hold a day of spending
 HOUSE_SHARE = .10     # the house's cut of every tax credit (Kenton's bank)
-# Development: a surplus over SURPLUS x the reserve funds grants to struggling worlds' licensed industries.
+# Fiscal rule: one tax rate for every lawful world (struggling worlds get a discount), steered each review
+# towards a treasury of RESERVE_AIM x the reserve target, like a central bank's feedback rule.
+RESERVE_AIM = 1.5
+TAX_GAIN = .01        # tax change per review for a gap of one reserve target (limited to TAX_STEP)
+STRUGGLING_DISCOUNT = .02
+# Development (cohesion) fund: a share of all tax, plus anything over SURPLUS x the reserve target,
+# is set aside and spent as grants on the weakest worlds, where transfers do most good.
+DEV_SHARE = .15
 SURPLUS = 3
 GRANT_COST = 8000.
-GRANT_SKILL = .10     # each grant lifts a licensed line's efficiency by this much (up to economy.LEARNED+.05)
+GRANT_SKILL = .10     # a grant lifts a licensed line's efficiency by this much (up to economy.LEARNED+.05)...
+GRANT_CAPACITY = .25  # ...or, where there is none to lift, adds this much capacity to the world's best export line
+WEAK = MIN_EXPORTS+1  # worlds with this few worthwhile exports or fewer can get grants
 
 
 def council_state(market, now):
@@ -60,7 +69,9 @@ def council_state(market, now):
     state.setdefault('safety', {str(i): 0. for i in range(len(market.profiles))})
     state.setdefault('house', 0.)
     state.setdefault('house_share', HOUSE_SHARE)
-    state.setdefault('spent', dict(upkeep=0., police=0., licences=0., relief=0.))
+    state.setdefault('spent', dict(upkeep=0., police=0., licences=0., relief=0., grants=0.))
+    state.setdefault('fund', 0.)
+    state.setdefault('base_tax', DEFAULT_TAX)
     return state
 
 
@@ -123,15 +134,22 @@ def review(market, now, neighbours, contraband=(), names=None, goods=None):
         state['treasury'] -= cost; spend += cost
         state['spent']['upkeep'] += upkeep; state['spent']['police'] += police
         state['safety'][key] = 0. if lawless else SAFEST*min(1., police/(POLICE_FULL*depth))
-    # Fiscal rule: keep about a day of spending in reserve; give back a surplus, cover a shortfall.
+    # Development fund: its share of the tax taken since the last review, and any surplus over the ceiling.
     target = RESERVE_REVIEWS*spend
+    state['target'] = target
+    revenue = state.get('revenue', 0.)-state.get('revenue_seen', 0.); state['revenue_seen'] = state.get('revenue', 0.)
+    put = DEV_SHARE*max(0., revenue)+max(0., state['treasury']-SURPLUS*target)
+    put = min(put, max(0., state['treasury']))
+    state['treasury'] -= put; state['fund'] = state.get('fund', 0.)+put
+    # Fiscal rule: steer the tax rate towards the reserve aim.
     tlo, thi = TAX_RANGE
+    base = state.get('base_tax', DEFAULT_TAX)
+    base += max(-TAX_STEP, min(TAX_STEP, TAX_GAIN*(RESERVE_AIM*target-state['treasury'])/max(1., target)))
+    state['base_tax'] = base = max(tlo, min(thi, base))
     for system in range(len(market.stock)):
         key = str(system)
         if market.profiles[system]['government'] in E.LAWLESS: state['tax'][key] = 0.; continue
-        if counts[system] < MIN_EXPORTS: state['tax'][key] = max(tlo, state['tax'][key]-TAX_STEP)   # help a struggling world
-        elif state['treasury'] > SURPLUS*target: state['tax'][key] = max(tlo, state['tax'][key]-TAX_STEP)
-        elif state['treasury'] < target: state['tax'][key] = min(thi, state['tax'][key]+TAX_STEP)
+        state['tax'][key] = max(tlo, base-(STRUGGLING_DISCOUNT if counts[system] < MIN_EXPORTS else 0.))
 
     for system in range(len(market.stock)):
         key = str(system)
@@ -157,23 +175,37 @@ def review(market, now, neighbours, contraband=(), names=None, goods=None):
                 industry[choice] = max(industry[choice], NEW_LINE)
                 state['treasury'] -= LICENCE_COST; state['spent']['licences'] += LICENCE_COST
                 decree = dict(kind='industry', good=choice)
-        elif counts[system] < MIN_EXPORTS and state['treasury'] > SURPLUS*target+GRANT_COST:
-            # Development grant: money the treasury doesn't need makes a licensed line competitive.
-            industry, kind = economy.industry(system, station), market.profiles[system]['economy']
-            skill = station.setdefault('skill', [E.OFF_SPECIALITY]*len(industry))
-            lines = [g for g in legal if industry[g] >= .2 and g not in E.NATIVE[kind] and skill[g] < E.LEARNED+.05]
-            if lines:
-                g = max(lines, key=lambda g: industry[g])
-                skill[g] = min(E.LEARNED+.05, skill[g]+GRANT_SKILL)
-                state['treasury'] -= GRANT_COST; state['spent']['grants'] = state['spent'].get('grants', 0.)+GRANT_COST
-                decree = dict(kind='grant', good=g)
-        if decree:
-            decree.update(system=system, at=now)
-            if names and goods:
-                decree['text'] = {'relief': f'Relief convoy sent to {names[system]}',
-                                  'grant': f'Council funds {names[system]}\'s {goods[decree["good"]].lower()} industry',
-                                  'industry': f'{names[system]} licensed to produce {goods[decree["good"]]}'}[decree['kind']]
-            state['decrees'] = (state['decrees']+[decree])[-KEEP:]
-            state['last'][key] = now
-            made.append(decree)
+        if decree: record(state, decree, system, now, names, goods, made)
+    # Grants from the development fund, weakest worlds first (their own cooldown, apart from decrees).
+    for system in sorted(range(len(market.stock)), key=lambda i: (counts[i], economy.station(i, now)['prosperity'])):
+        key = 'grant:'+str(system)
+        if state.get('fund', 0.) < GRANT_COST or counts[system] > WEAK: continue
+        if now-state['last'].get(key, -1e18) < COOLDOWN: continue
+        station = economy.station(system, now)
+        industry, kind = economy.industry(system, station), market.profiles[system]['economy']
+        skill = station.setdefault('skill', [E.OFF_SPECIALITY]*len(industry))
+        lines = [g for g in legal if industry[g] >= .2 and g not in E.NATIVE[kind] and skill[g] < E.LEARNED+.05]
+        if lines:   # make a licensed line competitive
+            g = max(lines, key=lambda g: industry[g])
+            skill[g] = min(E.LEARNED+.05, skill[g]+GRANT_SKILL)
+        else:       # a capital grant to the line whose goods fetch most next door, for what they cost here
+            lines = [g for g in legal if industry[g] >= .2 and industry[g] < E.INDUSTRY_RANGE[1]]
+            if not lines: continue
+            g = max(lines, key=lambda g: max(market.price(j, g) for j in neighbours[system])/market.price(system, g))
+            industry[g] = min(E.INDUSTRY_RANGE[1], industry[g]+GRANT_CAPACITY)
+        state['fund'] -= GRANT_COST; state['spent']['grants'] = state['spent'].get('grants', 0.)+GRANT_COST
+        state['last'][key] = now
+        record(state, dict(kind='grant', good=g), system, now, names, goods, made)
     return made
+
+
+def record(state, decree, system, now, names, goods, made):
+    """Log a decree (with its news line) in the Council's record."""
+    decree.update(system=system, at=now)
+    if names and goods:
+        decree['text'] = {'relief': f'Relief convoy sent to {names[system]}',
+                          'grant': f'Council funds {names[system]}\'s {goods[decree["good"]].lower()} industry',
+                          'industry': f'{names[system]} licensed to produce {goods[decree["good"]]}'}[decree['kind']]
+    state['decrees'] = (state['decrees']+[decree])[-KEEP:]
+    if decree['kind'] != 'grant': state['last'][str(system)] = now
+    made.append(decree)

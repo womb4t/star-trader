@@ -56,6 +56,7 @@ class Market:
         if council:
             tax, share = value*self.tax(system), council.get('house_share', 0.)
             council['treasury'] = council.get('treasury', 0.)+tax*(1-share)
+            council['revenue'] = council.get('revenue', 0.)+tax*(1-share)
             council['house'] = council.get('house', 0.)+tax*share
 
     def tax(self, system):
