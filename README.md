@@ -39,7 +39,7 @@ git pull --ff-only
 bash install.sh
 ```
 
-**From 0.2.0 onward:** the game checks the official GitHub release once per day in a background thread. When a newer version is available, it shows an update notice. **2** displays the installed version and instructions. Checks time out quietly offline; no account, telemetry or mandatory connection is required. Disable checks with `--no-update-check` or `STAR_TRADER_NO_UPDATE_CHECK=1`.
+**From 0.2.0 onward:** the game checks the official GitHub release once per day in a background thread. When a newer version is available, it shows an update notice. The menu (**`**) shows the installed version and instructions. Checks time out quietly offline; no account, telemetry or mandatory connection is required. Disable checks with `--no-update-check` or `STAR_TRADER_NO_UPDATE_CHECK=1`.
 
 To apply an update yourself, quit the game and run from your checkout:
 
@@ -61,27 +61,30 @@ You start docked with 150 credits, a full 7-unit fuel tank, a pulse laser, three
 
 | Screen | Controls |
 | --- | --- |
+| Screens (from anywhere) | 1 home (market or cockpit); 2 Nav; 3 VMS; 4 Money; 5 Comms (DSC); 6 trade log; 8 engineering; 9 help; 0 feedback. Press again to go back |
 | Station | Up/Down select; B buy; S sell; U outfitting; L requests departure clearance, then L launches once granted |
-| Station services | F buys a full fuel refill; R repairs hull; P pays fines |
+| VMS (3) | F buys a full fuel refill; K sells fuel; R repairs hull; U outfitting; L launch |
 | Outfitting | Up/Down browse; B or Enter buy and fit; U returns to market |
+| Money (4) | B bank and storage; X Crymto exchange; R redeem a code; F pay fines; J station jobs; T trade log |
+| Bank/storage | D deposit money, W withdraw; S store selected cargo, T retrieve; R rent, B buy bay |
 | Flight | Arrows steer; W accelerate; S brake, then reverse; Q/E roll |
-| View | 4 toggles front/rear view; Space fires the current view’s fitted laser |
-| Weapons | Space fires selected laser; V cycles installed lasers; M fires a missile; B deploys a mine |
-| Equipment | C docking computer; Z signal jammer; K phase cloak |
-| Safety and radio | 6 distress/recovery; 7 requests docking clearance; 8 engineering and training |
-| Bank/storage | 9 while docked; D deposit money, W withdraw; S store selected cargo, T retrieve; R rent, B buy bay |
-| Local beacons | D station; P planet; A asteroid/ore; J sun; O collects nearby ore |
-| Galaxy map | G open/close; arrows select planet; / searches names; C enters X,Y |
+| View | F toggles front/rear view; Space fires the current view’s fitted laser |
+| Weapons | Space fires selected laser; V cycles installed lasers; M fires a missile; L lays a mine |
+| Equipment | D docking computer; J signal jammer; K phase cloak |
+| Safety and radio | R requests docking clearance; N hails a disabled ship; Ctrl+E distress/recovery; 8 engineering and training |
+| Local beacons | Ctrl+S station; Ctrl+P planet; Ctrl+R asteroid/ore; Ctrl+U sun; O collects nearby ore |
+| Steering aids | Ctrl+F fine steering; Ctrl+G approach guidance |
+| Galaxy map (2) | arrows select planet; / searches names; C enters X,Y; I planet profile |
 | Free map cursor | Tab switches between planet selection and coordinate cursor; arrows move cursor |
 | Course/travel | Enter locks course; hold H for 3 seconds to enter hyperspace; T interstellar cruise; T in cruise cancels |
-| Scanner | Click a ship contact to select it; 5 selects/clears the current ship target |
-| General | 1 manual; 2 updates; 3 fullscreen; Esc quit |
+| Scanner | Click a ship contact to select it; Tab cycles ship targets |
+| General | Backspace back; ` menu; Ctrl+N quick note; Ctrl+M full screen; Esc saves and closes |
 
 ### Mouse controls
 
 Mouse selection is available throughout the game: click commodity/equipment rows, then the buy/sell/fit buttons; click planets or empty coordinates on the map; click scanner contacts; select rescue offers and use the accept/negotiate/refuse buttons. Screen buttons cover departure, docking, station services, training, repair, travel and returning from menus. Search and coordinate fields still support normal keyboard text entry; clicking the map selects a destination without typing.
 
-Press **1** for the redesigned pilot handbook: six clickable tabs with control cards rather than a text wall. Left/Right switches pages. In flight, click **Actions** for a compact cockpit panel with **Fly**, **Nav**, **Fight** and **Safety** tabs. Hold a movement, roll or fire button to keep it active; releasing the mouse stops that input. Hold **Hold jump** for the same three-second hyperspace countdown as H. A click can also use weapons, jamming, cloaking, beacons, the radio and engineering. **FS** toggles fullscreen; **X** quits or **<** goes back from a modal screen. Losing window focus releases held inputs.
+Press **9** for the pilot handbook: clickable tabs, starting with a Keys page, with control cards rather than a text wall. Left/Right switches pages. In flight, click **Actions** for a compact cockpit panel with **Fly**, **Nav**, **Fight** and **Safety** tabs. Hold a movement, roll or fire button to keep it active; releasing the mouse stops that input. Hold **Hold jump** for the same three-second hyperspace countdown as H. A click can also use weapons, jamming, cloaking, beacons, the radio and engineering. **FS** toggles fullscreen; **X** quits or **<** goes back from a modal screen. Losing window focus releases held inputs.
 
 ### Docking and departure clearance
 
@@ -89,7 +92,7 @@ L first checks fuel and the locked destination's jump requirement, including a c
 
 After requesting departure, wait two seconds for clearance, then press L (or click Launch) to leave. Cancelling keeps you docked.
 
-Before docking, press **7** or use **Radio 7** in Actions. Station control responds after two seconds if within 10,000 metres. Clearance lasts 120 seconds. A docking computer requests clearance automatically. Regulated stations refuse pilots with outstanding fines of 100 credits or more; anarchy and feudal ports still accept them. Profiles show the current docking policy for your pilot. Departure from a station where you are already docked remains permitted.
+Before docking, press **R** or use **Radio R** in Actions. Station control responds after two seconds if within 10,000 metres. Clearance lasts 120 seconds. A docking computer requests clearance automatically. Regulated stations refuse pilots with outstanding fines of 100 credits or more; anarchy and feudal ports still accept them. Profiles show the current docking policy for your pilot. Departure from a station where you are already docked remains permitted.
 
 Fly through the rotating entrance at speed **1–25**. Centre within **14 metres horizontally and 6 metres vertically**, measured in the slot's frame, and use Q/E to keep the slot horizontal within about nine degrees. The cockpit reports roll error. Begin braking early, especially with a loaded hold. A station collision damages shields and hull.
 
@@ -99,7 +102,7 @@ Without valid clearance, even a geometrically correct entry will be rejected as 
 
 Buy and sell quotes are separate: BUY is what you pay, SELL is what you receive. Station stock is finite and saved. Cargo reduces top speed, turning rate, acceleration and braking, and increases fuel consumption. A larger hold increases capacity to 35 tonnes.
 
-Outfitting availability depends on local technology. You can buy a beam laser, military laser, mining laser, missiles, mines, scoops, an energy unit, docking computer, jammer or cloak. Front lasers can be switched with V. A rear laser mount costs 600 credits at tech level 4 or above and comes with a pulse laser. Press 4 for rear view, then Space to fire it; V in rear view moves any laser you own to the rear mount (each bought laser sits on one mount at a time; the pulse laser fits both). No mount means no rear firing. Rear view does not change your ship’s course or flight controls. Ammunition must be replaced; missiles and mines each have four storage slots. Browse down to see all equipment.
+Outfitting availability depends on local technology. You can buy a beam laser, military laser, mining laser, missiles, mines, scoops, an energy unit, docking computer, jammer or cloak. Front lasers can be switched with V. A rear laser mount costs 600 credits at tech level 4 or above and comes with a pulse laser. Press F for rear view, then Space to fire it; V in rear view moves any laser you own to the rear mount (each bought laser sits on one mount at a time; the pulse laser fits both). No mount means no rear firing. Rear view does not change your ship’s course or flight controls. Ammunition must be replaced; missiles and mines each have four storage slots. Browse down to see all equipment.
 
 Use A to find an asteroid, select a purchased mining laser with V, and fire until it breaks up. Approach the fragments at speed 50 or below. With scoops fitted, O collects one tonne of ore within 260 metres; sell ore at a station. Ordinary lasers do not yield ore.
 
@@ -112,15 +115,15 @@ The map shows both travel choices for your current load:
 - **Hyperspace:** hold H continuously for a visible three-second countdown, followed by a 1.6-second star-stream transition and arrival banner. Releasing H or leaving the cockpit before ignition cancels without spending jump fuel. Fuel is rechecked and deducted at ignition. Normal flight and threats continue during charging. Jump cost is `1.2 × distance + 0.2` fuel.
 - **Cruise:** `45 × distance × cargo mass factor` seconds of game time, costing `0.25 × distance × cargo mass factor` fuel. T cancels at your current coordinates.
 
-The cockpit has a top-down scanner: your ship is white at its centre, front is toward the top, pirates are red, police/planets blue, and the station green. Its radius is 2,500 metres, with more distant contacts clamped to the rim. Click a ship dot or press 5 to select it; the selected ship gains a gold scanner ring and a pink cockpit marker. Click the station/planet to select its local navigation beacon.
+The cockpit has a top-down scanner: your ship is white at its centre, front is toward the top, pirates are red, police/planets blue, and the station green. Its radius is 2,500 metres, with more distant contacts clamped to the rim. Click a ship dot or press Tab to select it; the selected ship gains a gold scanner ring and a pink cockpit marker. Click the station/planet to select its local navigation beacon.
 
 The active navigation destination has a gold dot/bracket when visible and an edge arrow when outside the view. Rearward targets are labelled “BEHIND: 4”; toggle rear view to see them. A remote locked galaxy waypoint shows a compass course; H/T travels between galactic coordinates. Once there, local beacons guide normal flight toward the station, sun, planet or ore. Steering in local space does not change galactic coordinates.
 
-These are game-scale distances/timings. Local flight also consumes fuel. The 7-unit tank no longer guarantees a seven-light-year jump. Low reserves trigger a warning; fuel can run out. F at a station buys a refill at 3 credits per unit, independently of hull repairs. Scoops can gather fuel near the sun: J selects its beacon, skim within 500 metres at speed 10–60, and retreat before heat reaches 90. Empty-space coordinates have no station or services. If stranded without a viable fuel source, press 6 to request rescue and review salvage terms.
+These are game-scale distances/timings. Local flight also consumes fuel. The 7-unit tank no longer guarantees a seven-light-year jump. Low reserves trigger a warning; fuel can run out. F at a station buys a refill at 3 credits per unit, independently of hull repairs. Scoops can gather fuel near the sun: Ctrl+U selects its beacon, skim within 500 metres at speed 10–60, and retreat before heat reaches 90. Empty-space coordinates have no station or services. If stranded without a viable fuel source, press Ctrl+E to request rescue and review salvage terms.
 
 ### Distress calls, salvage and rescue
 
-Press **6** in flight or cruise, or click Distress. A call stops cruise and opens recovery offers. Broadcasting reveals a cloaked ship. Calls have a 60-second in-flight cooldown; declining an offer takes no payment.
+Press **Ctrl+E** in flight or cruise, or click Distress. A call stops cruise and opens recovery offers. Broadcasting reveals a cloaked ship. Calls have a 60-second in-flight cooldown; declining an offer takes no payment.
 
 Within **5,000 metres** of a station that accepts your pilot, the **Galactic Recovery Accord** charges a fixed **25% of credits AND cargo tonnes**, rounded up and capped at what you hold. The screen lists the exact cash amount and each cargo item claimed before you accept. Equipment is not part of the salvage claim.
 
@@ -140,7 +143,7 @@ A failed attempt imposes a **real-time** wait: **30 minutes, then 60, 120, 240�
 
 ### Bank and station storage
 
-Press **9** or click **Bank / storage** while docked. The galactic bank holds credits off-ship; select 10, 50, 100 or All, then deposit or withdraw. Deposited money is not part of a distress salvage claim. Cargo bays belong to individual stations: renting costs **50 credits for 40 tonnes for seven real days**, while buying costs **750 credits for 100 tonnes**. Owned capacity has no recurring rent in this version.
+Press **4** then **B**, or click **Bank / storage**, while docked. The galactic bank holds credits off-ship; select 10, 50, 100 or All, then deposit or withdraw. Deposited money is not part of a distress salvage claim. Cargo bays belong to individual stations: renting costs **50 credits for 40 tonnes for seven real days**, while buying costs **750 credits for 100 tonnes**. Owned capacity has no recurring rent in this version.
 
 Choose a commodity, then store/retrieve one tonne. Expired rentals keep their contents and allow retrieval; renew or buy to deposit more. Buying a rented bay retains its cargo and increases capacity. A bay at one port cannot be accessed from another. Station cargo and bank money survive ship loss; N explicitly starting a new pilot resets all assets. This version stores cargo, not spare ship modules.
 
@@ -194,17 +197,17 @@ You can run `python3 star_trader.py` directly without installing. System librari
 
 MIT. An original tribute, not a port of Elite; no original Elite code or assets are included. The galaxy is currently eight predefined planets, not the original's generated galaxies. Several flight and combat mechanics are deliberately simplified.
 
-Approach guidance: Y toggles centring on the selected local navigation target ahead.
+Approach guidance: Ctrl+G toggles centring on the selected local navigation target ahead.
 You retain throttle and roll control; arrows cancel guidance. It does not grant docking clearance.
-Use H/T for remote galaxy destinations. I toggles fine steering (20% arrows and Q/E roll),
-useful for docking. Mouse: Actions > Nav > Guide Y; Actions > Safety > Fine I.
+Use H/T for remote galaxy destinations. Ctrl+F toggles fine steering (20% arrows and Q/E roll),
+useful for docking. Mouse: Actions > Nav > Guide; Actions > Safety > Fine.
 
 Docking allows +/-14 degrees of roll error. Slow station contact (speed 25 or below)
 causes minor damage; high-speed impacts remain dangerous. Slot roll error stays visible after clearance.
 
 Station defence: approaching the docking lane without clearance triggers warnings,
 then hostility after 12 seconds. Stop outside the entrance, withdraw or obtain clearance
-with 7 before escalation. Shooting the station causes immediate hostility, a 150cr fine,
+with R before escalation. Shooting the station causes immediate hostility, a 150cr fine,
 revoked clearance and attacking police. Hostility at that station survives saving;
 leave for another accepting port. Paying fines alone does not clear station hostility.
 
@@ -251,7 +254,7 @@ agricultural worlds pay more for narcotics, and frontier worlds have strong arms
 demand. Anarchy/feudal governments add an arms premium; corporate states add
 some narcotics demand. Normal dealer spreads and customs risks still apply.
 
-Detailed planet profiles: G opens the map; select a named planet and press I
+Detailed planet profiles: 2 opens the map; select a named planet and press I
 or click Planet profile. View coordinates, government, population, size, tech,
 customs, docking access, station services and all commodity buy/sell prices.
 Left/Right or Previous/Next browses profiles without changing your waypoint.
@@ -287,7 +290,7 @@ For offline testing only, close the game then run star_trader.py
 --grant-test-credits 100000. It backs up the save and adds credits without
 altering fines, Crymto or ship position. Multiplayer grants will require server admin authority.
 
-MONEY AND NOTES: 9 opens Money for bank/storage, Crymto exchange, fine payments
+MONEY AND NOTES: 4 opens Money for bank/storage, Crymto exchange, fine payments
 and credit codes. Select Redeem code and enter STAR-TEST-100K for a one-time
 100,000-credit grant per pilot in this offline test build. Multiplayer codes
 will require server validation. Press - or click Notes for a saved personal
@@ -303,7 +306,7 @@ use consistent 32px targets, clear labels and context-specific actions.
 Open Money (9) then Station jobs (5) to earn credits. Jobs return to Money.
 
 VMS (Vessel Management System) is in the top bar, alongside Money and
-Navigation. X opens VMS: check hull/shields, fuel/heat, cargo/mass, maintenance,
+Navigation. 3 opens VMS: check hull/shields, fuel/heat, cargo/mass, maintenance,
 weapons and fitted equipment. While docked, buy fuel, service, fit equipment,
 train engineering and launch from VMS. In flight, view status and open field
 engineering; station facilities stay unavailable until docking. Money (9) is

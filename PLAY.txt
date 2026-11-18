@@ -4,22 +4,22 @@ Install: bash install.sh
 Play: open your app launcher and search for Star Trader.
 Or run: python3 star_trader.py
 
-1: complete flight manual. 2: version and update instructions.
-3: fullscreen. ESC: quit. Update from a clean checkout: python3 update.py
+Screens, from anywhere: 1 home, 2 Nav, 3 VMS, 4 Money, 5 Comms, 6 trade log,
+8 engineering, 9 help, 0 feedback. Ctrl+M: full screen. ESC: save and quit. Update from a clean checkout: python3 update.py
 
-Station: arrows select, B buy, S sell, U outfitting, F buy fuel,
-R service hull/maintenance, P pay fines. L requests departure;
+Station: arrows select, B buy, S sell, U outfitting. In VMS (3): F buy fuel,
+R service hull/maintenance. In Money (4): F pay fines. L requests departure;
 wait for clearance, then L launches. A low/insufficient-fuel warning
 lets you buy fuel, cancel, or explicitly proceed. Buy and sell prices differ.
 Cargo affects speed, turning, braking, fuel use and cruise time.
 
 Flight: arrows steer, W accelerate, S brake/reverse, Q/E roll.
-SPACE laser, V switch front laser, M missile, B deploy mine.
-4 toggles front/rear view. Rear fire needs a rear laser mount (comes with a pulse laser); in rear view, V puts any laser you own on it.
-C docking computer, Z jammer, K cloak (equipment must be bought).
-D station, P planet, A asteroid/ore, J sun, O scoop nearby ore.
-7 requests docking clearance. Regulated ports may refuse wanted pilots.
-6 distress: nearby station rescue claims 25% cash AND cargo; outside
+SPACE laser, V switch front laser, M missile, L lay mine.
+F toggles front/rear view. Rear fire needs a rear laser mount (comes with a pulse laser); in rear view, V puts any laser you own on it.
+D docking computer, J jammer, K cloak (equipment must be bought).
+Ctrl+S station, Ctrl+P planet, Ctrl+R asteroid/ore, Ctrl+U sun, O scoop nearby ore.
+R requests docking clearance. Regulated ports may refuse wanted pilots.
+Ctrl+E distress: nearby station rescue claims 25% cash AND cargo; outside
 coverage, select/negotiate robot salvage offers before accepting.
 8 engineering: train while docked; repair self/help disabled ships in flight.
 Failure cooldowns start at 30 real minutes, doubling on consecutive failures.
@@ -27,12 +27,12 @@ Station service resets maintenance; neglect raises breakdown risk each flight.
 Mouse: click rows, map locations, scanner contacts and action buttons.
 Actions opens held movement/fire/hyperspace controls in the cockpit.
 
-G galaxy map: / search planets, C coordinates, TAB free cursor,
+2 galaxy map: / search planets, C coordinates, TAB free cursor,
 arrows select/move, ENTER locks a waypoint. Hold H for 3 seconds: countdown, star-stream transit and arrival banner.
 Hyperspace uses more fuel; release H before ignition to cancel. T starts slower, more economical cruise; T cancels.
 Read the planet profile and budget fuel before departure.
-Navigation uses gold dots/arrows. Click a scanner ship dot or press 5
-to select a ship; its direction marker is pink. 4 reveals rearward targets.
+Navigation uses gold dots/arrows. Click a scanner ship dot or press Tab
+to select a ship; its direction marker is pink. F reveals rearward targets.
 
 Dock through the rotating slot at speed 1-25. Centre within
 14m horizontal / 6m vertical; use Q/E to keep roll error within +/-14deg.
@@ -47,8 +47,8 @@ Undocked ships advance while unattended on rejoin; after long absences
 emergency salvage applies. Dock to log out safely. Destruction stays saved.
 R after death recovers a starter ship for up to 100 bank credits, keeping
 bank/station assets. N explicitly starts a new pilot and resets everything.
-9 while docked: bank deposits and local cargo bays (rent or buy).
-1 opens the tabbed control handbook. Actions has four compact cockpit tabs.
+4 then B while docked: bank deposits and local cargo bays (rent or buy).
+9 opens the tabbed control handbook. Actions has four compact cockpit tabs.
 Save: ${XDG_DATA_HOME:-~/.local/share}/star-trader/save.json
 
 Offline play works without Internet. Optional daily release checks
@@ -57,17 +57,17 @@ When a newer release is out, the game asks before it starts: Enter (or U)
 updates, N or Esc plays this version (it asks again next launch).
 Multiplayer, fleets, chat, player police and bases are future plans.
 
-Approach guidance: Y toggles centring on the selected local navigation target ahead.
+Approach guidance: Ctrl+G toggles centring on the selected local navigation target ahead.
 You retain throttle and roll control; arrows cancel guidance. It does not grant docking clearance.
-Use H/T for remote galaxy destinations. I toggles fine steering (20% arrows and Q/E roll),
-useful for docking. Mouse: Actions > Nav > Guide Y; Actions > Safety > Fine I.
+Use H/T for remote galaxy destinations. Ctrl+F toggles fine steering (20% arrows and Q/E roll),
+useful for docking. Mouse: Actions > Nav > Guide; Actions > Safety > Fine.
 
 Docking allows +/-14 degrees of roll error. Slow station contact (speed 25 or below)
 causes minor damage; high-speed impacts remain dangerous. Slot roll error stays visible after clearance.
 
 Station defence: approaching the docking lane without clearance triggers warnings,
 then hostility after 12 seconds. Stop outside the entrance, withdraw or obtain clearance
-with 7 before escalation. Shooting the station causes immediate hostility, a 150cr fine,
+with R before escalation. Shooting the station causes immediate hostility, a 150cr fine,
 revoked clearance and attacking police. Hostility at that station survives saving;
 leave for another accepting port. Paying fines alone does not clear station hostility.
 
@@ -123,7 +123,7 @@ struggle. Busy stations (more ships trading) produce and consume faster. In the
 market, orange stock is wanted there and blue is surplus. Watch the news for
 famines, plagues, mining booms, strikes, harvests, festivals and wars.
 
-Detailed planet profiles: G opens the map; select a named planet and press I
+Detailed planet profiles: 2 opens the map; select a named planet and press I
 or click Planet profile. View coordinates, government, population, size, tech,
 customs, docking access, station services and all commodity buy/sell prices.
 Left/Right or Previous/Next browses profiles without changing your waypoint.
@@ -159,7 +159,7 @@ For offline testing only, close the game then run star_trader.py
 --grant-test-credits 100000. It backs up the save and adds credits without
 altering fines, Crymto or ship position. Multiplayer grants will require server admin authority.
 
-MONEY AND NOTES: 9 opens Money for bank/storage, Crymto exchange, fine payments
+MONEY AND NOTES: 4 opens Money for bank/storage, Crymto exchange, fine payments
 and credit codes. Select Redeem code and enter STAR-TEST-100K for a one-time
 100,000-credit grant per pilot in this offline test build. Multiplayer codes
 will require server validation. Press - or click Notes for a saved personal
@@ -175,7 +175,7 @@ use consistent 32px targets, clear labels and context-specific actions.
 Open Money (9) then Station jobs (5) to earn credits. Jobs return to Money.
 
 VMS (Vessel Management System) is in the top bar, alongside Money and
-Navigation. X opens VMS: check hull/shields, fuel/heat, cargo/mass, maintenance,
+Navigation. 3 opens VMS: check hull/shields, fuel/heat, cargo/mass, maintenance,
 weapons and fitted equipment. While docked, buy fuel, service, fit equipment,
 train engineering and launch from VMS. In flight, view status and open field
 engineering; station facilities stay unavailable until docking. Money (9) is

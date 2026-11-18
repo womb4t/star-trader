@@ -24,7 +24,7 @@ import textwrap
 from market import Market, demand_factor
 import economy
 
-VERSION = '0.8.9'
+VERSION = '0.8.10'
 HOSTILITY_COOLDOWN_SECONDS = 30*60
 STATION_POLICE_CAPACITY = 6
 # Career points needed for each commander rank: kills, trade profit and hyperspace jumps all count.
@@ -63,7 +63,7 @@ EQUIPMENT = [
     ('docking', 'Docking computer', 1500, 8, 'C engages automatic approach and docking'),
     ('energy', 'Extra energy unit', 1500, 8, 'Doubles shield regeneration'),
     ('military', 'Military laser', 6000, 10, 'High damage, rapid fire'),
-    ('mine', 'Proximity mine', 75, 4, 'B deploys; 1.5 second arming delay; keep clear'),
+    ('mine', 'Proximity mine', 75, 4, 'L lays one; 1.5 second arming delay; keep clear'),
     ('jammer', 'Signal jammer', 600, 3, 'Z disrupts targeting for 8s; 20s cooldown'),
     ('cloak', 'Phase cloak', 3000, 11, 'K toggles concealment; consumes fuel'),
     ('dsc', 'DSC comms console', 450, 3, '5 Comms: distress alerts with identity, nature and position; acknowledge to track'),
@@ -1550,7 +1550,7 @@ class Game:
         self.security_elapsed += dt
         if not self.security_warning:
             self.security_warning = 1
-            self.message = 'STATION WARNING: no clearance! Stop and request docking with 7, or withdraw. Police in 12 seconds.'
+            self.message = 'STATION WARNING: no clearance! Stop and request docking with R, or withdraw. Police in 12 seconds.'
         if self.security_elapsed >= 6 and self.security_warning == 1:
             self.security_warning = 2
             self.message = 'FINAL STATION WARNING: withdraw or obtain clearance! Police in 6 seconds.'
@@ -4158,9 +4158,9 @@ class Game:
             self.mouse_button(35,674,190,'Flight controls',action=lambda:setattr(self,'mouse_controls',not self.mouse_controls))
         if self.mode == 'flight' and self.mouse_controls:
             groups=[('Flight', [('Thrust W',ord('w'),True),('Brake S',ord('s'),True),('Fire Spc',32,True),('Left',LEFT,True),('Up',UP,True),('Right',RIGHT,True),('Roll Q',ord('q'),True),('Down',DOWN,True),('Roll E',ord('e'),True)]),
-                ('Nav',[('Nav G',ord('g'),False),('Hold jump',ord('h'),True),('Cruise',ord('t'),False),('Station',ord('d'),False),('Planet',ord('p'),False),('Rocks',ord('a'),False),('Sun',ord('j'),False),('Scoop',ord('o'),False),('Guide ON' if self.course_assist else 'Guide Y',ord('y'),False)]),
-                ('Combat',[('Fire',32,True),('View 4',ord('4'),False),('Laser',ord('v'),False),('Missile',ord('m'),False),('Mine',ord('b'),False),('Jammer',ord('z'),False),('Cloak',ord('k'),False),('Target',ord('5'),False)]),
-                ('Safety',[('Surrender 7' if not self.p.deep_space and self.station_hostilities[self.p.system] and self.arrest_pending() and not self.surrendering else 'Radio 7',ord('7'),False),('Hail N',ord('n'),False),('Autodock',ord('c'),False),('Skills',ord('8'),False),('Distress',ord('6'),False),('Fine ON' if self.fine_control else 'Fine I',ord('i'),False)])]
+                ('Nav',[('Nav 2',ord('g'),False),('Hold jump',ord('h'),True),('Cruise',ord('t'),False),('Station',ord('d'),False),('Planet',ord('p'),False),('Rocks',ord('a'),False),('Sun',ord('j'),False),('Scoop',ord('o'),False),('Guide ON' if self.course_assist else 'Guide ^G',ord('y'),False)]),
+                ('Combat',[('Fire',32,True),('View F',ord('4'),False),('Laser',ord('v'),False),('Missile',ord('m'),False),('Mine',ord('b'),False),('Jammer',ord('z'),False),('Cloak',ord('k'),False),('Target',ord('5'),False)]),
+                ('Safety',[('Surrender R' if not self.p.deep_space and self.station_hostilities[self.p.system] and self.arrest_pending() and not self.surrendering else 'Radio R',ord('7'),False),('Hail N',ord('n'),False),('Autodock',ord('c'),False),('Skills',ord('8'),False),('Distress',ord('6'),False),('Fine ON' if self.fine_control else 'Fine ^F',ord('i'),False)])]
             d.fill(30,105,350,270,(5,16,27));d.rect(30,105,350,270,GREEN)
             d.text(40,112,'FLIGHT CONTROLS',GOLD)
             for i,(title,_) in enumerate(groups):
@@ -4205,7 +4205,7 @@ class Game:
             ('Keys',[
                 ('Screens: the number row','1 2 3 4 5 6 8 9 0','1 Home (market or cockpit), 2 Nav, 3 VMS, 4 Money, 5 Comms, 6 Logs, 8 Engineering, 9 Help, 0 Feedback. Press again to go back.'),
                 ('Actions: letters','B buy, S sell, D dock...','Letters act on the screen you are on and are named for what they do. Every button shows its key.'),
-                ('Rarer controls','CTRL + letter','Ctrl+N quick note, Ctrl+M full screen; in flight Ctrl+P/S/R/U beacons, Ctrl+F fine steering, Ctrl+G guidance, Ctrl+E distress.'),
+                ('Rarer controls','CTRL + letter (^)','Ctrl+N quick note, Ctrl+M full screen; in flight Ctrl+P/S/R/U beacons, Ctrl+F fine steering, Ctrl+G guidance, Ctrl+E distress.'),
                 ('Back and close','BACKSPACE / ESC','Backspace goes back. Esc saves and closes from every screen.'),
                 ('Menu','`','Notes, feedback, updates, display size and save and close.'),
                 ('Changed keys','In this update','Nav is now 2 (was G), VMS 3 (was X), Money 4 (was 9), Help 9 (was 1), docking computer D (was C), request docking R (was 7).')]),

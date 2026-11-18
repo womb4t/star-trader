@@ -1,3 +1,14 @@
+# 0.8.10 — new keyboard layout: numbers for screens, letters for actions
+
+From your suggestion: every control now has a keyboard shortcut, laid out so it is easy to remember.
+- **The number row opens screens, from anywhere:** 1 home (the market when docked, the cockpit when flying), 2 Nav, 3 VMS, 4 Money, 5 Comms (DSC console), 6 trade log, 8 engineering, 9 help, 0 feedback. Press the same number again to go back. Numbers never do anything else.
+- **Letters are actions on the screen you're on, named for what they do.** In flight: D docking computer, R request docking, F look behind, L lay a mine, J jammer, Tab next target (K cloak, M missile, V laser, H jump, T cruise, O scoop and N hail are unchanged). In Money: B bank, X exchange, R redeem a code, F pay fines, J jobs, T trade log. Hails and job questions are answered with A, B, C (and Y to accept, P for payment in cargo).
+- **Rarer flight controls use Ctrl:** Ctrl+S/P/R/U select the station, planet, rocks or sun beacon, Ctrl+F fine steering, Ctrl+G approach guidance, Ctrl+E distress call. Anywhere: Ctrl+N quick note, Ctrl+M full screen (no function keys needed).
+- **Buttons show the new keys**, and the handbook (9) opens on a new Keys page listing what moved: Nav was G, VMS was X, Money was 9, Help was 1, docking computer was C, request docking was 7.
+
+From your bug report:
+- **The market notes no longer run under the Commander Status panel.** The solar-flare message was too long for the space; it's shorter now, and so is the outfitting hint.
+
 # 0.8.9 — the economy breathes
 
 Stations now have living economies, shared by every commander on the server.
