@@ -2502,6 +2502,7 @@ class Game:
 
     def key_hint(self, legacy):
         """The keyboard key that does what an on-screen button's action key does, for its label."""
+        if legacy is None: return None   # a button with no key (its retired-key entries are None too)
         screens = {ord('g'): '2', ord('x'): '3', ord('9'): '4', ord('8'): '8', ord('1'): '9', ord('0'): '0'}
         letters = SCREEN_LETTERS.get(self.mode, {})
         for new, old in letters.items():
@@ -4524,7 +4525,7 @@ class Game:
         d.text(35,625,f'SHIELD {self.shield:.0f}%  HULL {p.hull:.0f}%  HOLD {sum(p.cargo)}/{p.capacity}t')
         error = math.degrees(self.slot_error())
         d.text(650,598,('GUIDANCE Y  ' if self.course_assist else '')+('FINE I' if self.fine_control else ''),GOLD)
-        d.text(650,625,'DRIVE DISABLED' if self.broken_down else 'AUTODOCK' if self.autodock else f'SLOT {error:+.0f}/14deg '+('CLEAR' if self.dock_clearance else '7 radio'),GOLD)
+        d.text(650,625,'DRIVE DISABLED' if self.broken_down else 'AUTODOCK' if self.autodock else f'SLOT {error:+.0f}/14deg '+('CLEAR' if self.dock_clearance else 'R radio'),GOLD)
         status = 'CLOAKED' if self.cloaked else 'JAMMING' if self.jamming else ''
         d.text(35,650,f'MINES {p.mines}  {status}  Ctrl+E distress  /  F rear view'+('  /  PATROL ZONE' if self.in_patrol_zone() else ''),GOLD)
         if p.fuel < 1.0:

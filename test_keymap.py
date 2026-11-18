@@ -115,6 +115,13 @@ class KeymapTests(unittest.TestCase):
         self.assertEqual(g.key_hint(k('g')), '2')
         self.assertEqual(g.key_hint(k('x')), '3')
 
+    def test_buttons_without_a_key_show_no_hint(self):
+        g = self.g
+        for mode in ('flight','cruise','market','outfit','money','jobs','hail'):
+            g.mode = mode
+            with self.subTest(mode=mode):
+                self.assertIsNone(g.key_hint(None))
+
 
 if __name__ == '__main__':
     unittest.main()
