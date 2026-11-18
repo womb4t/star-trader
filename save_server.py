@@ -148,6 +148,19 @@ class Store:
             row = db.execute("SELECT value FROM settings WHERE key='admin_token_hash'").fetchone()
         return row is not None and secrets.compare_digest(row[0],self.token_hash(token))
 
+    def market_exchange(self, trades=(), intercepts=(), now=None):
+        """Advance the shared market, apply a player's stock changes, and return what every commander sees."""
+        from star_trader import new_market
+        now = time.time() if now is None else now
+        with self.connect() as db:
+            db.execute('BEGIN IMMEDIATE')
+            row = db.execute("SELECT value FROM settings WHERE key='market'").fetchone()
+            market = new_market(json.loads(row[0]) if row else None)
+            market.advance(now)
+            market.apply(trades,intercepts)
+            db.execute("INSERT OR REPLACE INTO settings VALUES ('market',?)",(encode(market.state).decode(),))
+            return market.snapshot(now)
+
     def news_list(self):
         with self.connect() as db:
             return db.execute('SELECT name,email FROM players WHERE email IS NOT NULL ORDER BY name').fetchall()
@@ -244,12 +257,17 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_PUT(self):
         try:
-            if self.path not in ('/v1/save','/v1/presence','/v1/feedback'): return self.reply(404,dict(error='Not found'))
+            if self.path not in ('/v1/save','/v1/presence','/v1/feedback','/v1/market'): return self.reply(404,dict(error='Not found'))
             token = self.token()
             self.server.store.read(token)
             length = int(self.headers.get('Content-Length','0'))
             if not 0 < length <= MAX_SAVE+1024: return self.reply(413,dict(error='Save too large or empty'))
             data = json.loads(self.rfile.read(length))
+            if self.path == '/v1/market':
+                if type(data) is not dict or type(data.get('trades',[])) is not list or type(data.get('intercepts',[])) is not list: raise ValueError('Invalid market request')
+                trades = data.get('trades',[])
+                if not all(type(t) is list and len(t) == 3 for t in trades): raise ValueError('Invalid trade')
+                return self.reply(200,self.server.store.market_exchange(trades,data.get('intercepts',[])))
             if self.path == '/v1/feedback':
                 self.server.store.add_feedback(self.server.store.read(token)['player'],data)
                 return self.reply(201,dict(received=data['id']))

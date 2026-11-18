@@ -15,7 +15,7 @@ Cargo affects speed, turning, braking, fuel use and cruise time.
 
 Flight: arrows steer, W accelerate, S brake/reverse, Q/E roll.
 SPACE laser, V switch front laser, M missile, B deploy mine.
-4 toggles front/rear view. Rear fire needs a purchased rear pulse laser.
+4 toggles front/rear view. Rear fire needs a rear laser mount (comes with a pulse laser); in rear view, V puts any laser you own on it.
 C docking computer, Z jammer, K cloak (equipment must be bought).
 D station, P planet, A asteroid/ore, J sun, O scoop nearby ore.
 7 requests docking clearance. Regulated ports may refuse wanted pilots.

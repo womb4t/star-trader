@@ -1,10 +1,21 @@
-# 0.8.7 — best in range, and solar flares
+# 0.8.7 — a living galaxy: shared markets, traders, DSC distress calls and solar flares
 
 From your bug reports:
-- **BEST IN RANGE fills in when you arrive.** The market column used to list only systems the fuel left in your tank could reach, so straight after a jump (tank nearly empty) every row showed "-". It now shows the best sale price at systems a full tank can reach, since you can refuel at the station before you leave.
+- **BEST IN RANGE fills in when you arrive.** It used to list only systems the fuel left in your tank could reach, so straight after a jump every row showed "-". It now shows the best sale price within a full tank's reach, since you can refuel before leaving.
+- **Every rock breaks, whatever laser you use.** Silver (and gold) rocks only broke with the mining laser selected. Now any laser cracks any rock; what's left to scoop depends on how gently it cuts: the mining laser leaves 3 pieces, pulse and beam 2, and the military laser smashes rocks fastest but vaporises most of the ore (0 or 1 piece).
+- **Destroyed ships spill cargo.** Pirates drop plundered goods and police ships drop seized contraband, as well as disabled ships and traders. Fly slowly with scoops to collect it.
+- **Disabled ships are no longer on every flight.** About one flight in three, a ship somewhere in the system (3.5–8 km away) calls for help a few minutes after you launch.
+- **Fuel scoops checked.** They work: skim below 280 m altitude at speed 10–60 to refuel. The sun beacon hint now gives the same figure as the cockpit readout.
 
 New:
-- **Solar flares.** Every so often (about once every two hours) a solar flare blacks out deep-space comms for 4–10 minutes. While it lasts, the market's BEST IN RANGE column turns to static ("SOLAR FLARE: no signal from other systems. Comms back in about N min."), planet profiles show no market prices for other systems, and the nav map stops showing where other commanders are. Local prices, buying and selling, station traffic control, hailing and distress calls all still work. Flares follow the clock, so every commander sees the same flare at the same time, and quitting won't make it go away.
+- **One shared market.** Station stock is now held on the server, so every commander buys from and sells to the same stations; if Frank empties a station of computers, you'll find it empty too. Offline, the game carries on from the last stock it saw.
+- **Supply and demand.** Prices follow stock: scarce goods cost up to 1.5x, gluts sell down to 0.75x. Stations slowly produce goods back to their normal level.
+- **Bot traders.** Freighters buy goods where they are cheap and ship them to where they are dear, so stock moves around the galaxy. You will see them launch from the station and jump out, or jump in and fly to dock (white freighters on the scanner; 5 targets them). While docked, the market tells you when one arrives or leaves. Their cargo only reaches the other station if they make it: shoot one down and its cargo spills for you to scoop (100 cr fine in lawful systems).
+- **DSC comms console** (450 cr, tech 3). Like a marine DSC radio, it receives distress alerts carrying the caller's identity, nature of distress (fire, hull breach, life support failure, drive failure) and position. Alerts repeat every minute until acknowledged. TAB opens the console; ENTER acknowledges and locks your direction marker on the vessel. Fire and hull breach crews don't last long: reach them in time or the alert stops with the vessel lost.
+- **Any laser on the rear mount.** The rear pulse laser is now a rear laser mount (still comes with a pulse laser). In rear view (4), V moves any laser you own onto it; each bought laser sits on one mount at a time.
+- **Solar flares.** Every so often (about once every two hours) a flare blacks out deep-space comms for 4–10 minutes: BEST IN RANGE turns to static, planet profiles show no prices for other systems, and the nav map stops showing other commanders. Local trading, docking, hailing, DSC and distress calls still work. Every commander sees the same flare at the same time.
+
+Server: update the server before (or with) this release; it now holds the shared market (`PUT /v1/market`).
 
 # 0.8.6 — the newest save wins
 

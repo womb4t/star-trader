@@ -915,12 +915,10 @@ class GameplayTests(unittest.TestCase):
         g.key(ord('q'))
         self.assertFalse(g.autodock)
 
-    def test_mining_requires_laser_and_scoops(self):
+    def test_mining_needs_scoops_to_collect(self):
         g = self.game
         g.launch(); g.station = [400,0,1500]
         g.asteroids = [[0.,0.,240.,1]]; g.keys = {32}; g.speed = 0
-        g.update(.01)
-        self.assertEqual(len(g.asteroids),1)
         g.p.equipment = ['mining']; g.p.laser = 'mining'; g.cooldown = 0
         g.update(.01)
         self.assertEqual(len(g.asteroids),0)
@@ -973,6 +971,18 @@ class GameplayTests(unittest.TestCase):
         g.sun = [1000,0,1000]; heat = g.heat; g.update(.1)
         self.assertLess(g.heat,heat)
 
+    def test_fuel_scoops_refuel_while_skimming_the_sun(self):
+        g = self.game
+        g.launch(); g.station = [0.,0.,90000.]; g.spawn = 999
+        g.p.equipment = ['scoops']; g.p.fuel = 2.
+        g.sun = [400.,0.,0.]; g.speed = 30
+        for _ in range(100): g.update(.05)
+        self.assertGreater(g.p.fuel,2.6)
+        self.assertEqual(g.p.hull,100)
+        g.p.equipment = []; g.p.fuel = 2.; g.sun = [400.,0.,0.]
+        for _ in range(40): g.update(.05)
+        self.assertLess(g.p.fuel,2.01)
+
     def test_scoop_status_explains_sun_skimming_conditions(self):
         g = self.game
         g.launch(); g.station = [9000.,0,9000.]
@@ -1016,17 +1026,38 @@ class GameplayTests(unittest.TestCase):
         self.assertTrue(g.explosions)
         self.assertEqual(g.p.fine,fine+100)
 
-    def test_mining_laser_reports_each_hit_and_other_lasers_explain(self):
+    def test_mining_laser_reports_each_hit_and_cuts_cleanly(self):
         g = self.game
         g.launch(); g.station = [9000.,0,9000.]; g.speed = 0
         g.asteroids = [[0.,0.,1000.,3]]
-        g.fire_laser()
-        self.assertIn('Only a mining laser',g.message)
         g.p.equipment = ['mining']; g.p.laser = 'mining'; g.cooldown = 0; g.fire_laser()
         self.assertIn('2 more hits',g.message)
         for _ in range(2): g.cooldown = 0; g.fire_laser()
         self.assertEqual((g.asteroids,len(g.fragments)),([],3))
+        self.assertIn('cut cleanly',g.message)
         self.assertTrue(g.explosions)
+
+    def test_every_laser_breaks_every_rock_but_strong_ones_waste_ore(self):
+        g = self.game
+        for laser,most in (('pulse',2),('beam',2),('military',1)):
+            for good,health in ((2,3),(9,4),(8,5)):
+                g.launch(); g.station = [9000.,0,9000.]; g.speed = 0
+                g.p.equipment = [laser]; g.p.laser = laser
+                rock = [0.,0.,1000.,health,good]; g.asteroids = [rock]; g.fragments = []
+                for _ in range(10):
+                    g.cooldown = 0; g.fire_laser()
+                    if not g.asteroids: break
+                self.assertEqual(g.asteroids,[],(laser,good))
+                self.assertLessEqual(len(g.fragments),most)
+                self.assertTrue(all(f[3] == good for f in g.fragments))
+
+    def test_destroyed_pirates_spill_scoopable_cargo(self):
+        g = self.game
+        g.launch(); g.enemy = [0.,0.,500.,0.]; g.enemy_kind = 'pirate'
+        with patch.object(st.random,'randint',return_value=2):
+            g.destroy_enemy()
+        self.assertEqual(len(g.fragments),2)
+        self.assertIn('canisters',g.message)
 
     def test_station_mass_lock_and_arrival_outside_patrol_zone(self):
         g = self.game
@@ -1096,6 +1127,77 @@ class GameplayTests(unittest.TestCase):
             self.assertIn('comms restored',g.message)
             d.reset_mock(); g.draw()
             self.assertTrue(all(any(ch.isdigit() for ch in text) for text in column()))
+
+    def test_any_owned_laser_can_go_on_the_rear_mount(self):
+        g = self.game
+        g.launch(); g.spawn = 999
+        g.p.equipment = ['rear','military','mining']; g.p.laser = 'military'
+        g.rear_view = True
+        g.key(ord('v'))
+        self.assertEqual(g.p.rear_laser,'mining')  # military is on the front mount
+        g.key(ord('v'))
+        self.assertEqual(g.p.rear_laser,'pulse')
+        g.key(ord('v')); self.assertEqual(g.p.rear_laser,'mining')
+        g.rear_view = False
+        for _ in range(4):
+            g.key(ord('v'))
+            self.assertNotEqual(g.p.laser,'mining')
+        g.p.validate()
+        g.rear_view = True
+        rock = [0.,0.,-1000.,3,2]; g.asteroids = [rock]
+        g.cooldown = 0; g.fire_laser()
+        self.assertEqual(rock[3],2)
+        g.p.save(); again = st.Pilot(); again.load()
+        self.assertEqual(again.rear_laser,'mining')
+
+    def test_disabled_ships_are_occasional_and_far_away(self):
+        g = self.game
+        delays = []
+        for _ in range(400):
+            g.launch(); delays.append(g.assist_spawn_timer)
+        calls = [d for d in delays if d < 1e8]
+        self.assertTrue(.2 < len(calls)/len(delays) < .5)
+        self.assertTrue(all(st.DISTRESS_DELAY[0] <= d <= st.DISTRESS_DELAY[1] for d in calls))
+        g.spawn_distress()
+        reach = math.sqrt(sum(v*v for v in g.disabled_ship['object']))
+        self.assertTrue(st.DISTRESS_RANGE[0]-1 <= reach <= st.DISTRESS_RANGE[1]+1)
+
+    def test_dsc_console_receives_repeating_alerts_until_acknowledged(self):
+        g = self.game
+        g.launch(); g.spawn = 999
+        g.spawn_distress()
+        ship = g.disabled_ship
+        self.assertNotIn('disabled',[c[0] for c in g.scanner_contacts()])  # too far to see without DSC
+        g.update_distress()
+        self.assertNotIn('DSC',g.message)
+        g.key(9); self.assertIn('No DSC',g.message)
+        g.p.equipment.append('dsc')
+        g.update_distress()
+        self.assertIn('DSC DISTRESS ALERT',g.message)
+        self.assertIn(ship['ident'],g.message)
+        self.assertIn(ship['nature'].upper(),g.message)
+        self.assertIn('disabled',[c[0] for c in g.scanner_contacts()])
+        g.message = ''; g.update_distress()
+        self.assertEqual(g.message,'')  # repeats only once a minute
+        ship['next_alert'] = 0; g.update_distress()
+        self.assertIn('DSC DISTRESS ALERT',g.message)
+        g.key(9); self.assertEqual(g.mode,'dsc')
+        g.d = __import__('unittest.mock').mock.MagicMock(); g.draw()
+        g.key(13)
+        self.assertEqual(g.mode,'flight')
+        self.assertTrue(ship['acknowledged'])
+        self.assertIs(g.ship_target,ship['object'])
+        ship['next_alert'] = 0; g.message = ''; g.update_distress()
+        self.assertEqual(g.message,'')
+
+    def test_unreached_distress_ends_with_the_vessel_lost(self):
+        g = self.game
+        g.launch(); g.p.equipment.append('dsc')
+        g.spawn_distress()
+        g.disabled_ship['lost_at'] = 0
+        g.update_distress()
+        self.assertIsNone(g.disabled_ship)
+        self.assertIn('lost',g.message)
 
     def test_gold_and_silver_come_from_rich_asteroids(self):
         g = self.game
