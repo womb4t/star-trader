@@ -1,3 +1,9 @@
+# 0.8.11 — fix: Flight controls button overlap
+
+From your bug report:
+- **The Flight controls button in the cockpit no longer overlaps the text beside it.** 0.8.10 gave it a stray "C" key hint (it has no key), which made it wider. Buttons without a key no longer show a hint anywhere.
+- **The docking readout says "R radio"**, the new key for request docking, not "7 radio".
+
 # 0.8.10 — new keyboard layout: numbers for screens, letters for actions
 
 From your suggestion: every control now has a keyboard shortcut, laid out so it is easy to remember.
