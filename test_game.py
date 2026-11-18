@@ -1067,17 +1067,35 @@ class GameplayTests(unittest.TestCase):
         g.dock()
         self.assertTrue(all(g.best_sale_in_range(i) for i in range(len(st.GOODS))))
 
-    def test_trade_computer_sometimes_fritzes_then_reboots(self):
+    def test_solar_flares_are_shared_occasional_and_last_minutes(self):
+        windows = range(20000,22000)
+        flares = []
+        for w in windows:
+            t0 = w*st.FLARE_WINDOW
+            hits = [t for t in range(int(t0),int(t0+st.FLARE_WINDOW),20) if st.solar_flare(t)]
+            if hits: flares.append(hits[-1]-hits[0]+20)
+        self.assertTrue(.25 < len(flares)/len(windows) < .45)
+        self.assertTrue(all(3.5*60 <= length <= 10.5*60 for length in flares))
+        moment = next(w*st.FLARE_WINDOW+s for w in windows for s in range(0,st.FLARE_WINDOW,20) if st.solar_flare(w*st.FLARE_WINDOW+s))
+        self.assertEqual(st.solar_flare(moment),st.solar_flare(moment))  # same schedule for every commander
+
+    def test_solar_flare_blacks_out_best_in_range_then_clears(self):
+        from unittest.mock import MagicMock
+        d = MagicMock()
         g = self.game
-        g.dock_clearance = 120
-        with patch.object(st.random,'random',return_value=0.0), patch.object(st.random,'uniform',return_value=20.):
-            g.dock()
-        self.assertEqual(g.trade_computer_fritz,20.)
-        g.update(25)
-        self.assertEqual(g.trade_computer_fritz,0.)
-        with patch.object(st.random,'random',return_value=.99):
-            g.mode = 'cruise'; g.dock()
-        self.assertEqual(g.trade_computer_fritz,0.)
+        g.d = d
+        g.mode = 'market'
+        def column(): return [c.args[2] for c in d.text.call_args_list if c.args[0] == 565][1:]
+        with patch.object(st,'solar_flare',return_value=300.):
+            g.update(.01)
+            self.assertIn('SOLAR FLARE',g.message)
+            d.reset_mock(); g.draw()
+            self.assertFalse(any(any(ch.isdigit() for ch in text) for text in column()))
+        with patch.object(st,'solar_flare',return_value=0.):
+            g.update(.01)
+            self.assertIn('comms restored',g.message)
+            d.reset_mock(); g.draw()
+            self.assertTrue(all(any(ch.isdigit() for ch in text) for text in column()))
 
     def test_gold_and_silver_come_from_rich_asteroids(self):
         g = self.game

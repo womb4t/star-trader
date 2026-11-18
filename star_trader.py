@@ -152,8 +152,27 @@ def galactic_distance(a,b):
 
 
 FUEL_CAPACITY = 7.
-TRADE_COMPUTER_FRITZ_CHANCE = .12  # per docking: BEST IN RANGE shows static for a while
-FRITZ_GLYPHS = '#%&@?!<>/\\|*=~'
+# Solar flares black out deep-space comms (remote price feeds, the commander relay) for minutes at a time.
+# The schedule comes from the clock, so every copy of the game sees the same flare at the same moment.
+FLARE_WINDOW = 45*60       # seconds; each window may hold one flare
+FLARE_CHANCE = .35         # about one flare every two hours
+FLARE_MINUTES = (4,10)
+STATIC_GLYPHS = '#%&@?!<>/\\|*=~'
+
+
+def solar_flare(now=None):
+    """Seconds of comms blackout left at `now` (0 when space weather is clear)."""
+    now = time.time() if now is None else now
+    window = int(now//FLARE_WINDOW)
+    rng = random.Random(f'solar-flare-{window}')
+    if rng.random() >= FLARE_CHANCE: return 0.
+    duration = rng.uniform(*FLARE_MINUTES)*60
+    start = window*FLARE_WINDOW + rng.uniform(0,FLARE_WINDOW-duration)
+    return start+duration-now if start <= now < start+duration else 0.
+
+
+def static(width):
+    return ''.join(random.choice(STATIC_GLYPHS) for _ in range(width))
 
 
 def hyperspace_cost(distance):
@@ -695,7 +714,7 @@ class Game:
         self.feedback_text = ''
         self.feedback_type = 'bug'
         self.feedback_path = None
-        self.trade_computer_fritz = 0.  # seconds left until the glitching trade computer reboots
+        self.flare_active = False  # last seen solar flare state, to announce changes
         self.job_selected = 0
         self.mouse_controls = False
         self.mouse_held = set()
@@ -887,9 +906,12 @@ class Game:
             self.alert['elapsed'] += dt
             if self.alert['remaining'] <= 0: self.alert = None
         self.ship_collision_cooldown = max(0,self.ship_collision_cooldown-dt)
-        if self.trade_computer_fritz > 0:
-            self.trade_computer_fritz = max(0.,self.trade_computer_fritz-dt)
-            if not self.trade_computer_fritz and self.mode == 'market': self.message = 'Trade computer rebooted. BEST IN RANGE back online.'
+        flare = solar_flare() > 0
+        if flare != self.flare_active:
+            self.flare_active = flare
+            if self.mode != 'intro':
+                self.message = ('SOLAR FLARE: deep-space comms blacked out. Remote prices and the commander relay are down.' if flare
+                                else 'Solar flare over. Deep-space comms restored.')
         self.update_job(dt)
         if self.enemy_shot:
             self.enemy_shot['remaining'] -= dt
@@ -1605,9 +1627,7 @@ class Game:
         self.keys.clear()
         self.cloaked = False
         self.message = ('Docked.' + inspection) if inspection else 'Docked. X VMS for ship services; 9 Money; G Nav.'
-        if random.random() < TRADE_COMPUTER_FRITZ_CHANCE:
-            self.trade_computer_fritz = random.uniform(15,40)
-            if not inspection: self.message = 'Docked. The trade computer is on the fritz; BEST IN RANGE is rebooting.'
+        if solar_flare() and not inspection: self.message = 'Docked. A solar flare is blocking comms; BEST IN RANGE has no signal.'
         if arrest: self.arrest()
         self.save()
 
@@ -2872,7 +2892,7 @@ class Game:
             x,y = plot(coordinates(i))
             d.rect(x-4,y-4,8,8,GOLD if i == self.target and not self.cursor_mode else GREEN)
             presence = getattr(self,'presence',None)
-            count = sum(p['system'] == i and p['mode'] not in ('transit','deep-space') for p in presence.snapshot['players']) if presence else 0
+            count = sum(p['system'] == i and p['mode'] not in ('transit','deep-space') for p in presence.snapshot['players']) if presence and not solar_flare() else 0
             d.text(x+9,y-15,name+(f' [{count}]' if count else ''))
         x,y = plot(p.position)
         d.rect(x-8,y-8,16,16,(140,185,255))
@@ -2926,10 +2946,13 @@ class Game:
                                    'Crymto exchange' if government in ('Anarchy','Feudal') else 'No Crymto exchange',
                                    'Daily cargo, inventory and workshop jobs',
                                    'Engineering training and fine payments']): d.text(35,440+row*27,line)
-        d.text(610,140,'MARKET / * sells for Crymto',GOLD)
+        blackout = solar_flare() and i != self.p.system
+        if blackout: d.text(610,140,'MARKET / NO SIGNAL: SOLAR FLARE',(220,110,80))
+        else: d.text(610,140,'MARKET / * sells for Crymto',GOLD)
         d.text(610,178,'COMMODITY              BUY  SELL')
         for row,good in enumerate(GOODS):
-            d.text(610,210+row*27,f'{good+chr(42) if row in ILLEGAL else good:<20} {quote(i,row):>4} {quote(i,row,False):>5}',GOLD if row in ILLEGAL else GREEN)
+            prices = f'{static(4)} {static(5)}' if blackout else f'{quote(i,row):>4} {quote(i,row,False):>5}'
+            d.text(610,210+row*27,f'{good+chr(42) if row in ILLEGAL else good:<20} {prices}',GOLD if row in ILLEGAL else GREEN)
         demand = {'Industrial':'Cheaper manufactured goods / contraband',
                   'Agricultural':'Food / ore exports; narcotics demand',
                   'Frontier':'Strong arms demand; mixed exports'}[economy]
@@ -3927,22 +3950,22 @@ class Game:
                 d.text(35,85,'ORBITAL EXCHANGE / '+SYSTEMS[p.system][1].upper())
                 for x,label in [(35,'COMMODITY'),(270,'BUY'),(340,'SELL'),(415,'STOCK'),(495,'HOLD'),(565,'BEST IN RANGE')]:
                     d.text(x,130,label)
+                flare = solar_flare()
                 for i,g in enumerate(GOODS):
                     color = GOLD if i == self.selected else GREEN
                     d.text(35,170+i*30,('> ' if i == self.selected else '  ')+g+(' *' if i in ILLEGAL else ''),color)
                     for x,value in [(270,quote(p.system,i)),(340,quote(p.system,i,False)),(415,p.stock[p.system][i]),(495,p.cargo[i])]:
                         d.text(x,170+i*30,str(value),color)
                     best = self.best_sale_in_range(i)
-                    if self.trade_computer_fritz > 0:
-                        static = ''.join(random.choice(FRITZ_GLYPHS) for _ in range(random.randint(3,11)))
-                        d.text(565,170+i*30,static,(200,90,70) if random.random() < .3 else (120,140,150))
+                    if flare:
+                        d.text(565,170+i*30,static(random.randint(3,11)),(200,90,70) if random.random() < .3 else (120,140,150))
                     elif best:
                         price,system = best
                         d.text(565,170+i*30,f'{price:>3} {SYSTEMS[system][0][:7]}',(120,220,140) if price > quote(p.system,i) else (120,140,150))
                     else: d.text(565,170+i*30,'-',(120,140,150))
                 d.text(35,470,'BUY = you pay. * Contraband sales pay Crymto (CYM).')
-                if self.trade_computer_fritz > 0:
-                    d.text(35,500,f'TRADE COMPUTER ON THE FRITZ. Rebooting... {math.ceil(self.trade_computer_fritz)}s',(220,110,80))
+                if flare:
+                    d.text(35,500,f'SOLAR FLARE: no signal from other systems. Comms back in about {math.ceil(flare/60)} min.',(220,110,80))
                 else: d.text(35,500,'BEST IN RANGE: top sale price within a full tank\'s reach (refuel in VMS).',(135,175,185))
             else:
                 d.text(35,85,f'SHIP OUTFITTING / LOCAL TECH {TECH[p.system]} / U market')
