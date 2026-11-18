@@ -1,0 +1,164 @@
+"""The Galactic Council: reviews every world's trade and steps in where a world can't make a living.
+
+It has three tools, and a budget:
+  * Trade tax, per world, on every purchase and sale at the exchange. Struggling worlds get cuts to
+    draw traders in; busy, safe worlds pay more (lawless worlds collect none). Tax fills the treasury.
+  * The galactic interest rate. Cheap money speeds up building new industry (economy.investment);
+    the Council raises the rate when shortages push prices up across the galaxy and cuts it when
+    worlds stagnate. The same rate prices the bank's loans.
+  * Decrees, paid from the treasury: a licence for a new industry where a world has too few
+    profitable exports (chosen from what its neighbours pay most for), and relief convoys of food
+    and medicine where people are going without. At most one decree per world per COOLDOWN.
+Nothing happens in the first WARM_UP, while prices settle. Everything is kept in the market state,
+so every commander sees the same tax, rate and decrees (and a guide can report them).
+"""
+import economy as E
+
+REVIEW_EVERY = 6*E.HOUR
+WARM_UP = 12*E.HOUR
+COOLDOWN = 24*E.HOUR
+MIN_EXPORTS = 2
+SPREAD = .08          # the exchange's buy/sell spread each way
+WORTH_IT = 1.10       # a trade is worth a commander's while at 10% over spreads and tax
+NEW_LINE = .5         # a licensed industry starts at half a typical factory
+RELIEF = (E.FOOD, E.MEDICINE)
+KEEP = 60             # decrees remembered
+TAX_RANGE = (0., .10)
+TAX_START = {'Anarchy': 0., 'Feudal': 0.}   # everyone else starts at DEFAULT_TAX
+DEFAULT_TAX = .04
+TAX_STEP = .01
+RATE_RANGE = (.005, .15)
+RATE_STEP = .005
+LICENCE_COST = 2500.
+RELIEF_COST = 3000.
+START_TREASURY = 20000.
+# The budget, per review (6 hours), scaled by each world's population:
+UPKEEP = 400.        # running the station: docks, life support, the exchange
+POLICE_FULL = 1000.   # police spending that makes a world as safe as it gets
+SAFEST = .85          # the share of piracy risk full policing removes
+RISK = .02            # chance a cargo run through unpoliced lawful space is lost
+LAWLESS_RISK = .05    # and through lawless space
+# How safe each kind of government keeps its space (share of POLICE_FULL it funds), whatever the tax.
+SAFETY_TARGET = {'Dictatorship': .9, 'Communist': .85, 'Corporate state': .8, 'Confederacy': .7, 'Democracy': .75}
+RESERVE_REVIEWS = 4   # the treasury aims to hold a day of spending
+HOUSE_SHARE = .10     # the house's cut of every tax credit (Kenton's bank)
+
+
+def council_state(market, now):
+    state = market.state.setdefault('council', {})
+    state.setdefault('started', now)
+    state.setdefault('window', None)
+    state.setdefault('decrees', [])
+    state.setdefault('last', {})
+    state.setdefault('rate', E.BASE_INTEREST)
+    state.setdefault('treasury', START_TREASURY)
+    state.setdefault('tax', {str(i): TAX_START.get(p['government'], DEFAULT_TAX) for i, p in enumerate(market.profiles)})
+    state.setdefault('safety', {str(i): 0. for i in range(len(market.profiles))})
+    state.setdefault('house', 0.)
+    state.setdefault('house_share', HOUSE_SHARE)
+    state.setdefault('spent', dict(upkeep=0., police=0., licences=0., relief=0.))
+    return state
+
+
+def risk(market, system):
+    """Chance a cargo run touching this world is lost to pirates: police make lawful worlds safer."""
+    if market.profiles[system]['government'] in E.LAWLESS: return LAWLESS_RISK
+    safety = market.state.get('council', {}).get('safety', {}).get(str(system), 0.)
+    return RISK*(1-safety)
+
+
+def exports(market, system, neighbours, contraband=()):
+    """Legal goods this world makes that sell somewhere in range for a worthwhile profit after tax."""
+    station = market.economy.station(system, market.economy.state['stations'].get(str(system), {}).get('last', 0))
+    out = []
+    for g, capacity in enumerate(market.economy.industry(system, station)):
+        if capacity < .2 or g in contraband: continue
+        buy = market.price(system, g)*(1+SPREAD+market.tax(system))
+        sell = max(market.price(j, g)*(1-SPREAD-market.tax(j)) for j in neighbours[system])
+        if sell >= buy*WORTH_IT: out.append(g)
+    return out
+
+
+def collect(market, system, value):
+    """Tax on a trade worth `value` credits at this station goes to the treasury."""
+    state = market.state.get('council')
+    if state: state['treasury'] += value*market.tax(system)
+
+
+def review(market, now, neighbours, contraband=(), names=None, goods=None):
+    state = council_state(market, now)
+    window = int(now//REVIEW_EVERY)
+    if state['window'] == window or now-state['started'] < WARM_UP: return []
+    state['window'] = window
+    economy, made = market.economy, []
+    legal = [g for g in range(len(market.stock[0])) if g not in contraband]
+
+    # Interest rate: shortages everywhere mean an overheated economy; many idle worlds mean stagnation.
+    pressure = sum(E.scarcity(market.levels[i][g], market.normal[i][g]) for i in range(len(market.stock)) for g in legal)
+    pressure /= len(market.stock)*len(legal)
+    counts = {i: len(exports(market, i, neighbours, contraband)) for i in range(len(market.stock))}
+    struggling = sum(1 for n in counts.values() if n < MIN_EXPORTS)
+    lo, hi = RATE_RANGE
+    lending = market.state.get('bank', {}).get('use', 0.)       # how much of the banks' capacity is lent out
+    state['slow'] = state.get('slow', 0)+1 if struggling >= 3 else 0
+    if pressure > 1.12 or lending > .85: state['rate'] = min(hi, state['rate']+RATE_STEP)   # overheating, or credit too loose
+    elif state['slow'] >= 2 and lending < .6: state['rate'] = max(lo, state['rate']-RATE_STEP)  # stagnant for a day: cheaper money
+    elif abs(state['rate']-E.BASE_INTEREST) > 1e-9:   # nothing wrong: drift back towards the neutral rate
+        state['rate'] += RATE_STEP/2 if state['rate'] < E.BASE_INTEREST else -RATE_STEP/2
+
+    # The budget: every world's upkeep, and police wherever there is law, before anything else.
+    spend = 0.
+    for system in range(len(market.stock)):
+        key, depth = str(system), market.depth(system)
+        upkeep = UPKEEP*depth
+        lawless = market.profiles[system]['government'] in E.LAWLESS
+        police = 0. if lawless else POLICE_FULL*depth*SAFETY_TARGET.get(market.profiles[system]['government'], .75)
+        cost = upkeep+police
+        if state['treasury'] < cost:   # can't pay in full: police are cut first
+            police = max(0., state['treasury']-upkeep); cost = upkeep+police
+        state['treasury'] -= cost; spend += cost
+        state['spent']['upkeep'] += upkeep; state['spent']['police'] += police
+        state['safety'][key] = 0. if lawless else SAFEST*min(1., police/(POLICE_FULL*depth))
+    # Fiscal rule: keep about a day of spending in reserve; give back a surplus, cover a shortfall.
+    target = RESERVE_REVIEWS*spend
+    tlo, thi = TAX_RANGE
+    for system in range(len(market.stock)):
+        key = str(system)
+        if market.profiles[system]['government'] in E.LAWLESS: state['tax'][key] = 0.; continue
+        if counts[system] < MIN_EXPORTS: state['tax'][key] = max(tlo, state['tax'][key]-TAX_STEP)   # help a struggling world
+        elif state['treasury'] > 3*target: state['tax'][key] = max(.01, state['tax'][key]-TAX_STEP)
+        elif state['treasury'] < target: state['tax'][key] = min(thi, state['tax'][key]+TAX_STEP)
+
+    for system in range(len(market.stock)):
+        key = str(system)
+
+        if now-state['last'].get(key, -1e18) < COOLDOWN: continue
+        station = economy.station(system, now)
+        decree = None
+        if station['prosperity'] < .35 and state['treasury'] >= RELIEF_COST:
+            for g in RELIEF: market.change(system, g, market.normal[system][g]*.5)
+            state['treasury'] -= RELIEF_COST; state['spent']['relief'] += RELIEF_COST
+            decree = dict(kind='relief', good=None)
+        elif counts[system] < MIN_EXPORTS and state['treasury'] >= LICENCE_COST:
+            industry = economy.industry(system, station)
+            kind = market.profiles[system]['economy']
+            best, choice = 1.15, None
+            for g in legal:
+                if industry[g] >= .2: continue
+                # What it would fetch next door against what it would cost to make here.
+                here = market.price(system, g)/max(.5, economy.price_adjust(system, g))*.8/E.productivity(kind, g)
+                there = max(market.price(j, g) for j in neighbours[system])
+                if there/here > best: best, choice = there/here, g
+            if choice is not None:
+                industry[choice] = max(industry[choice], NEW_LINE)
+                state['treasury'] -= LICENCE_COST; state['spent']['licences'] += LICENCE_COST
+                decree = dict(kind='industry', good=choice)
+        if decree:
+            decree.update(system=system, at=now)
+            if names and goods:
+                decree['text'] = (f'Relief convoy sent to {names[system]}' if decree['kind'] == 'relief'
+                                  else f'{names[system]} licensed to produce {goods[decree["good"]]}')
+            state['decrees'] = (state['decrees']+[decree])[-KEEP:]
+            state['last'][key] = now
+            made.append(decree)
+    return made

@@ -49,10 +49,29 @@ class Market:
         return self.state['levels']
 
     def cap(self, system, good):
-        return 3*self.normal[system][good]+10
+        return 3*self.normal[system][good]*self.depth(system)+10
+
+    def pay_tax(self, system, value):
+        council = self.state.get('council')
+        if council:
+            tax, share = value*self.tax(system), council.get('house_share', 0.)
+            council['treasury'] = council.get('treasury', 0.)+tax*(1-share)
+            council['house'] = council.get('house', 0.)+tax*share
+
+    def tax(self, system):
+        """The station's trade tax (set by the Galactic Council in the adaptive economy; none otherwise)."""
+        return self.state.get('council', {}).get('tax', {}).get(str(system), 0.)
 
     def price(self, system, good):
-        return self.static_price(system, good)*demand_factor(self.stock[system][good], self.normal[system][good])
+        base = self.static_price(system, good)
+        # Adaptive economy (prototype): legal goods are priced from what the station makes and uses.
+        if self.economy and getattr(self, 'adaptive_base', None) and good not in getattr(self, 'contraband', ()):
+            from economy import ADAPTIVE
+            if ADAPTIVE: base = self.adaptive_base(system, good)*self.economy.price_adjust(system, good)
+        return base*demand_factor(self.stock[system][good], self.normal[system][good]*self.depth(system))
+
+    def depth(self, system):
+        return self.economy.depth(system) if self.economy else 1.
 
     def reconcile(self):
         """Whole-number stock changed directly (a trade in the game) carries over into the levels."""
@@ -83,6 +102,7 @@ class Market:
                 caps = [self.cap(system, g) for g in range(len(self.stock[system]))]
                 self.economy.advance(system, self.levels[system], caps, now, self.in_flight(system))
             self.sync()
+            if getattr(self, 'council', None): self.council(self, now)
         if state['next_trade'] is None: state['next_trade'] = now
         # After a long idle spell, simulate only the most recent stretch.
         earliest = now-MAX_CATCH_UP*sum(TRADE_INTERVAL)/2
@@ -101,7 +121,8 @@ class Market:
         for shipment in [s for s in self.state['shipments'] if s['arrive'] <= now]:
             self.state['shipments'].remove(shipment)
             self.change(shipment['dest'], shipment['good'], shipment['n'])
-            self.visit(shipment['dest'], shipment['id'], shipment['arrive'])
+            self.pay_tax(shipment['dest'], shipment['n']*self.price(shipment['dest'], shipment['good']))
+            self.visit(shipment['dest'], 'bot:'+shipment['id'], shipment['arrive'])
 
     def restock(self, rng):
         """Without an economy, stations simply produce: a random line below its normal level gains a little."""
@@ -117,14 +138,15 @@ class Market:
         if not sources: return None
         source = min(sources, key=lambda s: self.price(s, good))
         dest = max((s for s in offers if s != source), key=lambda s: self.price(s, good))
-        if self.price(dest, good) < self.price(source, good)*BOT_MARGIN: return None  # not worth a freighter's trip
+        if self.price(dest, good)*(1-self.tax(dest)) < self.price(source, good)*(1+self.tax(source))*BOT_MARGIN: return None  # not worth a freighter's trip
         n = min(self.stock[source][good]//2, rng.randint(1, 2) if self.normal[source][good] <= 6 else rng.randint(2, 6))
         if n <= 0: return None
         self.change(source, good, -n)
+        self.pay_tax(source, n*self.price(source, good))
         shipment = dict(id=f"{self.state['seed'][:8]}-{self.state['seq']}", name=rng.choice(TRADER_NAMES),
                         source=source, dest=dest, good=good, n=n, depart=now, arrive=now+self.travel_time(source, dest))
         self.state['shipments'].append(shipment)
-        self.visit(source, shipment['id'], now)
+        self.visit(source, 'bot:'+shipment['id'], now)
         return shipment
 
     def apply(self, trades=(), intercepts=(), ship=None, system=None, now=None):
