@@ -39,17 +39,23 @@ class StartupTests(unittest.TestCase):
     def test_update_prompt_asks_before_installing(self):
         screen = self.screen(); screen.update = 'v99.0.0'
         self.assertEqual(screen.event('down',13),'update')
-        self.assertEqual(screen.event('click',(500,695)),'update')
+        self.assertEqual(screen.event('click',(300,675)),'update')
         self.assertIsNone(screen.event('down',27))  # Esc skips the update for this launch, not the game
         self.assertIsNone(screen.update)
+        self.assertIn('skipped',screen.error)
         self.assertEqual(screen.event('down',13),'online')
         self.assertEqual(screen.event('down',27),'quit')
 
-    def test_choosing_a_mode_plays_without_updating_and_settings_keep_escape(self):
+    def test_game_cannot_start_until_the_update_is_answered(self):
         screen = self.screen(); screen.update = 'v99.0.0'
+        for event in (('click',(500,640)),('click',(200,640)),('down',ord('o')),('down',ord('f')),('down',st.DOWN),('down',32),('text','x')):
+            self.assertIsNone(screen.event(*event))
+            self.assertEqual(screen.update,'v99.0.0')
+        self.assertFalse(screen.settings)
+        self.assertEqual(screen.event('quit',0),'quit')
+        self.assertIsNone(screen.event('click',(800,675)))  # Not now
+        self.assertIsNone(screen.update)
         self.assertEqual(screen.event('click',(500,640)),'offline')
-        screen.settings = True
-        self.assertEqual(screen.event('down',27),'quit')
 
     def test_install_reports_progress_and_failure_keeps_current_version(self):
         class Display:
@@ -131,6 +137,20 @@ class StartupTests(unittest.TestCase):
             self.assertIn('Offline play',screen.error)
             screen.close.assert_called_once()
             self.assertFalse(offline_save.exists())
+
+    def test_offline_launch_waits_for_the_update_answer(self):
+        from unittest.mock import MagicMock
+        offline_save = Path(self.tmp.name)/'offline/save.json'
+        for answer,games in (('quit',0),('skip',1)):
+            with self.subTest(answer=answer):
+                screen = MagicMock(); screen.ask_update.return_value = answer
+                fake_game = MagicMock(running=False)
+                with patch.object(st,'SAVE',offline_save), patch.object(st.sys,'argv',['star_trader.py','--offline']), \
+                     patch.object(st,'update_available',return_value='v99.0.0'), patch.object(st,'Display',return_value=MagicMock()), \
+                     patch.object(st,'Game',return_value=fake_game) as create_game, patch.object(startup,'StartScreen',return_value=screen):
+                    st.main()
+                screen.ask_update.assert_called_once()
+                self.assertEqual(create_game.call_count,games)
 
     def test_bad_config_falls_back_without_breaking_offline(self):
         self.path.write_text('{broken')

@@ -97,7 +97,7 @@ def migrate_online_launcher(script):
 class StartScreen:
     def __init__(self, display, config, error='', update=None):
         self.d,self.config,self.error = display,dict(config),error
-        # A newer release waits for the player's yes: Enter installs, Esc plays this version until next launch.
+        # A newer release must be answered before anything else: Enter installs, N or Esc plays this version until next launch.
         self.update,self.installing = update,False
         self.selected = 0
         self.settings = False
@@ -183,9 +183,14 @@ class StartScreen:
     def event(self, kind, value):
         from star_trader import UP,DOWN,LEFT,RIGHT
         if kind == 'quit': return 'quit'
-        if self.update and self.signup is None and not self.settings:
-            if kind == 'down' and value == 27: self.update = None; return None
-            if (kind == 'down' and value == 13) or (kind == 'click' and 110 <= value[0] <= 990 and 678 <= value[1] <= 714): return 'update'
+        if self.update:
+            # Nothing else on the start screen works until the player answers the update question.
+            if (kind == 'down' and value in (13,ord('u'),ord('y'))) or (kind == 'click' and 110 <= value[0] <= 530 and 655 <= value[1] <= 699): return 'update'
+            if (kind == 'down' and value in (27,ord('n'))) or (kind == 'click' and 570 <= value[0] <= 990 and 655 <= value[1] <= 699):
+                from star_trader import VERSION
+                self.update = None
+                self.error = f'Update skipped for now: playing v{VERSION}. You will be asked again next launch.'
+            return None
         if kind == 'down' and value == 27: return 'quit'
         if kind in ('down','click','text'): self.auto_at = None
         if self.signup is not None:
@@ -318,15 +323,19 @@ class StartScreen:
             d.text(520,500,'Or copy an invite and Paste invite.')
             for x,w,label in ((70,300,'Save settings'),(390,320,'Paste invite'),(730,300,'Back')):
                 d.rect(x,550,w,46,GREEN); d.text(x+15,562,label,GREEN)
+        elif self.update:
+            from star_trader import VERSION
+            d.fill(90,590,920,128,(5,15,25)); d.rect(90,590,920,128,GOLD)
+            d.text(110,605,f'UPDATE {self.update} IS READY. Install it before you play? (you are on v{VERSION})',GOLD)
+            d.text(110,630,'Your saved game and settings are kept.',GREEN)
+            d.rect(110,655,420,44,GOLD); d.text(125,667,'Update now (Enter / U)',GOLD)
+            d.rect(570,655,420,44,GREEN); d.text(585,667,'Not now (N / Esc)',GREEN)
         else:
             for index,label in enumerate(('Online play','Offline play','Connection settings')):
                 x = 110+index*300
                 d.rect(x,615,280,48,GOLD if index == self.selected else GREEN)
                 d.text(x+15,630,label,GOLD if index == self.selected else GREEN)
             if self.installing: pass
-            elif self.update:
-                from star_trader import VERSION
-                d.rect(110,678,880,36,GOLD); d.text(125,685,f'Update {self.update} is available · Enter: update now · Esc: play v{VERSION}',GOLD)
             elif self.auto_at: d.text(110,685,f'Connecting to online play in {max(0,self.auto_at-time.monotonic()):.0f}s - press any key to choose',GOLD)
             else: d.text(110,685,'Arrows choose / Enter opens / Click to play / ESC closes')
         if self.error: d.text(45,727,self.error[:94],GOLD if self.error.startswith(('Welcome','Invite accepted','Signing up','Installing')) else RED)
@@ -350,6 +359,17 @@ class StartScreen:
         if done[0]: return True
         self.error = f'Update {latest} could not be installed; playing v{VERSION}. Details: update.log'
         return False
+
+    def ask_update(self):
+        """Only the update question (for --offline launches): 'update', 'skip' or 'quit'."""
+        while self.update:
+            for kind,value in self.d.events():
+                choice = self.event(kind,value)
+                if choice: return choice
+                if not self.update: return 'skip'
+            self.draw()
+            time.sleep(1/60)
+        return 'skip'
 
     def remember(self, mode):
         self.auto_at = None

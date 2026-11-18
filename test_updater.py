@@ -201,7 +201,7 @@ class AutoUpdateTests(unittest.TestCase):
         self.assertIsNone(self.run_update(None)[0])
         with patch.object(self.st.sys,'argv',['star_trader.py','--no-update-check']): self.assertIsNone(self.run_update('v99.0.0')[0])
 
-    def test_offline_launch_only_notifies(self):
+    def test_offline_launch_never_installs_without_an_answer(self):
         import os
         self.install()
         with patch.object(self.st.UpdateNotice,'fetch_latest',return_value='v99.0.0'), patch.object(self.st.sys,'argv',['star_trader.py','--offline']), \
@@ -209,6 +209,5 @@ class AutoUpdateTests(unittest.TestCase):
              patch.object(self.st.os,'execv') as execv, contextlib.redirect_stderr(io.StringIO()):
             with self.assertRaises(SystemExit): self.st.main()
         install.assert_not_called(); execv.assert_not_called()
-        self.assertIn('v99.0.0 is available',self.st.notify.call_args.args[0])
 
 if __name__ == '__main__': unittest.main()

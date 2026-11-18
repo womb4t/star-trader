@@ -23,7 +23,7 @@ import subprocess
 import textwrap
 from market import Market, demand_factor
 
-VERSION = '0.8.7'
+VERSION = '0.8.8'
 HOSTILITY_COOLDOWN_SECONDS = 30*60
 STATION_POLICE_CAPACITY = 6
 # Career points needed for each commander rank: kills, trade profit and hyperspace jumps all count.
@@ -4518,10 +4518,21 @@ def main():
         if not options.server and (options.token_file or options.import_local_save or options.restore_server_save):
             raise ValueError('Server options require --server')
         testing = '--smoke-test' in sys.argv or '--grant-test-credits' in sys.argv
-        # Nothing installs without the player's yes on the start screen; --offline has no start screen, so it only notifies.
+        # Nothing installs without the player's yes, and the game does not start until they answer.
         latest = None if testing else update_available()
         if latest and options.offline:
-            notify(f'Update {latest} is available. Start Star Trader without --offline and press Enter to install it, or run update.py.')
+            from startup import StartScreen,load_connection
+            display = Display()
+            screen = StartScreen(display,load_connection(),update=latest)
+            try:
+                answer = screen.ask_update()
+                if answer == 'quit': return
+                if answer == 'update':
+                    if screen.install(install_update):
+                        screen.close(); display.quit(); display = None
+                        restart_updated()
+                    notify(screen.error)
+            finally: screen.close()
         if testing and options.server: raise ValueError('Testing CLI tools require offline mode')
         if '--smoke-test' in sys.argv:
             scratch = tempfile.TemporaryDirectory(prefix='star-trader-smoke-')

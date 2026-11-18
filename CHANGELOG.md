@@ -1,3 +1,8 @@
+# 0.8.8 — answer the update question first
+
+- **The game waits for your answer when an update is out.** The start screen used to show the update offer as one line under the buttons, so you could click Online play and start without seeing it. Now the update question replaces the buttons: Update now (Enter or U) or Not now (N or Esc). Online play, Offline play and settings only appear once you have answered, and the game no longer auto-connects past it. Not now plays your current version and asks again next launch.
+- `--offline` launches ask the same question in a window before the game opens, instead of only showing a desktop notification.
+
 # 0.8.7 — a living galaxy: shared markets, traders, DSC distress calls and solar flares
 
 From your bug reports:
