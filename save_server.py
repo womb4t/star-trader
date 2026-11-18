@@ -148,7 +148,7 @@ class Store:
             row = db.execute("SELECT value FROM settings WHERE key='admin_token_hash'").fetchone()
         return row is not None and secrets.compare_digest(row[0],self.token_hash(token))
 
-    def market_exchange(self, trades=(), intercepts=(), now=None):
+    def market_exchange(self, trades=(), intercepts=(), now=None, ship=None, system=None):
         """Advance the shared market, apply a player's stock changes, and return what every commander sees."""
         from star_trader import new_market
         now = time.time() if now is None else now
@@ -156,8 +156,8 @@ class Store:
             db.execute('BEGIN IMMEDIATE')
             row = db.execute("SELECT value FROM settings WHERE key='market'").fetchone()
             market = new_market(json.loads(row[0]) if row else None)
+            market.apply(trades,intercepts,ship=ship,system=system,now=now)
             market.advance(now)
-            market.apply(trades,intercepts)
             db.execute("INSERT OR REPLACE INTO settings VALUES ('market',?)",(encode(market.state).decode(),))
             return market.snapshot(now)
 
@@ -267,7 +267,11 @@ class Handler(BaseHTTPRequestHandler):
                 if type(data) is not dict or type(data.get('trades',[])) is not list or type(data.get('intercepts',[])) is not list: raise ValueError('Invalid market request')
                 trades = data.get('trades',[])
                 if not all(type(t) is list and len(t) == 3 for t in trades): raise ValueError('Invalid trade')
-                return self.reply(200,self.server.store.market_exchange(trades,data.get('intercepts',[])))
+                system = data.get('system')
+                if system is not None and (type(system) is not int or not 0 <= system < 8): raise ValueError('Unknown system')
+                with self.server.store.connect() as db:
+                    player = db.execute('SELECT name FROM players WHERE token_hash=?',(self.server.store.token_hash(token),)).fetchone()[0]
+                return self.reply(200,self.server.store.market_exchange(trades,data.get('intercepts',[]),ship=player,system=system))
             if self.path == '/v1/feedback':
                 self.server.store.add_feedback(self.server.store.read(token)['player'],data)
                 return self.reply(201,dict(received=data['id']))

@@ -1,3 +1,19 @@
+# 0.8.9 — the economy breathes
+
+Stations now have living economies, shared by every commander on the server.
+- **People consume, workers produce.** Every planet's population needs basics (food, medicine), then comforts (textiles, computers, machinery) and, when they are doing well, luxuries (gold, silver, narcotics, arms). Factories turn out goods by economy: agricultural worlds make food, textiles and narcotics and need machinery; industrial worlds make machinery, computers, medicine and arms and need ore and food; frontier mining worlds make ore, gold and silver and need machinery and food.
+- **Prosperity matters.** A well-supplied world becomes Thriving: its workers produce more and it buys more luxuries. Starve it and it slides to Struggling or Destitute and its factories slow. Populations slowly grow or shrink with prosperity.
+- **Busy stations move faster.** The more ships trade at a station (commanders and bot freighters), the faster it consumes and produces, so the economy keeps up as more pilots join.
+- **Gluts clear and shortages bite.** Dumped goods are slowly used up instead of staying cheap forever, and a world that makes nothing of something keeps needing it.
+- **Galactic news.** Famines, plague outbreaks, mining booms, factory strikes, bumper harvests, festivals and local wars hit stations for 1–2½ hours and push prices hard. Every commander sees the same events. A solar flare blocks news from other systems.
+- **See it in the market.** The stock column turns orange where a good is wanted and blue where there is a surplus, and a line under the market shows the population, how they are doing and how many ships are trading (or the running event). Planet profiles show what a world makes, its prosperity, what it wants and what it has spare.
+- **Trading pays again.** Bot freighters used to haul any gap above 8%, so prices ended up nearly the same everywhere. They now only haul gaps of 60% or more, leaving the good routes to commanders.
+- Routine trader and news messages no longer push an urgent warning off the screen.
+
+Under the hood, each station is brought up to date in one step when someone looks at it, rather than ticking every station all the time. That is what an unlimited galaxy will need.
+
+Server: update the server before (or with) this release. Older games still work with it; they just don't see the economy news.
+
 # 0.8.8 — answer the update question first
 
 - **The game waits for your answer when an update is out.** The start screen used to show the update offer as one line under the buttons, so you could click Online play and start without seeing it. Now the update question replaces the buttons: Update now (Enter or U) or Not now (N or Esc). Online play, Offline play and settings only appear once you have answered, and the game no longer auto-connects past it. Not now plays your current version and asks again next launch.

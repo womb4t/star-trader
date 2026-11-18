@@ -3,11 +3,14 @@
 The progress server runs one Market for everyone; the game runs its own copy when offline.
 Bot traders buy a commodity where it is cheap and ship it to where it is dear. The cargo leaves
 the source station when they launch and only reaches the destination when they dock, so a
-trader destroyed on the way never delivers. Stations slowly produce goods back to their normal level.
+trader destroyed on the way never delivers. Between trades every station's people consume and its
+factories produce (economy.py), faster the more ships use it.
 """
 import math
 import random
 import uuid
+
+from economy import Economy
 
 TRADER_NAMES = ('Hullbridge', 'Drift Crow', 'Freewake', 'Lantern', 'Cobalt Mule', 'Saffron', 'Ironbark',
                 'Kestrel', 'Long Haul', 'Tallow', 'Quillon', 'Brass Heron')
@@ -15,6 +18,8 @@ TRADE_INTERVAL = (8, 16)    # seconds between bot trades somewhere in the galaxy
 MAX_CATCH_UP = 400          # bot steps simulated after the market has been idle
 MAX_SHIPMENTS = 40
 MAX_OPS = 50                # player stock changes accepted per request
+# Bots only haul when the gap is wide, so they smooth extremes but leave margins for commanders.
+BOT_MARGIN = 1.6
 
 
 def demand_factor(stock, normal):
@@ -24,16 +29,24 @@ def demand_factor(stock, normal):
 
 
 class Market:
-    def __init__(self, normal, static_price, travel_time, state=None, seed=None):
+    def __init__(self, normal, static_price, travel_time, state=None, seed=None, profiles=None):
         """normal: normal stock per [system][good]; static_price(system, good) before supply and demand;
-        travel_time(source, dest) in seconds."""
+        travel_time(source, dest) in seconds; profiles: economy, government and population per system."""
         self.normal, self.static_price, self.travel_time = normal, static_price, travel_time
         self.state = state or dict(stock=[row[:] for row in normal], shipments=[], next_trade=None, seq=0,
                                    seed=seed if seed is not None else uuid.uuid4().hex)
+        # Whole-number stock is what commanders trade; `levels` keeps the fractions slow flows add up to.
+        if 'levels' not in self.state: self.state['levels'] = [[float(n) for n in row] for row in self.stock]
+        self.profiles = profiles
+        self.economy = Economy(profiles, normal, self.state) if profiles else None
 
     @property
     def stock(self):
         return self.state['stock']
+
+    @property
+    def levels(self):
+        return self.state['levels']
 
     def cap(self, system, good):
         return 3*self.normal[system][good]+10
@@ -41,8 +54,35 @@ class Market:
     def price(self, system, good):
         return self.static_price(system, good)*demand_factor(self.stock[system][good], self.normal[system][good])
 
+    def reconcile(self):
+        """Whole-number stock changed directly (a trade in the game) carries over into the levels."""
+        for row, levels in zip(self.stock, self.levels):
+            for g, n in enumerate(row):
+                if n != round(levels[g]): levels[g] += n-round(levels[g])
+
+    def sync(self):
+        for row, levels in zip(self.stock, self.levels):
+            row[:] = [round(level) for level in levels]
+
+    def change(self, system, good, delta):
+        level = self.levels[system][good]
+        self.levels[system][good] = max(0., min(self.cap(system, good), level+delta))
+        self.stock[system][good] = round(self.levels[system][good])
+
+    def in_flight(self, system):
+        return sum(1 for s in self.state['shipments'] if system in (s['source'], s['dest']))
+
+    def visit(self, system, ship, now):
+        if self.economy and type(system) is int and 0 <= system < len(self.stock): self.economy.visit(system, ship, now)
+
     def advance(self, now):
         state = self.state
+        self.reconcile()
+        if self.economy:
+            for system in range(len(self.stock)):
+                caps = [self.cap(system, g) for g in range(len(self.stock[system]))]
+                self.economy.advance(system, self.levels[system], caps, now, self.in_flight(system))
+            self.sync()
         if state['next_trade'] is None: state['next_trade'] = now
         # After a long idle spell, simulate only the most recent stretch.
         earliest = now-MAX_CATCH_UP*sum(TRADE_INTERVAL)/2
@@ -52,7 +92,7 @@ class Market:
             self.deliver(t)
             rng = random.Random(f"{state['seed']}:{state['seq']}")
             state['seq'] += 1
-            self.restock(rng)
+            if not self.economy: self.restock(rng)
             self.bot_trade(rng, t)
             state['next_trade'] = t+rng.uniform(*TRADE_INTERVAL)
         self.deliver(now)
@@ -60,13 +100,13 @@ class Market:
     def deliver(self, now):
         for shipment in [s for s in self.state['shipments'] if s['arrive'] <= now]:
             self.state['shipments'].remove(shipment)
-            dest, good = shipment['dest'], shipment['good']
-            self.stock[dest][good] = min(self.cap(dest, good), self.stock[dest][good]+shipment['n'])
+            self.change(shipment['dest'], shipment['good'], shipment['n'])
+            self.visit(shipment['dest'], shipment['id'], shipment['arrive'])
 
     def restock(self, rng):
-        """Stations produce: a random line below its normal level gains a little."""
+        """Without an economy, stations simply produce: a random line below its normal level gains a little."""
         system, good = rng.randrange(len(self.stock)), rng.randrange(len(self.stock[0]))
-        if self.stock[system][good] < self.normal[system][good]: self.stock[system][good] += rng.randint(1, 2)
+        if self.stock[system][good] < self.normal[system][good]: self.change(system, good, rng.randint(1, 2))
 
     def bot_trade(self, rng, now):
         if len(self.state['shipments']) >= MAX_SHIPMENTS: return None
@@ -77,27 +117,39 @@ class Market:
         if not sources: return None
         source = min(sources, key=lambda s: self.price(s, good))
         dest = max((s for s in offers if s != source), key=lambda s: self.price(s, good))
-        if self.price(dest, good) < self.price(source, good)*1.08: return None  # no margin worth the trip
+        if self.price(dest, good) < self.price(source, good)*BOT_MARGIN: return None  # not worth a freighter's trip
         n = min(self.stock[source][good]//2, rng.randint(1, 2) if self.normal[source][good] <= 6 else rng.randint(2, 6))
         if n <= 0: return None
-        self.stock[source][good] -= n
+        self.change(source, good, -n)
         shipment = dict(id=f"{self.state['seed'][:8]}-{self.state['seq']}", name=rng.choice(TRADER_NAMES),
                         source=source, dest=dest, good=good, n=n, depart=now, arrive=now+self.travel_time(source, dest))
         self.state['shipments'].append(shipment)
+        self.visit(source, shipment['id'], now)
         return shipment
 
-    def apply(self, trades=(), intercepts=()):
-        """Player activity: stock changes from buying and selling, and traders destroyed in flight."""
-        for system, good, delta in list(trades)[:MAX_OPS]:
-            if type(system) is not int or type(good) is not int or type(delta) is not int: raise ValueError('Invalid trade')
-            if not (0 <= system < len(self.stock) and 0 <= good < len(self.stock[0]) and -10 <= delta <= 10): raise ValueError('Invalid trade')
-            self.stock[system][good] = max(0, min(self.cap(system, good), self.stock[system][good]+delta))
+    def apply(self, trades=(), intercepts=(), ship=None, system=None, now=None):
+        """Player activity: stock changes from buying and selling, and traders destroyed in flight.
+        `ship` and `system` say who is at which station, for its traffic."""
+        trades = list(trades)[:MAX_OPS]
+        for trade in trades:
+            if type(trade) not in (list, tuple) or len(trade) != 3: raise ValueError('Invalid trade')
+            system_, good, delta = trade
+            if type(system_) is not int or type(good) is not int or type(delta) is not int: raise ValueError('Invalid trade')
+            if not (0 <= system_ < len(self.stock) and 0 <= good < len(self.stock[0]) and -10 <= delta <= 10): raise ValueError('Invalid trade')
+        self.reconcile()
+        for system_, good, delta in trades:
+            self.change(system_, good, delta)
+            if ship is not None and now is not None: self.visit(system_, ship, now)
+        if ship is not None and now is not None and system is not None: self.visit(system, ship, now)
         lost = set(i for i in list(intercepts)[:10] if type(i) is str)
         self.state['shipments'] = [s for s in self.state['shipments'] if s['id'] not in lost]
 
     def snapshot(self, now):
-        return dict(protocol=1, now=now, stock=[row[:] for row in self.stock],
+        snap = dict(protocol=1, now=now, stock=[row[:] for row in self.stock],
                     shipments=[dict(s) for s in self.state['shipments']])
+        if self.economy:
+            snap['economy'] = [self.economy.report(i, self.levels[i], now) for i in range(len(self.stock))]
+        return snap
 
 
 class MarketClient:
@@ -109,6 +161,7 @@ class MarketClient:
         self.stop = threading.Event()
         self.trades, self.intercepts = [], []
         self.fresh = None
+        self.here = None  # the station this commander is at, for its traffic
         self.status = 'Market: connecting'
         self.thread = threading.Thread(target=self.run, name='market', daemon=True)
         self.thread.start()
@@ -134,7 +187,9 @@ class MarketClient:
             with self.lock:
                 trades, intercepts = self.trades[:MAX_OPS], self.intercepts[:10]
             try:
-                snap = self.remote.request(dict(trades=trades, intercepts=intercepts), endpoint='/v1/market')
+                request = dict(trades=trades, intercepts=intercepts)
+                if self.here is not None: request['system'] = self.here
+                snap = self.remote.request(request, endpoint='/v1/market')
                 if snap.get('protocol') != 1 or type(snap.get('stock')) is not list or type(snap.get('shipments')) is not list: raise ValueError('Invalid market')
                 with self.lock:
                     del self.trades[:len(trades)]

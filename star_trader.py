@@ -22,8 +22,9 @@ import shutil
 import subprocess
 import textwrap
 from market import Market, demand_factor
+import economy
 
-VERSION = '0.8.8'
+VERSION = '0.8.9'
 HOSTILITY_COOLDOWN_SECONDS = 30*60
 STATION_POLICE_CAPACITY = 6
 # Career points needed for each commander rank: kills, trade profit and hyperspace jumps all count.
@@ -79,6 +80,7 @@ DAMAGE_FAULTS = {'scanner': 60, 'bearing': 45, 'laser': 30}
 FAULT_LABELS = {'scanner': 'SCANNER FAULT', 'bearing': 'BEARING OFFLINE', 'laser': 'LASER MALFUNCTIONING'}
 UP, DOWN, LEFT, RIGHT = 1073741906, 1073741905, 1073741904, 1073741903
 GREEN, GOLD, RED = (68, 227, 182), (255, 206, 113), (255, 112, 100)
+WANTED_COLOR, SURPLUS_COLOR = (240, 150, 70), (110, 170, 240)  # station stock the economy wants or has too much of
 SYSTEMS = [
     ('Halvora', 'Agricultural', 0.15, 0.40), ('Corvant', 'Industrial', 0.40, 0.20),
     ('Meridel', 'Agricultural', 0.34, 0.64), ('Brennix', 'Industrial', 0.60, 0.46),
@@ -148,8 +150,12 @@ def trader_travel_time(source, dest):
     return 50 + 10*galactic_distance(coordinates(source), coordinates(dest))
 
 
+# What each station's economy needs to know: what it makes, who governs it and how many people live there.
+ECONOMY_PROFILES = [dict(economy=SYSTEMS[i][1], government=PROFILES[i][0], population=PROFILES[i][1]) for i in range(8)]
+
+
 def new_market(state=None):
-    return Market(NORMAL_STOCK, static_price, trader_travel_time, state)
+    return Market(NORMAL_STOCK, static_price, trader_travel_time, state, profiles=ECONOMY_PROFILES)
 
 
 def fuel_price(system):
@@ -696,6 +702,7 @@ class Game:
         self.market = None  # local market; replaced by the shared one online (see update_market)
         self.market_client = None
         self.shipments,self.market_offset,self.shown_shipments = [],0.,set()
+        self.economy_reports,self.market_at,self.announced_events = None,0.,set()
         self.station = [0., 0., 1500.]
         self.roll = self.station_angle = 0.
         self.autodock = False
@@ -842,6 +849,10 @@ class Game:
         critical = ('outfitting unavailable','thermal warning','station warning','station defence','station police','collision','breakdown','fuel exhausted','refused','seized','repair failed','mine detected','hostile contact','clearance granted','destroyed','rescued')
         if text != old and any(word in text.lower() for word in critical):
             self.alert = dict(text=text,remaining=5.,elapsed=0.)
+
+    def notice(self, text):
+        """Routine news (traders, galactic events) never pushes an urgent warning off the screen."""
+        if not self.alert: self.message = text
 
     def session_mode(self):
         mode = self.mode
@@ -3076,15 +3087,25 @@ class Game:
             d.text(30,610,'Selection: '+('free coordinate cursor' if self.cursor_mode else 'planet list'))
             d.text(30,645,'Locked: '+(p.waypoint['name'] if p.waypoint else 'none'))
 
+    def economy_line(self, system):
+        """One line about a station's people and trade: a running event comes first."""
+        for event in self.station_events():
+            if event['system'] == system: return f'{event["title"].upper()}: {event["effect"]}.'
+        report = self.economy_report(system)
+        if not report: return 'Station economy: waiting for market news.'
+        ships = round(report['ships'])
+        return (f'{report["population"]:.1f} bn people, {economy.prosperity_label(report["prosperity"]).lower()}, '
+                f'{ships} ship{"" if ships == 1 else "s"} trading.')
+
     def draw_planet_profile(self):
         d,i = self.d,self.profile_system
-        name,economy,_,_ = SYSTEMS[i]
+        name,economy_name,_,_ = SYSTEMS[i]
         government,population,size = PROFILES[i]
         position = coordinates(i)
         d.text(35,85,'PLANET PROFILE / '+name.upper(),GOLD)
         facts = [f'Coordinates: {position[0]:.2f}, {position[1]:.2f}',
-                 'Economy: '+economy,'Government: '+government,
-                 f'Population: {population:.1f} billion',f'Diameter: {size:,} km',
+                 'Economy: '+economy_name,'Government: '+government,
+                 f'Population: {self.economy_report(i)["population"] if self.economy_report(i) else population:.1f} billion',f'Diameter: {size:,} km',
                  f'Technology level: {TECH[i]}',
                  f'Police reserve: {self.p.station_police_remaining[i]}/{STATION_POLICE_CAPACITY}',
                  'Customs: minimal' if government in ('Anarchy','Feudal') else 'Customs: regulated; contraband can be seized',
@@ -3103,10 +3124,19 @@ class Game:
         for row,good in enumerate(GOODS):
             prices = f'{static(4)} {static(5)}' if blackout else f'{quote(i,row):>4} {quote(i,row,False):>5}'
             d.text(610,210+row*27,f'{good+chr(42) if row in ILLEGAL else good:<20} {prices}',GOLD if row in ILLEGAL else GREEN)
-        demand = {'Industrial':'Cheaper manufactured goods / contraband',
-                  'Agricultural':'Food / ore exports; narcotics demand',
-                  'Frontier':'Strong arms demand; mixed exports'}[economy]
-        for row,line in enumerate(textwrap.wrap(demand,42)): d.text(610,490+row*27,line)
+        makes = ', '.join(GOODS[g] for g in economy.FACTORIES[economy_name]['output'])
+        report = None if blackout else self.economy_report(i)
+        if blackout: lines = ['Makes: '+makes,'Station news: '+static(18)]
+        else:
+            lines = ['Makes: '+makes]
+            if report:
+                lines.append(f'Prosperity: {economy.prosperity_label(report["prosperity"])}, {report["ships"]:.0f} ships trading')
+                if report['wanted']: lines.append('Wanted: '+', '.join(GOODS[g] for g in report['wanted']))
+                if report['surplus']: lines.append('Surplus: '+', '.join(GOODS[g] for g in report['surplus']))
+            for event in self.station_events():
+                if event['system'] == i: lines.insert(0,f'{event["title"].upper()}: {event["effect"]}')
+        rows = [(part,WANTED_COLOR if line[:1].isupper() and line.split(':')[0].isupper() else GREEN) for line in lines for part in textwrap.wrap(line,42)]
+        for row,(line,color) in enumerate(rows[:5]): d.text(610,490+row*25,line,color)
         d.text(35,595,'I: map     LEFT / RIGHT: browse planets')
 
     def camera_vector(self, obj):
@@ -3660,29 +3690,57 @@ class Game:
         return result
 
     def update_market(self):
-        """Advance bot trading, keep prices tied to station stock, and show traders at this station."""
+        """Advance bot trading and station economies, keep prices tied to station stock, and show traders at this station."""
         global STOCK
         STOCK = self.p.stock
         now = time.time()
         known = {s['id']:s for s in self.shipments}
+        here = None if self.p.deep_space else self.p.system
         if self.market_client:
+            self.market_client.here = here
             snap = self.market_client.take()
             if snap:
                 for row,fresh in zip(self.p.stock,snap['stock']): row[:] = fresh
                 self.shipments,self.market_offset = snap['shipments'],snap['now']-now
-        else:
+                if type(snap.get('economy')) is list and len(snap['economy']) == 8: self.economy_reports = snap['economy']
+        elif now-self.market_at >= 1 or self.market is None or self.market.state['stock'] is not self.p.stock:
+            # Offline the game runs its own copy of the market, once a second.
             if self.market is None or self.market.state['stock'] is not self.p.stock:
                 self.market = new_market(dict(stock=self.p.stock,shipments=[],next_trade=None,seq=0,seed=uuid.uuid4().hex))
+            if here is not None: self.market.visit(here,'you',now)
             self.market.advance(now)
+            self.market_at = now
             self.shipments,self.market_offset = list(self.market.state['shipments']),0.
+            self.economy_reports = self.market.snapshot(now)['economy']
+        self.announce_events(now)
         if self.mode in ('market','vms') and not self.p.deep_space:
             here,current = self.p.system,{s['id'] for s in self.shipments}
             for s in self.shipments:
                 if s['id'] not in known and s['source'] == here and s['depart'] >= now+self.market_offset-10:
-                    self.message = f'Trader {s["name"]} launched with {s["n"]} t {GOODS[s["good"]].lower()}.'
+                    self.notice(f'Trader {s["name"]} launched with {s["n"]} t {GOODS[s["good"]].lower()}.')
             for sid,s in known.items():
                 if sid not in current and s['dest'] == here and s['arrive'] <= now+self.market_offset+5:
-                    self.message = f'Trader {s["name"]} docked and unloaded {s["n"]} t {GOODS[s["good"]].lower()}.'
+                    self.notice(f'Trader {s["name"]} docked and unloaded {s["n"]} t {GOODS[s["good"]].lower()}.')
+
+    def station_events(self, now=None):
+        """Demand events running now (famine, plague, booms...). The same for every commander."""
+        return economy.events_at(time.time() if now is None else now,ECONOMY_PROFILES)
+
+    def announce_events(self, now):
+        """Galactic news: a new event is reported once. A solar flare blocks news from other systems."""
+        if self.alert: return  # an urgent warning keeps the screen; the news waits
+        flare = solar_flare(now)
+        for event in self.station_events(now):
+            if event['id'] in self.announced_events: continue
+            local = not self.p.deep_space and event['system'] == self.p.system
+            if flare and not local: continue
+            self.announced_events.add(event['id'])
+            self.message = f'NEWS: {event["title"]} on {SYSTEMS[event["system"]][0]}: {event["effect"]}.'
+
+    def economy_report(self, system):
+        reports = self.economy_reports
+        if reports and 0 <= system < len(reports) and isinstance(reports[system],dict): return reports[system]
+        return None
 
     def update_traffic(self, dt):
         """Bot traders launching from or arriving at this station, matching their real shipments."""
@@ -4215,8 +4273,12 @@ class Game:
                 for i,g in enumerate(GOODS):
                     color = GOLD if i == self.selected else GREEN
                     d.text(35,170+i*30,('> ' if i == self.selected else '  ')+g+(' *' if i in ILLEGAL else ''),color)
+                    report = self.economy_report(p.system)
                     for x,value in [(270,quote(p.system,i)),(340,quote(p.system,i,False)),(415,p.stock[p.system][i]),(495,p.cargo[i])]:
-                        d.text(x,170+i*30,str(value),color)
+                        tint = color
+                        if x == 415 and report and i in report.get('wanted',()): tint = WANTED_COLOR
+                        elif x == 415 and report and i in report.get('surplus',()): tint = SURPLUS_COLOR
+                        d.text(x,170+i*30,str(value),tint)
                     best = self.best_sale_in_range(i)
                     if flare:
                         d.text(565,170+i*30,static(random.randint(3,11)),(200,90,70) if random.random() < .3 else (120,140,150))
@@ -4227,7 +4289,10 @@ class Game:
                 d.text(35,470,'BUY = you pay. * Contraband sales pay Crymto (CYM).')
                 if flare:
                     d.text(35,500,f'SOLAR FLARE: no signal from other systems. Comms back in about {math.ceil(flare/60)} min.',(220,110,80))
-                else: d.text(35,500,'BEST IN RANGE: top sale price within a full tank\'s reach (refuel in VMS).',(135,175,185))
+                else: d.text(35,500,'BEST IN RANGE: best sale within a full tank (refuel in VMS).',(135,175,185))
+                line = self.economy_line(p.system)
+                d.text(35,525,line,WANTED_COLOR if line.split(':')[0].isupper() else (135,175,185))
+                d.text(500,590,'STOCK:',(135,175,185)); d.text(575,590,'wanted',WANTED_COLOR); d.text(655,590,'surplus',SURPLUS_COLOR)
             else:
                 d.text(35,85,f'SHIP OUTFITTING / LOCAL TECH {TECH[p.system]} / U market')
                 start = max(0,min(self.shop_selected-4,len(EQUIPMENT)-8))
