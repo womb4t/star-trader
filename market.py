@@ -25,6 +25,9 @@ BOT_MARGIN = 1.6
 SMUGGLING_HALF_LIFE = 6*3600.   # seconds for the record of losses and deliveries to halve
 SMUGGLING_PRIOR = 20.           # tonnes of experience the expected risk counts for, so one seizure isn't a price shock
 RISK_PREMIUM_CAP = 3.           # covers customs' full 55% search with the reward below (1.25/0.45 = 2.8)
+# Prices follow stock moved by bots and station economies with this lag (seconds), so a margin seen at one
+# station is still mostly there after a stop on the way. Commanders' own trades move prices at once.
+PRICE_LAG = 30*60.
 REPORT_CAP = 40.                # tonnes one commander's reports count for, per world per half-life (a hold is <= 35 t)
 RISK_REWARD = .25               # smuggling must pay more than honest trade on average, or nobody would take the risk
 
@@ -130,11 +133,29 @@ class Market:
     def depth(self, system):
         return self.economy.depth(system) if self.economy else 1.
 
+    @property
+    def calm(self):
+        """The stock prices are quoted on: it follows real stock with PRICE_LAG, except for commanders' own trades."""
+        if 'calm' not in self.state: self.state['calm'] = [[float(n) for n in row] for row in self.stock]
+        return self.state['calm']
+
+    def shift_calm(self, system, good, delta):
+        self.calm[system][good] = max(0., min(self.cap(system, good), self.calm[system][good]+delta))
+
+    def settle_calm(self, now):
+        last = self.state.get('calm_at', now)
+        self.state['calm_at'] = now
+        k = 1-math.exp(-max(0., now-last)/PRICE_LAG)
+        for row, calm in zip(self.stock, self.calm):
+            for g, n in enumerate(row): calm[g] += (n-calm[g])*k
+
     def reconcile(self):
         """Whole-number stock changed directly (a trade in the game) carries over into the levels."""
-        for row, levels in zip(self.stock, self.levels):
+        for system, (row, levels) in enumerate(zip(self.stock, self.levels)):
             for g, n in enumerate(row):
-                if n != round(levels[g]): levels[g] += n-round(levels[g])
+                if n != round(levels[g]):
+                    self.shift_calm(system, g, n-round(levels[g]))
+                    levels[g] += n-round(levels[g])
 
     def sync(self):
         for row, levels in zip(self.stock, self.levels):
@@ -177,6 +198,7 @@ class Market:
             self.bot_trade(rng, t)
             state['next_trade'] = t+rng.uniform(*TRADE_INTERVAL)
         self.deliver(now)
+        self.settle_calm(now)
 
     def deliver(self, now):
         for shipment in [s for s in self.state['shipments'] if s['arrive'] <= now]:
@@ -229,7 +251,9 @@ class Market:
         self.reconcile()
         for system_, good, delta in trades:
             self.pay_tax(system_, abs(delta)*self.price(system_, good))
+            before = self.stock[system_][good]
             self.change(system_, good, delta)
+            self.shift_calm(system_, good, self.stock[system_][good]-before)
             if ship is not None and now is not None: self.visit(system_, ship, now)
         if ship is not None and now is not None and system is not None: self.visit(system, ship, now)
         for where, good, lost_, delivered in smuggling:
@@ -241,7 +265,8 @@ class Market:
 
     def snapshot(self, now):
         snap = dict(protocol=1, now=now, stock=[row[:] for row in self.stock],
-                    shipments=[dict(s) for s in self.state['shipments']])
+                    shipments=[dict(s) for s in self.state['shipments']],
+                    calm=[[round(n, 2) for n in row] for row in self.calm])
         if self.economy:
             snap['economy'] = [self.economy.report(i, self.levels[i], now) for i in range(len(self.stock))]
         council = self.state.get('council')
@@ -288,7 +313,9 @@ class MarketClient:
         with self.lock:
             snap, self.fresh = self.fresh, None
             if snap is None: return None
-            for system, good, delta in self.trades: snap['stock'][system][good] = max(0, snap['stock'][system][good]+delta)
+            for system, good, delta in self.trades:
+                snap['stock'][system][good] = max(0, snap['stock'][system][good]+delta)
+                if type(snap.get('calm')) is list: snap['calm'][system][good] = max(0, snap['calm'][system][good]+delta)
             lost = set(self.intercepts)
             snap['shipments'] = [s for s in snap['shipments'] if s['id'] not in lost]
             return snap

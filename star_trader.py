@@ -46,7 +46,8 @@ SUN_RADIUS, SCOOP_ALTITUDE, SCOOP_SPEEDS = 220, 280, (10, 60)
 TRADE_LOG_SIZE = 60
 DOCK_ROLL_TOLERANCE = math.radians(14)
 CRUISE_SECONDS_PER_LY = 45
-W, H = 1100, 760
+PANEL_W = 1100        # the game's screens; the rail of screen buttons sits to its right
+W, H = 1200, 760
 GOODS = ['Food', 'Textiles', 'Ore', 'Machinery', 'Medicine', 'Computers', 'Narcotics', 'Unlicensed Arms', 'Gold', 'Silver']
 BASE = [8, 15, 24, 48, 65, 90, 150, 110, 260, 95]
 ILLEGAL = (6, 7)
@@ -71,6 +72,13 @@ EQUIPMENT = [
 ]
 RESALE = 0.5   # outfitters buy kit back at half its new price
 LAWLESS = ('Anarchy','Feudal')
+# The Newcomer Charter: new commanders (below Operator rank) earn a bonus on legal sales at these low-tech,
+# well-policed worlds, and Charter patrols turn many pirates away there. It ends at Operator, nudging them on.
+CHARTER_WORLDS = (0, 2, 3)        # Halvora, Meridel, Brennix
+CHARTER_RANK = 250                # career points: Operator
+CHARTER_SHARE, CHARTER_CAP = .5, 40   # bonus: half the profit on each tonne, at most 40 cr
+SECURITY_GRACE = 20               # seconds near a station without clearance before police launch
+CHARTER_ESCORT = .6               # chance a Charter patrol turns a pirate away in Charter space
 # Crymto exchanges, by government: (% fee Crymto -> credits, % fee credits -> Crymto, compliance checks as a
 # share of the world's customs search). Lawless ports launder quietly; lawful ones charge more and check.
 EXCHANGE_TERMS = {'Anarchy':(20,10,0.), 'Feudal':(20,10,0.), 'Dictatorship':(30,10,.25), 'Communist':(30,10,.25),
@@ -114,6 +122,8 @@ ANY_CTRL = {ord('n'): ord('-'), ord('m'): ord('3')}   # quick note; full screen 
 # The top bar, left to right, labelled with its number-row keys: (x, width, label, action).
 TOP_BAR = ((155,90,'1 Nav',('open_navigation',)), (250,90,'2 VMS',('open_hub','vms')),
            (345,105,'3 Money',('open_hub','money')), (455,85,'4 Menu',('open_utility','menu')))
+# The rail down the right-hand side: the screens on the number row past 4 (x, label, key, the modes it lights).
+RAIL = ((5,'5 Comms',('dsc',)), (6,'6 Trades',('trades',)), (8,'8 Engine',('engineering',)), (9,'9 Manual',('help',)), (0,'0 Home',()))
 HOLD_SCREENS = ('hyperspace', 'dead', 'prison', 'intro', 'hail', 'distress', 'departure', 'trade_deal')
 GREEN, GOLD, RED = (68, 227, 182), (255, 206, 113), (255, 112, 100)
 WANTED_COLOR, SURPLUS_COLOR = (240, 150, 70), (110, 170, 240)  # station stock the economy wants or has too much of
@@ -156,6 +166,7 @@ def static_price(system, good):
 
 # Station stock the prices respond to: the game points this at the live market (shared online).
 STOCK = None
+CALM = None   # (calm stock, stock seen with it) from the last market snapshot; see stock_level
 # The Galactic Council's view (tax, rate, police, beacons, decrees, price adjustments, contraband premiums), from the
 # shared market's snapshot or the offline market. None (an older server) keeps today's prices.
 VIEW = None
@@ -257,10 +268,28 @@ def view_from(snapshot):
     return dict(snapshot['council'], adjust=prices.get('adjust'), contraband=prices.get('contraband'), depth=prices.get('depth'), tally=snapshot.get('tally'))
 
 
+def stock_level(system, good):
+    """The stock prices are quoted on: the market's calm level (it lags bots and station economies, see
+    market.PRICE_LAG) moved by this commander's own trades since the last snapshot."""
+    if STOCK is None: return None
+    if CALM:
+        calm, seen = CALM
+        return max(0., calm[system][good]+STOCK[system][good]-seen[system][good])
+    return STOCK[system][good]
+
+
+def take_calm(snap):
+    """Remember a snapshot's calm stock and the stock it came with (own trades are the difference later)."""
+    global CALM
+    calm = snap.get('calm') if isinstance(snap, dict) else None
+    good = type(calm) is list and len(calm) == len(snap['stock']) and all(type(r) is list and len(r) == len(GOODS) and all(type(n) in (int,float) for n in r) for r in calm)
+    CALM = ([row[:] for row in calm],[row[:] for row in snap['stock']]) if good else None
+
+
 def price(system, good, stock=None):
     """Scarce goods cost more and gluts sell cheap; see market.demand_factor. stock: as if the station held this much."""
     depth = VIEW['depth'][system] if VIEW and VIEW.get('depth') else 1   # busy worlds hold deeper stock (as on the server)
-    level = stock if stock is not None else STOCK[system][good] if STOCK is not None else None
+    level = stock if stock is not None else stock_level(system, good)
     factor = demand_factor(level,NORMAL_STOCK[system][good]*depth) if level is not None else 1
     if VIEW and VIEW.get('adjust') and good not in ILLEGAL:   # the living economy: priced from what the world makes and uses
         return round(BASE[good]*quirk(system, good)*VIEW['adjust'][system][good]*factor)
@@ -276,9 +305,13 @@ def quote(system, good, buy=True, stock=None):
     stock: price as if the station held this much."""
     base = price(system, good, stock)
     tax = VIEW['tax'][system] if VIEW else 0.
-    if not buy and good in ILLEGAL and VIEW and VIEW.get('contraband'):
+    if good in ILLEGAL and VIEW and VIEW.get('contraband'):
         premium, loss = VIEW['contraband'][system][ILLEGAL.index(good)]
-        return quote_price(base, tax, False, premium, loss)
+        smuggled = quote_price(base, tax, False, premium, loss)
+        # The premium pays for bringing contraband in past customs, so the street price here carries it too:
+        # buying in the same dock always costs more than the dock pays, and only a cargo run makes money.
+        if buy: return max(quote_price(base, tax, True), smuggled+max(1, math.ceil(base*.08)))
+        return smuggled
     return quote_price(base, tax, buy)
 
 
@@ -456,6 +489,11 @@ class Pilot:
         for day in sorted(days)[:-LEDGER_DAYS]: del days[day]
 
     @property
+    def charter(self):
+        """A new commander protected and paid by the Newcomer Charter here."""
+        return self.career_points < CHARTER_RANK and not self.deep_space and self.system in CHARTER_WORLDS
+
+    @property
     def career_points(self):
         return self.kills*25 + self.trade_profit//10 + self.jumps*5
 
@@ -478,8 +516,8 @@ class Pilot:
         if buy:
             if stock[good] <= 0: return 'Station has no stock.'
             if sum(self.cargo) >= self.capacity: return 'Cargo hold full.'
-            dirty = min(self.crymto,value) if (good in ILLEGAL and use_crymto) or self.crymto_accepted else 0
-            if self.credits < value-dirty: return 'Insufficient funds.' if self.crymto_accepted else 'Insufficient funds (Crymto pays for contraband here; anarchy and feudal ports take it for anything).'
+            dirty = min(self.crymto,value) if good in ILLEGAL or self.crymto_accepted else 0
+            if self.credits < value-dirty: return 'Insufficient funds.' if self.crymto_accepted or good in ILLEGAL else 'Insufficient funds (anarchy and feudal ports take Crymto for anything; contraband takes it everywhere).'
             self.crymto -= dirty
             self.credits -= value-dirty
             if self.cargo[good] == 0: self.cargo_paid[good] = 0
@@ -489,6 +527,11 @@ class Pilot:
             self.log_trade('buy',good,value,'CYM' if dirty == value else 'cr')
         else:
             if self.cargo[good] <= 0: return 'None aboard to sell.'
+            bonus = 0
+            if good not in ILLEGAL and self.charter:
+                bonus = max(0,min(CHARTER_CAP,int((value-self.cargo_paid[good]//self.cargo[good])*CHARTER_SHARE)))
+                value += bonus
+            rank = self.rank
             if good in ILLEGAL and not clean_deal: self.crymto += value
             else: self.credits += value
             basis = self.cargo_paid[good]//self.cargo[good]
@@ -498,8 +541,12 @@ class Pilot:
             self.cargo_paid[good] = 0 if self.cargo[good] == 1 else self.cargo_paid[good]-basis
             self.cargo[good] -= 1
             stock[good] += 1
-        unit = ('Crymto / credits' if use_crymto and good in ILLEGAL else 'cr') if buy else ('Crymto' if good in ILLEGAL and not clean_deal else 'cr')
-        return f'{"Bought" if buy else "Sold"} 1 t {GOODS[good]} for {value} {unit}.'
+        unit = ('Crymto' if dirty == value else 'Crymto / credits' if dirty else 'cr') if buy else ('Crymto' if good in ILLEGAL and not clean_deal else 'cr')
+        result = f'{"Bought" if buy else "Sold"} 1 t {GOODS[good]} for {value} {unit}.'
+        if not buy and bonus: result += f' Includes {bonus} cr Newcomer Charter bonus.'
+        if not buy and rank != self.rank and self.rank == dict(RANKS)[CHARTER_RANK]:
+            result = 'Promoted to Operator: the Newcomer Charter ends. Corvant and Velmora pay most for high-tech goods.'
+        return result
 
     def add_cargo(self, good, n=1, paid=0):
         """Cargo arriving any way but a purchase (scooped, salvaged, paid as a fee) costs nothing unless paid says so."""
@@ -1005,6 +1052,7 @@ class Game:
         self.security_elapsed = 0.
         self.security_warning = 0
         self.security_dispatch = 0.
+        self.minor_offence = None   # the world whose police you can pay off: you only flew too close
         self.station_strikes = 0
         self.station_strike_at = 0.
         self.surrendering = False
@@ -1167,7 +1215,7 @@ class Game:
 
     def checkpoint(self):
         if getattr(self,'_restoring',False): return
-        fields = ('world_basis','world_epoch','shield','speed','station','roll','station_angle','station_hostilities','station_hostile_until','security_elapsed','security_warning','security_dispatch','station_laser_warning','station_laser_timer','enemy_police_system','surrendering','autodock','course_assist','fine_control','enemy','enemy_kind',
+        fields = ('world_basis','world_epoch','shield','speed','station','roll','station_angle','station_hostilities','station_hostile_until','security_elapsed','security_warning','security_dispatch','minor_offence','station_laser_warning','station_laser_timer','enemy_police_system','surrendering','autodock','course_assist','fine_control','enemy','enemy_kind',
                   'asteroids','fragments','sun','heat','nav','rear_view','planet','planet_radius',
                   'assist_speed','mine_objects','jamming','jammer_cooldown','cloaked','customs_checked',
                   'cruise','jump_warp','npc_mine_timer','spawn','cooldown','enemy_shot','broken_down','breakdown_in',
@@ -1766,7 +1814,8 @@ class Game:
             self.docking_pending = 0
             self.message = 'Docking refused: hostile or wanted status. Seek another accepting port.'
         elif self.station_hostilities[self.p.system] and not self.surrendering:
-            self.surrender()
+            if self.can_settle(): self.settle_with_police()
+            else: self.surrender()
         elif self.dock_clearance > 0:
             self.message = f'Docking clearance remains valid for {math.ceil(self.dock_clearance)}s.'
         else:
@@ -1775,6 +1824,7 @@ class Game:
 
     def station_hostile(self, reason):
         if self.p.deep_space: return
+        self.minor_offence = None
         if not self.station_hostilities[self.p.system]:
             self.p.fine += 150
         self.station_hostilities[self.p.system] = True
@@ -1782,6 +1832,35 @@ class Game:
         self.dock_clearance = self.docking_pending = 0.
         self.autodock = self.course_assist = False
         self.message = 'STATION DEFENCE: '+reason+' Docking revoked; police response authorised!'
+        self.checkpoint()
+
+    def can_settle(self):
+        """Flying too close is the only offence, and you have not fired on the police: they take a fine by radio."""
+        police = self.enemy_kind == 'police' and self.enemy is not None
+        return (not self.p.deep_space and type(self.minor_offence) is int and self.minor_offence == self.p.system
+                and self.station_hostilities[self.p.system] and not (police and self.enemy[3] < ENEMY_STRENGTH['police']))
+
+    def settle_with_police(self):
+        cost = self.p.fine
+        if self.p.spend(cost) is None:
+            self.surrender()
+            self.message = f'POLICE: the fine is {cost} cr and you cannot pay. Surrender accepted instead: dock to be arrested.'
+            return
+        self.p.book('fines',-cost)
+        self.p.fine = 0
+        system = self.p.system
+        if self.enemy_kind == 'police' and self.enemy is not None:
+            if self.enemy_police_system is not None:
+                self.p.station_police_remaining[self.enemy_police_system] = min(STATION_POLICE_CAPACITY,self.p.station_police_remaining[self.enemy_police_system]+1)
+            self.enemy = self.ship_target = self.enemy_police_system = None
+        self.station_hostilities[system] = False
+        self.station_hostile_until[system] = 0.
+        self.minor_offence = None
+        self.security_elapsed,self.security_warning,self.security_dispatch = 0.,0,0.
+        self.station_laser_warning,self.station_laser_timer = False,15.
+        self.dock_clearance,self.docking_pending = 120,0
+        self.message = f'POLICE: {cost} cr fine paid by radio. Stand-down given; you are cleared to dock. Fly straight in.'
+        self.alert = None
         self.checkpoint()
 
     def surrender(self):
@@ -1882,12 +1961,14 @@ class Game:
         self.security_elapsed += dt
         if not self.security_warning:
             self.security_warning = 1
-            self.message = 'STATION WARNING: no clearance! Stop and request docking with R, or withdraw. Police in 12 seconds.'
-        if self.security_elapsed >= 6 and self.security_warning == 1:
+            self.message = f'STATION WARNING: no clearance! Press R to request docking, or withdraw. Police in {SECURITY_GRACE} seconds.'
+        if self.security_elapsed >= SECURITY_GRACE-8 and self.security_warning == 1:
             self.security_warning = 2
-            self.message = 'FINAL STATION WARNING: withdraw or obtain clearance! Police in 6 seconds.'
-        if self.security_elapsed >= 12:
+            self.message = 'FINAL STATION WARNING: press R for clearance or withdraw! Police in 8 seconds.'
+        if self.security_elapsed >= SECURITY_GRACE:
             self.station_hostile('Unauthorised docking approach.')
+            self.minor_offence = self.p.system
+            self.message += ' Press R to radio the police and pay the fine.'
 
     def update_station_lasers(self, dt):
         if not self.station_overwhelmed() or math.sqrt(sum(v*v for v in self.station)) > 2500:
@@ -2313,6 +2394,7 @@ class Game:
         self.ship_target = None
         if self.enemy_kind == 'police':
             self.p.fine += 150
+            self.minor_offence = None
             if self.enemy_police_system is not None:
                 system = self.enemy_police_system
                 self.station_hostilities[system] = True
@@ -2502,7 +2584,7 @@ class Game:
         government = PROFILES[self.p.system][0]
         d.text(45,205,'Contraband sales pay Crymto. Crymto survives ship loss; banks hold credits.')
         if self.p.crymto_accepted: d.text(45,240,f'{government} port: Crymto pays for anything here, before credits.',(120,220,140))
-        else: d.text(45,240,'C at the market buys contraband with Crymto. Anarchy and feudal ports take it for anything.')
+        else: d.text(45,240,'Contraband is paid for in Crymto first. Anarchy and feudal ports take it for anything.')
         d.text(45,290,f'Crymto to credits: {launder_fee}% fee. Credits to Crymto: {buy_fee}% fee.',GOLD)
         if check: d.text(45,320,f'{government} compliance: {check*100:.0f}% chance of a check; it freezes {COMPLIANCE_SEIZE}% and fines {COMPLIANCE_FINE}%.',RED)
         else: d.text(45,320,'No compliance checks at this port.',(120,220,140))
@@ -2767,7 +2849,7 @@ class Game:
             for j,line in enumerate(textwrap.wrap(note,44)): d.text(580,340+j*25,line,dim)
         else: d.text(580,340,f'Average of {info["commanders"]} commanders.',dim)
 
-        d.line(35,488,W-35,488)
+        d.line(35,488,PANEL_W-35,488)
         y = 500
         for line in report_verdict(bucket,average):
             for part in textwrap.wrap(line,90):
@@ -2816,7 +2898,13 @@ class Game:
         self.key(ord('g'))
 
     def engineering_location(self):
-        return self.vms_return if self.engineering_return == 'vms' else self.engineering_return
+        """'market' when docked, otherwise the flight mode, however the engineering screen was reached
+        (key 8 works from the trade log, money, help and other screens)."""
+        place = self.vms_return if self.engineering_return == 'vms' else self.engineering_return
+        if place in ('market','outfit'): return place
+        mode,self.mode = self.mode,place
+        try: return self.session_mode()
+        finally: self.mode = mode
 
     def draw_vms(self):
         d,p = self.d,self.p
@@ -3782,14 +3870,14 @@ class Game:
         d = self.d
         vx,vy,vz = self.camera_vector(obj)
         projected = self.project(obj)
-        if projected and 55 <= projected[0] <= W-55 and 110 <= projected[1] <= 510:
+        if projected and 55 <= projected[0] <= PANEL_W-55 and 110 <= projected[1] <= 510:
             x,y,_ = projected
             d.fill(x-3,y-3,7,7,color)
             d.rect(x-10,y-10,20,20,color)
-            d.text(max(35,min(W-330,x+16)),max(105,min(515,y-10)),label[:28],color)
+            d.text(max(35,min(PANEL_W-330,x+16)),max(105,min(515,y-10)),label[:28],color)
             return
         if projected:
-            dx,dy = projected[0]-W/2,projected[1]-330
+            dx,dy = projected[0]-PANEL_W/2,projected[1]-330
         else:
             dx,dy = vx,vy
             if abs(dx)+abs(dy) < 1: dx,dy = 0,1
@@ -3797,13 +3885,13 @@ class Game:
         if length < 1: dx,dy,length = 0,1,1
         dx,dy = dx/length,dy/length
         limit = min(490/max(abs(dx),.0001),190/max(abs(dy),.0001))
-        x,y = W/2+dx*limit,330+dy*limit
+        x,y = PANEL_W/2+dx*limit,330+dy*limit
         bx,by = x-dx*18,y-dy*18
         d.line(x,y,bx-dy*8,by+dx*8,color)
         d.line(x,y,bx+dy*8,by-dx*8,color)
         d.line(bx-dy*8,by+dx*8,bx+dy*8,by-dx*8,color)
         text = label+(' / BEHIND: 4' if vz <= 0 else '')
-        d.text(max(35,min(W-350,x-140)),max(102,min(515,y+14)),text[:34],color)
+        d.text(max(35,min(PANEL_W-350,x-140)),max(102,min(515,y+14)),text[:34],color)
 
     def draw_heat_instrument(self):
         d = self.d
@@ -3909,7 +3997,7 @@ class Game:
         d = self.d
         elapsed = self.jump_warp['elapsed']
         clip = bind(d.sdl,'SDL_RenderSetClipRect',C.c_int,[C.c_void_p,C.c_void_p])
-        viewport = (C.c_int*4)(25,65,W-50,640)
+        viewport = (C.c_int*4)(25,65,PANEL_W-50,640)
         clip(d.r,viewport)
         for i,star in enumerate(self.stars):
             angle = math.atan2(star[1],star[0])
@@ -3966,11 +4054,11 @@ class Game:
             x,z,roll = -x,-z,-roll
         if z <= 5: return None
         c,s = math.cos(roll), math.sin(roll)
-        return W/2+(x*c+y*s)*500/z, 330+(-x*s+y*c)*500/z, 500/z
+        return PANEL_W/2+(x*c+y*s)*500/z, 330+(-x*s+y*c)*500/z, 500/z
 
     def on_target(self, obj, radius=32):
         projected = self.project(obj)
-        return projected is not None and abs(projected[0]-W/2) < radius and abs(projected[1]-330) < radius
+        return projected is not None and abs(projected[0]-PANEL_W/2) < radius and abs(projected[1]-330) < radius
 
     def turn_world(self, yaw, pitch):
         # Rotate every relative vector by the inverse cockpit turn. This
@@ -4170,6 +4258,9 @@ class Game:
             if self.p.fine > 0 and random.random() < .5 and self.p.station_police_remaining[self.p.system] > 0 and not self.p.deep_space:
                 self.dispatch_station_police()
             elif patrolled: self.spawn = 5
+            elif self.p.charter and random.random() < CHARTER_ESCORT:
+                self.spawn = 30
+                self.notice('Charter patrol: a pirate turned away from you. The Newcomer Charter protects you until Operator rank.')
             else:
                 self.enemy_kind = 'pirate'
                 self.enemy = [random.uniform(-120,120),random.uniform(-70,70),-850. if random.random()<.3 else 850.,6,0.]
@@ -4260,7 +4351,7 @@ class Game:
         fresh = quote(system,good,buy)
         own = getattr(self,'visit_trades',{}).get((system,good),0)
         if not own: return fresh
-        undone = quote(system,good,buy,stock=self.p.stock[system][good]-own)
+        undone = quote(system,good,buy,stock=max(0,stock_level(system,good)-own))
         return max(fresh,undone) if buy else min(fresh,undone)
 
     def end_trading_visit(self):
@@ -4298,6 +4389,7 @@ class Game:
                 if type(snap.get('economy')) is list and len(snap['economy']) == 8: self.economy_reports = snap['economy']
                 if isinstance(snap.get('reports'),dict): self.report_averages = snap['reports']
                 VIEW = view_from(snap)
+                take_calm(snap)
         elif now-self.market_at >= 1 or self.market is None or self.market.state['stock'] is not self.p.stock:
             # Offline the game runs its own copy of the market, once a second.
             if self.market is None or self.market.state['stock'] is not self.p.stock:
@@ -4309,6 +4401,7 @@ class Game:
             snap = self.market.snapshot(now)
             self.economy_reports = snap['economy']
             VIEW = view_from(snap)
+            take_calm(snap)
         self.announce_events(now)
         if self.mode in ('market','vms') and not self.p.deep_space:
             here,current = self.p.system,{s['id'] for s in self.shipments}
@@ -4456,7 +4549,7 @@ class Game:
         else:
             vertices = [(math.cos(i*2*math.pi/7)*42*(.85+.15*(i%3)),math.sin(i*2*math.pi/7)*42) for i in range(7)]
         # Test the central laser ray against the same outline drawn on screen.
-        x,y = (W/2-sx)/scale,(330-sy)/scale
+        x,y = (PANEL_W/2-sx)/scale,(330-sy)/scale
         c,s = math.cos(angle),math.sin(angle)
         x,y = x*c+y*s,-x*s+y*c
         inside = False
@@ -4502,21 +4595,21 @@ class Game:
             if hint and label.endswith(' '+hint): label = label[:-len(hint)-1]
             hint_width = max(30,len(hint)*11+12) if hint else 0
             button_width = max(132,min(330,len(label)*11+24+hint_width))
-            if items and width+10+button_width > W-70:
+            if items and width+10+button_width > PANEL_W-70:
                 rows.append(items)
                 items,width = [],0
             items.append((label,hint,callback,button_width,hint_width,hold))
             width += (10 if width else 0)+button_width
         if items: rows.append(items)
         start = 674-(len(rows)-1)*36
-        d.fill(25,start-6 if self.mode != 'flight' else start,W-50,710-start+6,(7,19,28))
-        if self.mode != 'flight': d.line(25,start-6,W-25,start-6,(35,65,80))
+        d.fill(25,start-6 if self.mode != 'flight' else start,PANEL_W-50,710-start+6,(7,19,28))
+        if self.mode != 'flight': d.line(25,start-6,PANEL_W-25,start-6,(35,65,80))
         for row,items in enumerate(rows):
             x,y = 35,start+row*36
             for index,(label,hint,callback,w,hint_width,hold) in enumerate(items):
                 back = label.lower().startswith(('return','back','cancel','decline','refuse'))
                 danger = 'reset' in label.lower() or 'quit' in label.lower()
-                if back and index == len(items)-1: x = max(x,W-35-w)
+                if back and index == len(items)-1: x = max(x,PANEL_W-35-w)
                 primary = index == 0 and not back and not danger
                 border = GOLD if primary else RED if danger else (55,95,110)
                 d.fill(x,y,w,32,(15,56,61) if primary else (12,29,40))
@@ -4549,6 +4642,10 @@ class Game:
             if section:
                 x,w = {'map':TOP_BAR[0][:2],'vms':TOP_BAR[1][:2],'money':TOP_BAR[2][:2]}[section]
                 d.rect(x,18,w,32,GOLD)
+            for i,(n,label,lit) in enumerate(RAIL):
+                y = 80+i*44
+                self.mouse_button(PANEL_W-8,y,100,label,ord(str(n)))
+                if self.mode in lit: d.rect(PANEL_W-8,y,100,32,GOLD)
         modal = self.mode not in ('market','flight','cruise','hyperspace','dead','prison')
         self.mouse_button(545,18,85,'Back' if modal else 'Quit',action=self.mouse_back)
         row_y = 674
@@ -4700,7 +4797,7 @@ class Game:
             groups=[('Flight', [('Thrust W',ord('w'),True),('Brake S',ord('s'),True),('Fire Spc',32,True),('Left',LEFT,True),('Up',UP,True),('Right',RIGHT,True),('Roll Q',ord('q'),True),('Down',DOWN,True),('Roll E',ord('e'),True)]),
                 ('Nav',[('Nav 1',ord('g'),False),('Hold jump',ord('h'),True),('Cruise',ord('t'),False),('Station',ord('d'),False),('Planet',ord('p'),False),('Rocks',ord('a'),False),('Sun',ord('j'),False),('Scoop',ord('o'),False),('Guide ON' if self.course_assist else 'Guide',ord('y'),False)]),
                 ('Combat',[('Fire',32,True),('View F',ord('4'),False),('Laser',ord('v'),False),('Missile',ord('m'),False),('Mine',ord('b'),False),('Jammer',ord('z'),False),('Cloak',ord('k'),False),('Target',ord('5'),False)]),
-                ('Safety',[('Surrender R' if not self.p.deep_space and self.station_hostilities[self.p.system] and self.arrest_pending() and not self.surrendering else 'Radio R',ord('7'),False),('Hail N',ord('n'),False),('Autodock',ord('c'),False),('Skills',ord('8'),False),('Distress',ord('6'),False),('Fine ON' if self.fine_control else 'Fine ^F',ord('i'),False)])]
+                ('Safety',[('Pay fine R' if self.can_settle() and not self.surrendering else 'Surrender R' if not self.p.deep_space and self.station_hostilities[self.p.system] and self.arrest_pending() and not self.surrendering else 'Radio R',ord('7'),False),('Hail N',ord('n'),False),('Autodock',ord('c'),False),('Skills',ord('8'),False),('Distress',ord('6'),False),('Fine ON' if self.fine_control else 'Fine ^F',ord('i'),False)])]
             d.fill(30,105,350,270,(5,16,27));d.rect(30,105,350,270,GREEN)
             d.text(40,112,'FLIGHT CONTROLS',GOLD)
             for i,(title,_) in enumerate(groups):
@@ -4816,7 +4913,7 @@ class Game:
         economy = '' if p.deep_space or self.mode in ('cruise','hyperspace') else f' / {SYSTEMS[p.system][1]} / Tech {TECH[p.system]}'
         d.text(640,5,location+economy,GOLD)
         d.text(640,29,f'CR {p.credits:.0f}  CYM {p.crymto}  KILLS {p.kills}')
-        d.line(25,52,W-25,52)
+        d.line(25,52,PANEL_W-25,52)
         if self.mode == 'vms':
             self.draw_vms()
         elif self.mode == 'menu':
@@ -4945,7 +5042,8 @@ class Game:
                 d.text(35,545,'The pulse laser is built in and cannot be sold.',(135,175,185))
             wanted = self.wanted_level()
             for i,t in enumerate(['COMMANDER STATUS',f'Cmdr  {self.commander_name()[:16]}',f'Rank  {p.rank}',f'Wanted {"*"*wanted}{"-"*(5-wanted)} {wanted}/5',f'Cargo {sum(p.cargo)}/{p.capacity} t',f'Fuel  {p.fuel:.2f}/7',f'Hull  {p.hull:.0f}%',f'Refill {p.fuel_cost()} cr',f'Service {p.service_cost()} cr',f'Mines {p.mines}/4',f'Fine {p.fine} cr',f'Wear {p.maintenance:.0f}%',f'Eng. {p.engineering_level}/5']): d.text(790,130+i*35,t,RED if i == 3 and wanted else GREEN)
-            if self.mode == 'market': d.text(35,562,'Ship fuel, service, fitting and engineering: open VMS above.')
+            if self.mode == 'market' and p.charter: d.text(35,562,f'NEWCOMER CHARTER: +50% on sale profit here (max {CHARTER_CAP}/t) to Operator.',(120,220,140))
+            elif self.mode == 'market': d.text(35,562,'Ship fuel, service, fitting and engineering: open VMS above.')
             d.text(35,590,'3 Money / station jobs   2 VMS   1 Nav')
         elif self.mode == 'planet_profile':
             self.draw_planet_profile()
@@ -4973,7 +5071,7 @@ class Game:
             self.draw_flight()
         self.draw_alert()
         self.draw_mouse_ui()
-        d.line(25,710,W-25,710)
+        d.line(25,710,PANEL_W-25,710)
         notice = 'Update '+self.updates.latest+' available - 2' if self.updates.latest else self.message
         d.text(28,725,notice[:94],GOLD)
         d.present(d.r)
@@ -4982,7 +5080,7 @@ class Game:
         d,p = self.d,self.p
         # Clip the 3D view so near objects do not overwrite cockpit instruments.
         clip = bind(d.sdl,'SDL_RenderSetClipRect',C.c_int,[C.c_void_p,C.c_void_p])
-        viewport = (C.c_int*4)(25,65,W-50,490)
+        viewport = (C.c_int*4)(25,65,PANEL_W-50,490)
         clip(d.r,viewport)
         for star in self.stars:
             point = self.project(star)
@@ -4999,7 +5097,7 @@ class Game:
         for player in self.other_players.values():
             self.object(player['object'],'player')
             projected = self.project(player['object'])
-            if projected: d.text(max(35,min(W-240,projected[0]-60)),max(100,min(510,projected[1]-35)),player['name'],(140,185,255))
+            if projected: d.text(max(35,min(PANEL_W-240,projected[0]-60)),max(100,min(510,projected[1]-35)),player['name'],(140,185,255))
         for t in self.traffic: self.object(t['object'],'trader')
         if self.enemy: self.object(self.enemy,self.enemy_kind)
         if self.disabled_ship: self.object(self.disabled_ship['object'],'disabled')
@@ -5008,7 +5106,7 @@ class Game:
             if point:
                 x,y,_ = point
                 d.line(x-6,y,x+6,y,(255,240,160)); d.line(x,y-6,x,y+6,(255,240,160))
-                d.line(x,y,x+(W/2-x)*.15,y+(560-y)*.15,GOLD)
+                d.line(x,y,x+(PANEL_W/2-x)*.15,y+(560-y)*.15,GOLD)
         for e in self.explosions:
             point = self.project(e['position'])
             if point:
@@ -5051,7 +5149,7 @@ class Game:
             name,shield,hull = status
             d.text(35,100,f'TARGET {name}  SHIELD {shield:.0f}%  HULL {hull:.0f}%',(255,100,180))
         if getattr(self,'presence',None): d.text(360,73,f'PLAYERS NEARBY {len(self.other_players)} / PvP disabled',(140,185,255))
-        if self.flash: d.rect(26,65,W-52,490,RED)
+        if self.flash: d.rect(26,65,PANEL_W-52,490,RED)
         if self.alarm:
             bright = int(time.monotonic()*3)%2 == 0
             d.fill(450,94,375,32,RED if bright else (90,20,24))
@@ -5098,7 +5196,7 @@ class Game:
         projected = self.project(obj)
         if projected is None: return
         sx,sy,scale = projected
-        if sx < -800 or sx > W+800 or sy < -800 or sy > H+800: return
+        if sx < -800 or sx > PANEL_W+800 or sy < -800 or sy > H+800: return
         color = GREEN
         angle = self.roll if self.rear_view else -self.roll
         if kind == 'trader':
@@ -5125,7 +5223,7 @@ class Game:
         points = [(sx+(x*c-y*s)*scale,sy+(x*s+y*c)*scale) for x,y in points]
         for a,b in edges: self.d.line(*points[a],*points[b],color)
         if abs(obj[2]) > 150:
-            self.d.text(max(30,min(W-220,sx-65)),max(75,min(525,sy+110*scale)),kind.upper(),color)
+            self.d.text(max(30,min(PANEL_W-220,sx-65)),max(75,min(525,sy+110*scale)),kind.upper(),color)
 
 
 def self_test():

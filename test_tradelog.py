@@ -12,6 +12,7 @@ import threading
 import time
 from unittest.mock import MagicMock
 import star_trader as st
+st.CHARTER_RANK = 0   # the Newcomer Charter's bonus and patrols are tested on their own (test_tradelog.CharterTests)
 from save_server import Store, make_server
 from save_sync import RemoteSave
 
@@ -339,7 +340,7 @@ class CrymtoTests(Base):
         p.equipment = []
         self.assertEqual(p.buy_equipment(1), 'Insufficient credits.')
         self.assertEqual(p.crymto, 5000)
-        self.assertIn('anarchy and feudal ports take it for anything', p.trade(FOOD, True, value=150))
+        self.assertIn('anarchy and feudal ports take Crymto for anything', p.trade(FOOD, True, value=150))
         p.credits = 1000
         p.buy_equipment(1)
         self.assertEqual((p.crymto, p.credits), (5000, 600))
@@ -380,3 +381,167 @@ class CrymtoTests(Base):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class FeedbackFixTests(Base):
+    """0.9.2 bug reports: engineering while docked, Crymto for contraband, no same-dock contraband profit,
+    and prices that hold steadier between stops."""
+    def test_engineering_training_works_when_reached_from_any_docked_screen(self):
+        g = self.g
+        g.mode = 'market'
+        for screen in ('trades', 'money', 'help', 'vms'):
+            g.p.engineering_level, g.p.credits = 0, 1000
+            g.mode = screen
+            if screen == 'trades': g.money_return = 'market'
+            if screen == 'money': g.money_return = 'market'
+            if screen == 'help': g.help_return = 'market'
+            if screen == 'vms': g.vms_return = 'market'
+            g.engineering_return, g.mode = screen, 'engineering'
+            g.train_engineering()
+            self.assertEqual(g.p.engineering_level, 1, screen)
+            self.assertEqual(g.mode, 'engineering')
+
+    def test_engineering_training_still_needs_a_dock(self):
+        g = self.g
+        g.engineering_return, g.mode = 'flight', 'engineering'
+        g.train_engineering()
+        self.assertEqual(g.p.engineering_level, 0)
+        self.assertIn('docked', g.message)
+
+    def test_b_pays_for_contraband_in_crymto_at_a_lawful_port(self):
+        p = self.p
+        p.system, p.credits, p.crymto = 2, 0, 2000   # a democracy
+        self.assertTrue(p.trade(st.ILLEGAL[0], True, value=300).startswith('Bought'))
+        self.assertEqual((p.credits, p.crymto), (0, 1700))
+        self.assertEqual(p.trade_log[-1]['unit'], 'CYM')
+
+    def test_own_trades_move_prices_at_once_but_outside_trade_only_slowly(self):
+        import market as m
+        mk = st.new_market(seed='calm')
+        mk.advance(1000.)
+        system, good = 3, 0
+        calm = mk.calm[system][good]
+        mk.apply(trades=[[system, good, -5]], now=1000.)
+        self.assertAlmostEqual(mk.calm[system][good], calm-5)   # a commander's purchase shows straight away
+        mk.change(system, good, 20)                              # a freighter unloads
+        mk.settle_calm(1000.)
+        lagged = mk.calm[system][good]
+        mk.settle_calm(1000.+60)
+        moved = mk.calm[system][good]-lagged
+        self.assertGreater(moved, 0)
+        self.assertLess(moved, 20*(1-__import__('math').exp(-60/m.PRICE_LAG))+.01)
+        mk.settle_calm(1000.+60+20*m.PRICE_LAG)
+        self.assertAlmostEqual(mk.calm[system][good], mk.stock[system][good], places=3)
+
+    def test_the_game_prices_on_calm_stock_and_its_own_trades(self):
+        st.STOCK = self.p.stock
+        snap = dict(stock=[row[:] for row in self.p.stock], calm=[[float(n) for n in row] for row in self.p.stock])
+        snap['calm'][1][0] = self.p.stock[1][0]+10.   # a glut has just arrived; prices have not caught up
+        st.take_calm(snap)
+        self.addCleanup(setattr, st, 'CALM', None)
+        self.assertEqual(st.stock_level(1, 0), self.p.stock[1][0]+10)
+        self.p.stock[1][0] -= 2                        # this commander buys 2 t
+        self.assertEqual(st.stock_level(1, 0), self.p.stock[1][0]+10)   # 2 t fewer, at once
+        st.take_calm(dict(stock=snap['stock'], calm='nonsense'))
+        self.assertEqual(st.stock_level(1, 0), self.p.stock[1][0])
+
+
+class CharterTests(Base):
+    """New commanders earn a bonus at the Charter worlds and are often spared pirates there, until Operator."""
+    def setUp(self):
+        super().setUp()
+        patch = unittest.mock.patch.object(st, 'CHARTER_RANK', 250)
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def test_charter_pays_half_the_profit_again_up_to_the_cap(self):
+        p = self.p
+        p.system = 0
+        self.assertTrue(p.charter)
+        self.buy(FOOD, 2, value=20)
+        self.assertIn('Newcomer Charter bonus', p.trade(FOOD, False, value=40))
+        self.assertEqual(p.trade_log[-1]['price'], 50)          # 20 profit, 10 bonus
+        p.trade(FOOD, False, value=200)
+        self.assertEqual(p.trade_log[-1]['price'], 200+st.CHARTER_CAP)
+
+    def test_no_bonus_on_a_loss_on_contraband_or_away_from_charter_worlds(self):
+        p = self.p
+        p.system = 0
+        self.buy(FOOD, 1, value=20)
+        p.trade(FOOD, False, value=15)
+        self.assertEqual(p.trade_log[-1]['price'], 15)
+        p.cargo[st.ILLEGAL[0]] = 1
+        p.trade(st.ILLEGAL[0], False, value=100)
+        self.assertEqual(p.trade_log[-1]['price'], 100)
+        p.system = 1   # Corvant: not a Charter world
+        self.assertFalse(p.charter)
+        self.buy(FOOD, 1, value=20)
+        p.trade(FOOD, False, value=40)
+        self.assertEqual(p.trade_log[-1]['price'], 40)
+
+    def test_charter_ends_at_operator(self):
+        p = self.p
+        p.system = 0
+        p.jumps = 48   # 240 career points
+        self.buy(FOOD, 1, value=0)
+        result = p.trade(FOOD, False, value=100)
+        self.assertEqual(p.rank, 'Operator')
+        self.assertIn('Newcomer Charter ends', result)
+        self.assertFalse(p.charter)
+
+    def test_charter_patrols_turn_pirates_away_in_charter_space(self):
+        g = self.g
+        g.launch(); g.speed = 0
+        g.station = [0., 0., st.PATROL_RADIUS+500.]
+        with unittest.mock.patch.object(st.random, 'random', return_value=0.):
+            g.spawn = 0; g.update(.01)
+        self.assertIsNone(g.enemy)
+        self.assertIn('Charter patrol', g.message)
+
+
+class PoliceSettleTests(Base):
+    """Flying too close to a station can be settled by radio: pay the fine and the police stand down."""
+    def approach(self):
+        g = self.g
+        g.mode = 'flight'
+        g.station, g.speed = [0., 0., 500.], 10
+        g.update_station_security(.1)
+        g.update_station_security(st.SECURITY_GRACE)
+        self.assertTrue(g.station_hostilities[0])
+        g.update_station_security(0)
+        self.assertEqual(g.enemy_kind, 'police')
+        return g
+
+    def test_pay_the_fine_by_radio(self):
+        g = self.approach()
+        reserve = g.p.station_police_remaining[0]
+        credits, fine = g.p.credits, g.p.fine
+        self.assertTrue(g.can_settle())
+        g.request_docking()
+        self.assertEqual(g.p.credits, credits-fine)
+        self.assertEqual(g.p.fine, 0)
+        self.assertFalse(g.station_hostilities[0])
+        self.assertIsNone(g.enemy)
+        self.assertEqual(g.p.station_police_remaining[0], reserve+1)
+        self.assertGreater(g.dock_clearance, 0)
+        self.assertFalse(g.surrendering)
+
+    def test_no_settling_after_firing_on_police(self):
+        g = self.approach()
+        g.enemy[3] -= 1
+        self.assertFalse(g.can_settle())
+        g.request_docking()
+        self.assertTrue(g.surrendering)
+
+    def test_cannot_pay_means_surrender(self):
+        g = self.approach()
+        g.p.credits = 0
+        g.request_docking()
+        self.assertTrue(g.surrendering)
+        self.assertIn('cannot pay', g.message)
+
+    def test_real_offences_cannot_be_settled(self):
+        g = self.g
+        g.mode = 'flight'
+        g.station_hostile('Repeated weapons fire on station after warnings.')
+        self.assertFalse(g.can_settle())

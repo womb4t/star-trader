@@ -61,7 +61,7 @@ You start docked with 150 credits, a full 7-unit fuel tank, a pulse laser, three
 
 | Screen | Controls |
 | --- | --- |
-| Screens (from anywhere) | 0 home (market or cockpit); 1 Nav; 2 VMS; 3 Money; 4 Menu; 5 Comms (DSC); 6 trade log; 8 engineering; 9 help; Ctrl+0 feedback. Press again to go back |
+| Screens (from anywhere) | 0 home (market or cockpit); 1 Nav; 2 VMS; 3 Money; 4 Menu; 5 Comms (DSC); 6 trade log; 8 engineering; 9 help; Ctrl+0 feedback. Press again to go back. Buttons for 5–0 run down the right-hand side |
 | Station | Up/Down select; B buy; S sell; U outfitting; L requests departure clearance, then L launches once granted |
 | VMS (2) | F buys a full fuel refill; K sells fuel; R repairs hull; U outfitting; L launch |
 | Outfitting | Up/Down browse; B or Enter buy and fit; U returns to market |
@@ -217,10 +217,13 @@ Docking allows +/-14 degrees of roll error. Slow station contact (speed 25 or be
 causes minor damage; high-speed impacts remain dangerous. Slot roll error stays visible after clearance.
 
 Station defence: approaching the docking lane without clearance triggers warnings,
-then hostility after 12 seconds. Stop outside the entrance, withdraw or obtain clearance
-with R before escalation. Shooting the station causes immediate hostility, a 150cr fine,
-revoked clearance and attacking police. Hostility at that station survives saving;
-leave for another accepting port. Paying fines alone does not clear station hostility.
+then hostility after 20 seconds. Stop outside the entrance, withdraw or obtain clearance
+with R before escalation. If flying too close was your only offence and you have not
+fired on the police, R radios them instead: pay your fines on the spot and they stand
+down and clear you to dock (no money means surrender instead). Shooting the station
+causes immediate hostility, a 150cr fine, revoked clearance and attacking police; that
+cannot be settled by radio. Hostility at that station survives saving; leave for
+another accepting port. Paying fines alone does not clear station hostility.
 
 Arrows now turn the ship heading rather than sliding sideways. Objects and stars
 move opposite your turn; forward thrust follows the new heading. I reduces turn
@@ -280,8 +283,18 @@ game version, platform, screen and system are included; no save file is attached
 CRYMTO (CYM): contraband sales normally pay this separate account balance.
 Crymto survives ship destruction and is exempt from salvage claims.
 At anarchy and feudal ports Crymto pays for anything (goods, kit, fuel, service,
-bays, training, fines) before credits. Elsewhere B buys with credits and C buys
-contraband with Crymto first, credits covering any shortfall.
+bays, training, fines) before credits. Elsewhere B buys legal goods with credits,
+and contraband with Crymto first, credits covering any shortfall. Contraband's street
+price carries the smugglers' premium, so it always costs more to buy than the same
+dock pays: only a cargo run makes money.
+
+NEWCOMER CHARTER: until you reach Operator rank, legal sales at Halvora, Meridel and
+Brennix pay half your profit again (up to 40 cr a tonne), and Charter patrols turn
+many pirates away there. It ends at Operator; the core worlds pay more after that.
+
+PRICES hold steadier between stops: deliveries by other traders and station
+production reach prices over about half an hour, so a margin you saw is mostly still
+there on arrival. Your own buying and selling moves prices at once.
 N negotiates a one-tonne contraband sale for clean credits at a 15% discount
 (review the offer and press Y to accept). Every station has a Crymto exchange
 (Money, X). Credits -> Crymto costs 10%.

@@ -5,9 +5,16 @@ From your suggestions:
 - **The trade log has In, Out and Balance columns**, and totals money in and out at the top.
 - **Sell your ship's kit.** In Outfitting, S sells the selected item back for half its new price: lasers, mounts, scoops, the cargo bay (once the hold is down to 20 t), docking computer, missiles and mines. Selling a laser puts the built-in pulse laser back on that mount. Buying a laser now tells you the pulse laser is kept: V switches lasers, and a rear laser mount carries one behind you.
 
+- **Screen buttons down the right-hand side** for 5 Comms, 6 Trades, 8 Engineering, 9 Manual and 0 Home, so the screens past 1–4 are easy to find. The window is a little wider to make room.
+- **Newcomer Charter.** Until Operator rank, legal sales at Halvora, Meridel and Brennix (low-tech, well-policed worlds) pay half your profit again, up to 40 cr a tonne, and Charter patrols turn many pirates away there. The Charter ends at Operator, pointing you to the core worlds.
+- **Settle with the police by radio.** If flying too close to a station was your only offence and you have not fired on the police, R now pays your fines on the spot: the police stand down and you are cleared to dock. Without the money you surrender as before. The warning before police launch is now 20 seconds instead of 12.
+- **Prices hold steadier between stops.** Deliveries by other traders and station production now reach prices over about half an hour, so a margin you saw at one station is mostly still there after a stop on the way. Your own trades still move prices at once.
 - **Crymto goes further.** Anarchy and feudal ports take Crymto for anything (market goods, kit, fuel, service, bays, training and fines), spending it before credits. Every station now has a Crymto exchange: cashing Crymto costs 20% at lawless ports, 30% under dictatorships, communists and confederacies, and 40% in democracies and corporate states. Lawful ports also run compliance checks, more often where the Council funds more police: a check freezes half the Crymto you tried to exchange and adds a 10% fine. Buying Crymto costs 10% everywhere.
 
 From your bug reports:
+- **No more same-dock contraband profit.** Contraband could be bought and sold back in the same dock at a profit, because the smugglers' premium only applied to selling. The street price now carries the premium too, so buying always costs more than the same dock pays, and only a cargo run makes money.
+- **B spends Crymto on contraband.** Contraband is paid for in Crymto first everywhere, then credits, without needing C.
+- **Engineering training works when docked.** Opening engineering with 8 from the trade log, Money or another screen said training was only available while docked, even when you were.
 - **Selling scooped or salvaged cargo no longer shows a false loss.** Cargo lost when your ship is destroyed, seized by customs, taken as a rescue fee or moved to a station bay used to leave its purchase cost behind, and the next free tonne of that good was charged for it. The cost now goes with the cargo (station bays keep it until you take the cargo back), and saves are cleaned up when loaded.
 # 0.9.1 — fix: the game closed as soon as it went online
 

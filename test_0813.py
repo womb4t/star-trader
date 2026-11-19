@@ -7,6 +7,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 import star_trader as st
+st.CHARTER_RANK = 0   # the Newcomer Charter's bonus and patrols are tested on their own (test_tradelog.CharterTests)
 
 _OUTBOX = tempfile.TemporaryDirectory()
 st.FEEDBACK_OUTBOX = Path(_OUTBOX.name)/'feedback-outbox'

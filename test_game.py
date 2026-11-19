@@ -8,6 +8,7 @@ import tempfile
 import unittest
 from pathlib import Path
 import star_trader as st
+st.CHARTER_RANK = 0   # the Newcomer Charter's bonus and patrols are tested on their own (test_tradelog.CharterTests)
 
 # Keep logged feedback out of the real outbox.
 _OUTBOX = tempfile.TemporaryDirectory()
@@ -191,10 +192,10 @@ class GameplayTests(unittest.TestCase):
         g.update_station_security(.1)
         self.assertIn('WARNING',g.message)
         self.assertIsNone(g.enemy)
-        g.update_station_security(6)
+        g.update_station_security(st.SECURITY_GRACE-8)
         self.assertIn('FINAL',g.message)
         self.assertIsNone(g.enemy)
-        g.update_station_security(6)
+        g.update_station_security(8)
         self.assertTrue(g.station_hostilities[0])
         g.update_station_security(0)
         self.assertEqual(g.enemy_kind,'police')
@@ -243,7 +244,7 @@ class GameplayTests(unittest.TestCase):
         g.roll = st.math.pi/2
         g.station = [0.,300.,1000.]
         self.assertGreater(g.scanner_position(g.station)[0],955)
-        self.assertGreater(g.project(g.station)[0],st.W/2)
+        self.assertGreater(g.project(g.station)[0],st.PANEL_W/2)
         g.rear_view = True
         self.assertLess(g.scanner_position(g.station)[0],955)
 
@@ -510,11 +511,12 @@ class GameplayTests(unittest.TestCase):
         p.trade(6,False)
         self.assertEqual(p.credits,cash)
         self.assertEqual(p.crymto,st.quote(0,6,False))
-        p.credits = 1000
-        dirty = p.crymto
-        p.trade(6,True)
-        self.assertEqual(p.crymto,dirty)
+        p.credits,p.crymto = 1000,0
+        p.trade(6,True)   # without Crymto, credits buy contraband
         self.assertEqual(p.credits,1000-st.quote(0,6))
+        p.credits,p.crymto = 1000,50
+        p.trade(6,True)   # B spends Crymto on contraband first, then credits
+        self.assertEqual((p.crymto,p.credits),(0,1000-(st.quote(0,6)-50)))
         p.crymto = 1000
         cash = p.credits
         p.trade(6,True,use_crymto=True)
@@ -1620,7 +1622,7 @@ class GameplayTests(unittest.TestCase):
         g.rear_view = True
         self.assertIsNotNone(g.project([0,0,-500]))
         self.assertIsNone(g.project([0,0,500]))
-        self.assertLess(g.project([50,0,-500])[0],st.W/2)
+        self.assertLess(g.project([50,0,-500])[0],st.PANEL_W/2)
 
     def test_rear_laser_purchase_save_and_firing_direction(self):
         g = self.game
@@ -2533,7 +2535,10 @@ class CouncilPricingTests(unittest.TestCase):
         base = st.price(1, good)
         self.assertEqual(base, round(st.static_price(1, good)*st.demand_factor(st.STOCK[1][good], st.NORMAL_STOCK[1][good])))
         self.assertEqual(st.quote(1, good, False), max(1, round(base*2.5+25) - math.ceil(base*.08)))
-        self.assertEqual(st.quote(1, good), base+max(1, math.ceil(base*.08)))
+        # the street price carries the premium too: buying here always costs more than selling here pays
+        self.assertEqual(st.quote(1, good), st.quote(1, good, False)+max(1, math.ceil(base*.08)))
+        for system in range(8):
+            for g in st.ILLEGAL: self.assertGreater(st.quote(system, g), st.quote(system, g, False))
 
     def test_a_new_game_starts_without_an_old_view(self):
         st.VIEW = self.view(tax=[.1]*8)
