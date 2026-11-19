@@ -24,27 +24,22 @@ DOCK_TIME = 180.      # seconds spent docked, trading and refuelling
 
 def fuel(i, j, beacons=()):
     """Fuel for a jump between two worlds; a hyperspace beacon at either end saves council.BEACON_SAVING."""
-    import council
-    cost = st.hyperspace_cost(st.galactic_distance(st.coordinates(i), st.coordinates(j)))
-    return cost*(1-council.BEACON_SAVING) if i in beacons or j in beacons else cost
+    return st.jump_fuel(st.coordinates(i), j, beacons, source=i)
 
 
-def in_range(i, beacons=()):
-    return [j for j in range(len(st.SYSTEMS)) if j != i and fuel(i, j, beacons) <= st.FUEL_CAPACITY]
-
-
+in_range = st.systems_in_range
 RANGE = {i: in_range(i) for i in range(len(st.SYSTEMS))}   # reach with no beacons (each market keeps its own)
 LEGAL = [g for g in range(len(st.GOODS)) if g not in st.ILLEGAL]
 
 
 def quote(market, system, good, buy=True):
-    """The exchange's quote: the market price with the game's 8% spread, plus the station's trade tax."""
+    """The exchange's quote, as the game shows it (market.quote_price): spread and tax, and on contraband sold
+    into a world the premium that pays for the risk."""
+    from market import quote_price
     base = round(market.price(system, good))
-    tax = round(base*market.tax(system))
-    if not buy and good in st.ILLEGAL:   # a world pays smugglers for the risk of bringing it in: losses, fines and a reward
-        share = market.loss_share(system, good)
-        base = round(base*market.risk_premium(system, good)+CUSTOMS_FINE*share/(1-share))
-    return base+max(1, math.ceil(base*.08))+tax if buy else max(1, base-math.ceil(base*.08)-tax)
+    if not buy and good in st.ILLEGAL:
+        return quote_price(base, market.tax(system), False, market.risk_premium(system, good), market.loss_share(system, good), CUSTOMS_FINE)
+    return quote_price(base, market.tax(system), buy)
 
 
 # The bank (prototype): loans secured against the ship, priced off the Council's rate.
@@ -63,8 +58,7 @@ RATE_CAP = .20        # the bank never charges more than this, whatever the rati
 WANTED_DECAY = 12*HOUR
 CONTRABAND_RISK = .25 # chance a contraband sale raises the wanted level
 SMUGGLERS = .3        # share of commanders who trade contraband
-SEIZURE = .55         # customs find contraband at a lawful world's dock (star_trader.inspect_cargo)
-CUSTOMS_FINE = 25     # per tonne seized
+from council import CUSTOMS_SEARCH as SEIZURE, CUSTOMS_FINE   # noqa: E402
 # The bank's own money is limited: it can lend LEVERAGE times its capital. Capital grows with the
 # number of active ships (their deposits and business) and with interest earned, and shrinks when
 # a default leaves debt the ship's sale doesn't cover. Near the limit it rations credit.
@@ -123,17 +117,7 @@ def lawless(system):
     return st.PROFILES[system][0] in ('Anarchy', 'Feudal')
 
 
-def customs(market, system):
-    """Chance customs seize contraband at this world's dock: the game's 55%, scaled by how well its police are funded."""
-    if lawless(system): return 0.
-    import council
-    if 'council' not in market.state: return SEIZURE
-    return SEIZURE*market.state['council'].get('safety', {}).get(str(system), 0.)/council.SAFEST
-
-
-def contraband_risk(market, system):
-    """The share of contraband a smuggler expects to lose bringing it here: customs, then pirates on the way in."""
-    return customs(market, system)+(1-customs(market, system))*loss_risk(market, system, system)
+from council import customs, contraband_risk   # noqa: E402  (shared with the live game)
 
 
 def opportunities(market, i, goods=LEGAL):
@@ -320,7 +304,6 @@ class Commander:
             if self.debt:
                 pay = min(self.debt, REPAY_SHARE*takings); self.debt -= pay; self.credits -= pay
             self.tax_paid += n*market.price(self.system, g)*market.tax(self.system)
-            market.pay_tax(self.system, n*market.price(self.system, g))
             trade(market, self.system, g, n, self.name, now)
             self.cargo = None
         self.bank(market, now)
@@ -333,7 +316,6 @@ class Commander:
             paid = n*quote(market, self.system, g)
             self.credits -= paid
             self.tax_paid += n*market.price(self.system, g)*market.tax(self.system)
-            market.pay_tax(self.system, n*market.price(self.system, g))
             trade(market, self.system, g, -n, self.name, now)
             self.cargo = (g, n, paid, dest)
         else:
@@ -355,18 +337,10 @@ def quirk(system, good):
 
 
 def make_market(seed, adaptive=False):
-    import economy, council
+    """The live game's market (star_trader.new_market), with the adaptive economy on or off."""
+    import economy
     economy.ADAPTIVE = adaptive
-    market = Market(st.NORMAL_STOCK, st.static_price, st.trader_travel_time, None, seed=seed, profiles=st.ECONOMY_PROFILES)
-    market.range = {i: list(r) for i, r in RANGE.items()}
-    market.reach = lambda beacons: market.range.update({i: in_range(i, beacons) for i in range(len(st.SYSTEMS))})
-    if adaptive:
-        market.adaptive_base = lambda s, g: st.BASE[g]*quirk(s, g)
-        market.contraband = st.ILLEGAL
-        market.contraband_risk = lambda system: contraband_risk(market, system)
-        names, goods = [s[0] for s in st.SYSTEMS], st.GOODS
-        market.council = lambda m, now: council.review(m, now, m.range, st.ILLEGAL, names, goods)
-    return market
+    return st.new_market(seed=seed)
 
 
 def run(days=5, players=2, seed='sim', start=1.8e9, setup=None, quiet=False, adaptive=False, sample=HOUR, loans=False, force_wipe=0):

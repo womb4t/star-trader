@@ -283,3 +283,27 @@ class StartupTests(unittest.TestCase):
 
 
 if __name__ == '__main__': unittest.main()
+
+
+class RelayTests(unittest.TestCase):
+    """Release 1: The Relay's headlines on the start screen."""
+    NEWS = dict(protocol=1, acts=[dict(title='The Living Economy Act', lines=['x'])],
+                decrees=[dict(at=1., text='Relief convoy sent to Velmora'), dict(at=2., text="Council funds Corvant's computers industry")],
+                tally=dict(day=1, points=['Galactic output rose 2.1% on the day.', 'Prices rose 0.6%.'], sign_off='s'))
+
+    def test_relay_lines_order_and_limit(self):
+        import startup
+        self.assertEqual(startup.relay_lines(self.NEWS), [
+            'THE RELAY · News at the speed of the next jump',
+            "COUNCIL: Council funds Corvant's computers industry",
+            'STA TALLY: Galactic output rose 2.1% on the day.',
+            'ACT OF THE STA: The Living Economy Act'])
+
+    def test_relay_lines_are_cut_to_width(self):
+        import startup
+        news = dict(self.NEWS, decrees=[dict(at=1., text='A'*200)])
+        self.assertTrue(all(len(line) <= 90 for line in startup.relay_lines(news)))
+
+    def test_relay_offline(self):
+        import startup
+        self.assertEqual(startup.relay_lines(None), ['THE RELAY · no signal'])

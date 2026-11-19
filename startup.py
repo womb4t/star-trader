@@ -94,6 +94,31 @@ def migrate_online_launcher(script):
     except (OSError,ValueError,IndexError): return False
 
 
+RELAY_MASTHEAD = 'THE RELAY · News at the speed of the next jump'
+
+
+def relay_lines(news, width=90):
+    """The Relay's start-screen headlines: the newest Council decree, the STA Tally's first point, the latest Act."""
+    import textwrap
+    if not isinstance(news, dict): return ['THE RELAY · no signal']
+    items = []
+    decrees = news.get('decrees') or []
+    if decrees: items.append('COUNCIL: '+decrees[-1]['text'])
+    tally = news.get('tally')
+    if tally and tally.get('points'): items.append('STA TALLY: '+tally['points'][0])
+    if news.get('acts'): items.append('ACT OF THE STA: '+news['acts'][-1]['title'])
+    items += ['COUNCIL: '+d['text'] for d in reversed(decrees[:-1])]
+    return [RELAY_MASTHEAD]+[textwrap.shorten(item, width, placeholder='…') for item in items[:3]]
+
+
+def fetch_news(server, timeout=3):
+    """The Relay's news from the server (no token needed), or None offline."""
+    import urllib.request
+    try:
+        with urllib.request.urlopen(server.rstrip('/')+'/v1/news', timeout=timeout) as reply: return json.loads(reply.read())
+    except (OSError, ValueError): return None
+
+
 class StartScreen:
     def __init__(self, display, config, error='', update=None):
         self.d,self.config,self.error = display,dict(config),error
@@ -106,6 +131,7 @@ class StartScreen:
         ready = self.config.get('last_mode') == 'online' and self.config['server'] and Path(self.config['token_file']).expanduser().is_file()
         self.auto_at = time.monotonic()+2.5 if ready and not error and not update else None
         self.field = 0
+        self.news, self.news_started = None, False
         self.replace_field = False
         self.texture = None
         asset = Path(__file__).resolve().parent/'assets/star-trader-splash.bmp.gz'
@@ -331,6 +357,10 @@ class StartScreen:
             d.rect(110,655,420,44,GOLD); d.text(125,667,'Update now (Enter / U)',GOLD)
             d.rect(570,655,420,44,GREEN); d.text(585,667,'Not now (N / Esc)',GREEN)
         else:
+            if self.news_started:
+                d.fill(40,478,1020,114,(5,15,25))
+                for row,line in enumerate(relay_lines(self.news if isinstance(self.news,dict) else None) if self.news else [RELAY_MASTHEAD]):
+                    d.text(55,486+row*26,line,GOLD if row == 0 else GREEN)
             for index,label in enumerate(('Online play','Offline play','Connection settings')):
                 x = 110+index*300
                 d.rect(x,615,280,48,GOLD if index == self.selected else GREEN)
@@ -378,7 +408,14 @@ class StartScreen:
         try: save_connection(self.config)
         except OSError: pass
 
+    def fetch_relay(self):
+        """Fetch The Relay's headlines in the background; the start screen never waits for them."""
+        if self.news_started or not self.config.get('server'): return
+        self.news_started = True
+        threading.Thread(target=lambda: setattr(self, 'news', fetch_news(self.config['server']) or 'offline'), daemon=True).start()
+
     def choose(self):
+        self.fetch_relay()
         while True:
             for kind,value in self.d.events():
                 choice = self.event(kind,value)

@@ -118,5 +118,24 @@ class BankPricingTests(unittest.TestCase):
             if c.borrowed: self.assertTrue(c.insured)
 
 
+class SimulatedTaxTests(unittest.TestCase):
+    def test_a_commander_sale_is_taxed_once(self):
+        from unittest.mock import patch
+        market = econ_sim.make_market('tax-once', adaptive=True)
+        market.council = None
+        market.advance(START)
+        council.council_state(market, START)
+        market.state['council']['tax']['1'] = .05
+        rng = __import__('random').Random(1)
+        cmdr = econ_sim.Commander('t', 1, rng)
+        cmdr.smuggler, cmdr.came_from = False, 0
+        cmdr.cargo = (0, 10, 50., 1)
+        price = market.price(1, 0)
+        before = market.state['council']['treasury']
+        with patch.object(econ_sim, 'loss_risk', return_value=0.), patch.object(econ_sim, 'opportunities', return_value=[]), patch.object(cmdr, 'bank'):
+            cmdr.act(market, START+60)
+        self.assertAlmostEqual(market.state['council']['treasury']-before, 10*price*.05*(1-council.HOUSE_SHARE), places=4)
+
+
 if __name__ == '__main__':
     unittest.main()

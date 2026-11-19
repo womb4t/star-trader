@@ -66,5 +66,16 @@ class RiskPremiumTests(unittest.TestCase):
         self.assertEqual(econ_sim.quote(self.market, self.world, 0, False), before)
 
 
+class StartingPoliceTests(unittest.TestCase):
+    def test_worlds_start_policed_before_the_first_review(self):
+        import council
+        market = econ_sim.make_market('police-test', adaptive=True)
+        council.council_state(market, START)
+        for i in range(len(st.SYSTEMS)):
+            government = st.PROFILES[i][0]
+            if government in ('Anarchy', 'Feudal'): self.assertEqual(council.customs(market, i), 0.)
+            else: self.assertAlmostEqual(council.customs(market, i), council.CUSTOMS_SEARCH*council.SAFETY_TARGET[government])
+
+
 if __name__ == '__main__':
     unittest.main()

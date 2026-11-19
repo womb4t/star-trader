@@ -148,7 +148,7 @@ class Store:
             row = db.execute("SELECT value FROM settings WHERE key='admin_token_hash'").fetchone()
         return row is not None and secrets.compare_digest(row[0],self.token_hash(token))
 
-    def market_exchange(self, trades=(), intercepts=(), now=None, ship=None, system=None):
+    def market_exchange(self, trades=(), intercepts=(), now=None, ship=None, system=None, smuggling=()):
         """Advance the shared market, apply a player's stock changes, and return what every commander sees."""
         from star_trader import new_market
         now = time.time() if now is None else now
@@ -156,10 +156,22 @@ class Store:
             db.execute('BEGIN IMMEDIATE')
             row = db.execute("SELECT value FROM settings WHERE key='market'").fetchone()
             market = new_market(json.loads(row[0]) if row else None)
-            market.apply(trades,intercepts,ship=ship,system=system,now=now)
+            market.apply(trades,intercepts,ship=ship,system=system,now=now,smuggling=smuggling)
             market.advance(now)
             db.execute("INSERT OR REPLACE INTO settings VALUES ('market',?)",(encode(market.state).decode(),))
             return market.snapshot(now)
+
+    def relay(self):
+        """The Relay's news for the start screen: Acts of the STA, the Council's latest decrees and the STA Tally.
+        Read from the stored market without advancing it; public, so it needs no token."""
+        import council
+        with self.connect() as db:
+            row = db.execute("SELECT value FROM settings WHERE key='market'").fetchone()
+        state = json.loads(row[0]) if row else {}
+        decrees = state.get('council',{}).get('decrees',[])[-8:]
+        tally = state.get('tally')
+        return dict(protocol=1,acts=council.ACTS,decrees=[dict(at=d['at'],text=d.get('text',d['kind'])) for d in decrees],
+                    tally=dict(day=tally['day'],points=tally['points'],sign_off=tally['sign_off']) if tally else None)
 
     def news_list(self):
         with self.connect() as db:
@@ -218,6 +230,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         try:
             if self.path == '/health': return self.reply(200,dict(service='star-trader-saves',protocol=1,version=VERSION))
+            if self.path == '/v1/news': return self.reply(200,self.server.store.relay())
             if self.path.startswith('/v1/admin/feedback'):
                 if not self.server.store.is_admin(self.token()): raise PermissionError('Admin only')
                 status = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query).get('status',[None])[0]
@@ -271,7 +284,9 @@ class Handler(BaseHTTPRequestHandler):
                 if system is not None and (type(system) is not int or not 0 <= system < 8): raise ValueError('Unknown system')
                 with self.server.store.connect() as db:
                     player = db.execute('SELECT name FROM players WHERE token_hash=?',(self.server.store.token_hash(token),)).fetchone()[0]
-                return self.reply(200,self.server.store.market_exchange(trades,data.get('intercepts',[]),ship=player,system=system))
+                smuggling = data.get('smuggling',[])
+                if type(smuggling) is not list: raise ValueError('Invalid smuggling report')
+                return self.reply(200,self.server.store.market_exchange(trades,data.get('intercepts',[]),ship=player,system=system,smuggling=smuggling))
             if self.path == '/v1/feedback':
                 self.server.store.add_feedback(self.server.store.read(token)['player'],data)
                 return self.reply(201,dict(received=data['id']))

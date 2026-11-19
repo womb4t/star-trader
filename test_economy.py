@@ -246,3 +246,19 @@ class ServerEconomyTests(unittest.TestCase):
 
 
 if __name__ == '__main__': unittest.main()
+
+
+class LongGapTests(unittest.TestCase):
+    def test_population_settles_without_overshooting_after_a_long_gap(self):
+        import economy, star_trader as st
+        m = st.new_market(seed='gap')
+        m.advance(1.8e9)
+        station = m.state['stations']['0']
+        station['population'] = 1.
+        m.advance(1.8e9+400*24*3600)   # over a year with nobody about: each economy step spans weeks
+        quiet = .8+.4*station['prosperity']   # the size a world settles at with no regular traffic
+        self.assertLess(abs(station['population']-quiet), .05)   # settled there, not overshot past it
+
+
+if __name__ == '__main__':
+    unittest.main()

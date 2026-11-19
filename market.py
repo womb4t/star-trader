@@ -28,6 +28,15 @@ RISK_PREMIUM_CAP = 3.           # covers customs' full 55% search with the rewar
 RISK_REWARD = .25               # smuggling must pay more than honest trade on average, or nobody would take the risk
 
 
+def quote_price(base, tax=0., buy=True, premium=None, loss=0., fine=25):
+    """The exchange's quote on a station price `base`: an 8% spread and the station's trade tax each way. A world
+    pays smugglers `premium` on contraband brought in, plus the expected customs `fine` for the `loss` share seized."""
+    spread, tax = math.ceil(base*.08), round(base*tax)
+    if buy: return base+max(1, spread)+tax
+    if premium is None: return max(1, base-spread-tax)
+    return max(1, round(base*premium+fine*loss/(1-loss))-spread-tax)
+
+
 def demand_factor(stock, normal):
     """Scarce goods cost more and gluts sell cheap: 1.5x when sold out, 1x at normal stock, 0.75x at 1.5x normal."""
     ratio = stock/max(1, normal)
@@ -63,6 +72,7 @@ class Market:
             tax, share = value*self.tax(system), council.get('house_share', 0.)
             council['treasury'] = council.get('treasury', 0.)+tax*(1-share)
             council['revenue'] = council.get('revenue', 0.)+tax*(1-share)
+            council['turnover'] = council.get('turnover', 0.)+value   # all trade, for the Tally's output
             council['house'] = council.get('house', 0.)+tax*share
 
     def tax(self, system):
@@ -84,6 +94,7 @@ class Market:
         record = books.get(str(good), [0., 0., now])
         keep = .5**(max(0., now-record[2])/SMUGGLING_HALF_LIFE)
         record = [record[0]*keep+lost, record[1]*keep+delivered, now]
+        self.state['contraband_lost'] = self.state.get('contraband_lost', 0.)+lost   # for the Tally
         books[str(good)] = record
         return record
 
@@ -136,7 +147,10 @@ class Market:
                 caps = [self.cap(system, g) for g in range(len(self.stock[system]))]
                 self.economy.advance(system, self.levels[system], caps, now, self.in_flight(system))
             self.sync()
-            if getattr(self, 'council', None): self.council(self, now)
+            if getattr(self, 'council', None):
+                self.council(self, now)
+                import tally
+                tally.publish(self, now)
         if state['next_trade'] is None: state['next_trade'] = now
         # After a long idle spell, simulate only the most recent stretch.
         earliest = now-MAX_CATCH_UP*sum(TRADE_INTERVAL)/2
@@ -183,9 +197,16 @@ class Market:
         self.visit(source, 'bot:'+shipment['id'], now)
         return shipment
 
-    def apply(self, trades=(), intercepts=(), ship=None, system=None, now=None):
-        """Player activity: stock changes from buying and selling, and traders destroyed in flight.
+    def apply(self, trades=(), intercepts=(), ship=None, system=None, now=None, smuggling=()):
+        """Player activity: stock changes from buying and selling (each pays the station's trade tax), traders
+        destroyed in flight, and contraband reports [system, good, tonnes lost, tonnes delivered] for the risk premium.
         `ship` and `system` say who is at which station, for its traffic."""
+        if type(smuggling) not in (list, tuple) or len(smuggling) > 10: raise ValueError('Invalid smuggling report')
+        for report in smuggling:
+            if type(report) not in (list, tuple) or len(report) != 4 or any(type(n) is not int for n in report): raise ValueError('Invalid smuggling report')
+            where, good, lost, delivered = report
+            if not (0 <= where < len(self.stock) and good in getattr(self, 'contraband', ()) and 0 <= lost <= 50 and 0 <= delivered <= 50):
+                raise ValueError('Invalid smuggling report')
         trades = list(trades)[:MAX_OPS]
         for trade in trades:
             if type(trade) not in (list, tuple) or len(trade) != 3: raise ValueError('Invalid trade')
@@ -194,9 +215,11 @@ class Market:
             if not (0 <= system_ < len(self.stock) and 0 <= good < len(self.stock[0]) and -10 <= delta <= 10): raise ValueError('Invalid trade')
         self.reconcile()
         for system_, good, delta in trades:
+            self.pay_tax(system_, abs(delta)*self.price(system_, good))
             self.change(system_, good, delta)
             if ship is not None and now is not None: self.visit(system_, ship, now)
         if ship is not None and now is not None and system is not None: self.visit(system, ship, now)
+        for where, good, lost_, delivered in smuggling: self.smuggling(where, good, lost=lost_, delivered=delivered, now=now)
         lost = set(i for i in list(intercepts)[:10] if type(i) is str)
         self.state['shipments'] = [s for s in self.state['shipments'] if s['id'] not in lost]
 
@@ -205,6 +228,18 @@ class Market:
                     shipments=[dict(s) for s in self.state['shipments']])
         if self.economy:
             snap['economy'] = [self.economy.report(i, self.levels[i], now) for i in range(len(self.stock))]
+        council = self.state.get('council')
+        if council:   # the Council's view, for prices, tax, customs, beacons and news in the game
+            worlds = range(len(self.stock))
+            snap['council'] = dict(
+                tax=[council.get('tax', {}).get(str(i), 0.) for i in worlds], rate=float(council.get('rate', .05)),
+                safety=[council.get('safety', {}).get(str(i), 0.) for i in worlds], beacons=list(council.get('beacons', [])),
+                decrees=[dict(id=d.get('id', f"{d['kind']}-{d['system']}-{int(d['at'])}"), at=d['at'], kind=d['kind'],
+                              system=d['system'], text=d.get('text', d['kind'])) for d in council.get('decrees', [])[-10:]])
+        if self.state.get('tally'): snap['tally'] = {k: v for k, v in self.state['tally'].items() if k != 'previous'}
+        if self.economy and getattr(self, 'contraband', None):
+            snap['prices'] = dict(adjust=[[self.economy.price_adjust(i, g) for g in range(len(self.stock[i]))] for i in range(len(self.stock))],
+                                  contraband=[[[self.risk_premium(i, g), self.loss_share(i, g)] for g in self.contraband] for i in range(len(self.stock))])
         return snap
 
 
@@ -215,7 +250,7 @@ class MarketClient:
         self.remote, self.interval = remote, interval
         self.lock = threading.Lock()
         self.stop = threading.Event()
-        self.trades, self.intercepts = [], []
+        self.trades, self.intercepts, self.smuggling = [], [], []
         self.fresh = None
         self.here = None  # the station this commander is at, for its traffic
         self.status = 'Market: connecting'
@@ -224,6 +259,10 @@ class MarketClient:
 
     def queue_trade(self, system, good, delta):
         with self.lock: self.trades.append([system, good, delta])
+
+    def report_smuggling(self, system, good, lost=0, delivered=0):
+        """Contraband seized or lost on the way to `system`, or sold there: the server's risk premium learns from it."""
+        with self.lock: self.smuggling.append([system, good, int(lost), int(delivered)])
 
     def intercept(self, shipment_id):
         with self.lock: self.intercepts.append(shipment_id)
@@ -241,15 +280,17 @@ class MarketClient:
     def run(self):
         while not self.stop.is_set():
             with self.lock:
-                trades, intercepts = self.trades[:MAX_OPS], self.intercepts[:10]
+                trades, intercepts, smuggling = self.trades[:MAX_OPS], self.intercepts[:10], self.smuggling[:10]
             try:
                 request = dict(trades=trades, intercepts=intercepts)
+                if smuggling: request['smuggling'] = smuggling
                 if self.here is not None: request['system'] = self.here
                 snap = self.remote.request(request, endpoint='/v1/market')
                 if snap.get('protocol') != 1 or type(snap.get('stock')) is not list or type(snap.get('shipments')) is not list: raise ValueError('Invalid market')
                 with self.lock:
                     del self.trades[:len(trades)]
                     del self.intercepts[:len(intercepts)]
+                    del self.smuggling[:len(smuggling)]
                     self.fresh = snap
                 self.status = 'Market: shared'
             except (OSError, RuntimeError, ValueError, KeyError, TypeError):

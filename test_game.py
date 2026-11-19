@@ -2477,3 +2477,270 @@ class LawAndPrisonTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class CouncilPricingTests(unittest.TestCase):
+    """Release 1: prices, tax and contraband premiums follow the Council's view; without it, today's prices."""
+    def setUp(self):
+        st.STOCK = [row[:] for row in st.NORMAL_STOCK]
+        st.VIEW = None
+
+    def tearDown(self):
+        st.STOCK = None
+        st.VIEW = None
+
+    def old_quote(self, system, good, buy=True):
+        base = round(st.static_price(system, good)*st.demand_factor(st.STOCK[system][good], st.NORMAL_STOCK[system][good]))
+        return base+max(1, math.ceil(base*.08)) if buy else max(1, base-math.ceil(base*.08))
+
+    def view(self, **changes):
+        view = dict(tax=[0.]*8, rate=.05, safety=[0.]*8, beacons=[], decrees=[], adjust=[[1.]*10 for _ in range(8)],
+                    contraband=[[[1.25, 0.] for _ in st.ILLEGAL] for _ in range(8)], tally=None)
+        view.update(changes)
+        return view
+
+    def test_quotes_are_unchanged_without_the_councils_view(self):
+        for i in range(8):
+            for g in range(len(st.GOODS)):
+                self.assertEqual(st.quote(i, g), self.old_quote(i, g))
+                self.assertEqual(st.quote(i, g, False), self.old_quote(i, g, False))
+
+    def test_legal_prices_follow_make_and_use(self):
+        adjust = [[1.]*10 for _ in range(8)]
+        adjust[1][5] = 1.17
+        st.VIEW = self.view(adjust=adjust)
+        factor = st.demand_factor(st.STOCK[1][5], st.NORMAL_STOCK[1][5])
+        self.assertEqual(st.price(1, 5), round(st.BASE[5]*st.quirk(1, 5)*1.17*factor))
+        self.assertNotEqual(st.price(1, 5), round(st.static_price(1, 5)*factor))
+
+    def test_tax_is_added_to_buys_and_taken_from_sales(self):
+        tax = [0.]*8
+        tax[1] = .08
+        st.VIEW = self.view(tax=tax)
+        base = st.price(1, 5)
+        self.assertGreater(round(base*.08), 0)
+        self.assertEqual(st.quote(1, 5), base+max(1, math.ceil(base*.08))+round(base*.08))
+        self.assertEqual(st.quote(1, 5, False), max(1, base-math.ceil(base*.08)-round(base*.08)))
+
+    def test_smugglers_are_paid_for_the_risk_only_when_selling(self):
+        contraband = [[[1.25, 0.] for _ in st.ILLEGAL] for _ in range(8)]
+        contraband[1][0] = [2.5, .5]
+        st.VIEW = self.view(contraband=contraband)
+        good = st.ILLEGAL[0]
+        base = st.price(1, good)
+        self.assertEqual(base, round(st.static_price(1, good)*st.demand_factor(st.STOCK[1][good], st.NORMAL_STOCK[1][good])))
+        self.assertEqual(st.quote(1, good, False), max(1, round(base*2.5+25) - math.ceil(base*.08)))
+        self.assertEqual(st.quote(1, good), base+max(1, math.ceil(base*.08)))
+
+    def test_a_new_game_starts_without_an_old_view(self):
+        st.VIEW = self.view(tax=[.1]*8)
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        original = st.SAVE
+        st.SAVE = Path(tmp.name)/'save.json'
+        self.addCleanup(lambda: setattr(st, 'SAVE', original))
+        st.Game(None)
+        self.assertIsNone(st.VIEW)
+
+    def test_offline_play_runs_the_council(self):
+        import council
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        original = st.SAVE
+        st.SAVE = Path(tmp.name)/'save.json'
+        self.addCleanup(lambda: setattr(st, 'SAVE', original))
+        game = st.Game(None)
+        start = 1.8e9
+        with patch('star_trader.time.time', return_value=start): game.update_market()
+        with patch('star_trader.time.time', return_value=start+council.WARM_UP+council.REVIEW_EVERY+60): game.update_market()
+        self.assertEqual(len(st.VIEW['tax']), 8)
+        self.assertEqual(len(st.VIEW['adjust']), 8)
+
+
+class FakeMarketClient:
+    def __init__(self): self.reports, self.trades, self.here = [], [], None
+    def report_smuggling(self, system, good, lost=0, delivered=0): self.reports.append((system, good, lost, delivered))
+    def queue_trade(self, system, good, delta): self.trades.append((system, good, delta))
+
+
+class SmugglingReportTests(unittest.TestCase):
+    """Release 1: customs follow police funding; seizures, losses and contraband sales feed the risk premium."""
+    def setUp(self):
+        import council
+        self.council = council
+        self.tmp = tempfile.TemporaryDirectory()
+        self.original_save = st.SAVE
+        st.SAVE = Path(self.tmp.name)/'save.json'
+        self.game = st.Game(None)
+        self.client = FakeMarketClient()
+        self.game.market_client = self.client
+        self.lawful = next(i for i in range(8) if st.PROFILES[i][0] not in ('Anarchy', 'Feudal'))
+        self.lawless = next(i for i in range(8) if st.PROFILES[i][0] in ('Anarchy', 'Feudal'))
+        st.VIEW = None
+
+    def tearDown(self):
+        st.SAVE = self.original_save
+        st.VIEW = None
+        st.STOCK = None
+        self.tmp.cleanup()
+
+    def safety(self, value):
+        st.VIEW = dict(tax=[0.]*8, rate=.05, safety=[value]*8, beacons=[], decrees=[], adjust=None, contraband=None, tally=None)
+
+    def test_customs_search_follows_police_funding(self):
+        self.assertEqual(self.game.customs_chance(self.lawful), .55)
+        self.safety(self.council.SAFEST)
+        self.assertAlmostEqual(self.game.customs_chance(self.lawful), .55)
+        self.safety(self.council.SAFEST/2)
+        self.assertAlmostEqual(self.game.customs_chance(self.lawful), .275)
+        self.assertEqual(self.game.customs_chance(self.lawless), 0.)
+
+    def test_seizure_reports_the_loss(self):
+        self.game.p.system = self.lawful
+        self.game.p.cargo[6] = 3
+        with patch('star_trader.random.random', return_value=0.):
+            self.assertIn('seized 3t', self.game.inspect_cargo())
+        self.assertEqual(self.client.reports, [(self.lawful, 6, 3, 0)])
+
+    def test_contraband_sale_reports_the_delivery(self):
+        self.game.p.system = self.lawless
+        st.STOCK = self.game.p.stock
+        self.game.p.cargo[6] = 1
+        self.game.p.cargo_paid[6] = 10
+        self.game.market_trade(6, False)
+        self.game.p.cargo[0] = 1
+        self.game.p.cargo_paid[0] = 10
+        self.game.market_trade(0, False)
+        self.assertEqual(self.client.reports, [(self.lawless, 6, 0, 1)])
+
+    def test_losing_the_ship_reports_contraband_aboard_as_lost(self):
+        self.game.p.system = self.lawful
+        self.game.p.cargo[7] = 2
+        self.game.p.cargo[0] = 5
+        self.game.recover_destroyed_pilot()
+        self.assertEqual(self.client.reports, [(self.lawful, 7, 2, 0)])
+
+
+class RecordingDisplay:
+    """Records the text a screen draws; everything else is a no-op."""
+    def __init__(self): self.texts = []
+    def text(self, x, y, value, *args, **kwargs): self.texts.append(str(value))
+    def __getattr__(self, name): return lambda *args, **kwargs: None
+
+
+class BeaconTests(unittest.TestCase):
+    """Release 1: hyperspace beacons make jumps to and from a world cheaper, and show on the Nav map."""
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.original_save = st.SAVE
+        st.SAVE = Path(self.tmp.name)/'save.json'
+        self.game = st.Game(None)
+        self.game.p.system, self.game.p.position, self.game.p.deep_space = 5, st.coordinates(5), False
+
+    def tearDown(self):
+        st.SAVE = self.original_save
+        st.VIEW = None
+        self.tmp.cleanup()
+
+    def beacons(self, *worlds):
+        st.VIEW = dict(tax=[0.]*8, rate=.05, safety=[0.]*8, beacons=list(worlds), decrees=[], adjust=None, contraband=None, tally=None)
+
+    def waypoint(self, system): return dict(name=st.SYSTEMS[system][0], position=st.coordinates(system), system=system)
+
+    def test_beacon_makes_the_jump_cheaper(self):
+        plain = st.hyperspace_cost(st.galactic_distance(st.coordinates(5), st.coordinates(0)))
+        self.assertAlmostEqual(self.game.jump_fuel_to(self.waypoint(0)), plain)
+        self.beacons(0)
+        self.assertAlmostEqual(self.game.jump_fuel_to(self.waypoint(0)), plain*.9)
+        self.beacons(5)   # leaving a beaconed world is cheaper too
+        self.assertAlmostEqual(self.game.jump_fuel_to(self.waypoint(0)), plain*.9)
+
+    def test_beacon_brings_a_world_in_range(self):
+        far = [j for j in range(8) if j != 5 and j not in self.game.systems_in_range(st.FUEL_CAPACITY)]
+        self.assertTrue(far)
+        self.beacons(5)
+        self.assertTrue(set(far) & set(self.game.systems_in_range(st.FUEL_CAPACITY)))
+
+    def test_nav_map_marks_beacons(self):
+        self.beacons(5)
+        self.game.d = RecordingDisplay()
+        self.game.draw_map()
+        self.assertTrue(any(st.SYSTEMS[5][0] in t and 'beacon' in t for t in self.game.d.texts))
+        self.assertFalse(any(st.SYSTEMS[0][0] in t and 'beacon' in t for t in self.game.d.texts))
+
+
+class CouncilNewsTests(unittest.TestCase):
+    """Release 1: station tax and Council decrees on screen, and decrees announced as news."""
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.original_save = st.SAVE
+        st.SAVE = Path(self.tmp.name)/'save.json'
+        self.game = st.Game(None)
+        self.lawful = next(i for i in range(8) if st.PROFILES[i][0] not in ('Anarchy', 'Feudal'))
+        self.lawless = next(i for i in range(8) if st.PROFILES[i][0] in ('Anarchy', 'Feudal'))
+        self.game.p.system = self.lawful
+        tax = [.03]*8
+        tax[self.lawless] = 0.
+        self.decrees = [dict(id='relief-5-1', at=1., kind='relief', system=5, text='Relief convoy sent to Velmora')]
+        st.VIEW = dict(tax=tax, rate=.05, safety=[0.]*8, beacons=[], decrees=self.decrees, adjust=None, contraband=None, tally=None)
+        quiet = patch.object(self.game, 'station_events', return_value=[])   # no demand events in these tests
+        quiet.start()
+        self.addCleanup(quiet.stop)
+
+    def tearDown(self):
+        st.SAVE = self.original_save
+        st.VIEW = None
+        st.STOCK = None
+        self.tmp.cleanup()
+
+    def drawn(self, mode):
+        self.game.d = RecordingDisplay()
+        self.game.mode = mode
+        if mode == 'planet_profile': self.game.draw_planet_profile()
+        else: self.game.draw()
+        return self.game.d.texts
+
+    def test_market_screen_shows_station_tax(self):
+        self.assertTrue(any('TAX 3.0%' in t for t in self.drawn('market')))
+        self.game.p.system = self.lawless
+        self.assertTrue(any('NO TAX' in t for t in self.drawn('market')))
+
+    def test_planet_profile_shows_tax_and_latest_decree(self):
+        self.game.profile_system = 5
+        texts = self.drawn('planet_profile')
+        self.assertTrue(any('Customs: regulated; trade tax 3.0%' == t for t in texts))
+        self.assertTrue(any('COUNCIL: Relief convoy sent to Velmora' in t for t in texts))
+
+    def test_new_decree_is_announced_once(self):
+        self.game.announce_events(1.8e9)   # decrees already made when you arrive aren't news
+        self.assertNotIn('COUNCIL', self.game.message or '')
+        self.decrees.append(dict(id='grant-1-2', at=2., kind='grant', system=1, text="Council funds Corvant's computers industry"))
+        self.game.announce_events(1.8e9)
+        self.assertEqual(self.game.message, "COUNCIL: Council funds Corvant's computers industry.")
+        self.game.message = ''
+        self.game.announce_events(1.8e9)
+        self.assertEqual(self.game.message, '')
+
+    def test_new_tally_is_announced_once_a_day(self):
+        st.VIEW['tally'] = dict(day=7, points=['Galactic output rose 2.1% on the day.'], sign_off='s')
+        with patch('star_trader.solar_flare', return_value=300.):
+            self.game.announce_events(1.8e9)
+            self.assertNotIn('TALLY', self.game.message or '')   # the subnet is down
+        self.game.announce_events(1.8e9)
+        self.assertEqual(self.game.message, 'STA TALLY: Galactic output rose 2.1% on the day.')
+        self.game.message = ''
+        self.game.announce_events(1.8e9)
+        self.assertEqual(self.game.message, '')
+
+    def test_flare_holds_decrees_about_other_worlds(self):
+        self.game.announce_events(1.8e9)
+        self.game.p.system, self.game.p.deep_space = 1, False
+        self.decrees.append(dict(id='grant-6-2', at=2., kind='grant', system=6, text='Elsewhere'))
+        with patch('star_trader.solar_flare', return_value=300.):
+            self.game.announce_events(1.8e9)
+            self.assertNotIn('Elsewhere', self.game.message or '')
+            self.decrees.append(dict(id='grant-1-3', at=3., kind='grant', system=1, text='Here'))
+            self.game.announce_events(1.8e9)
+            self.assertIn('Here', self.game.message)
+        self.game.announce_events(1.8e9)
+        self.assertIn('Elsewhere', self.game.message)

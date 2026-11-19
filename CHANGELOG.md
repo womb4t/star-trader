@@ -1,3 +1,12 @@
+# 0.9.0 — the living economy (draft, not released)
+
+The galaxy's economy now behaves like a real one, and it has a government.
+- **Worlds change what they make.** Industries grow where their goods are scarce and dear and shrink in a glut, so a world that can't earn a living turns to something else. Prices come from what each world actually makes and uses, and populations grow with the traffic they get, so the galaxy gets busier as more commanders join.
+- **Needs come in order.** People buy food and medicine first, then weapons for self-defence, clothes and their habits, then computers and machinery, and only then gold, silver and other luxuries. A poor world, or one where food is dear, cuts luxuries first.
+- **The Galactic Council governs.** Every 6 hours it reviews every world. It sets a **trade tax** on every purchase and sale (shown in each exchange's header; lawless worlds pay none, struggling worlds pay less) and a galactic **interest rate** that steers spending and building. It funds station upkeep and police, licenses new industries, sends relief convoys, pays development grants to the weakest worlds, and builds **hyperspace beacons**: jumps to and from a beaconed world take 10% less fuel, shown on the Nav map.
+- **Contraband follows demand and risk.** Smugglers don't avoid policed worlds; worlds pay them for the risk of bringing contraband in. Where customs and pirates take more cargo, contraband sells for more. Customs search harder where the Council funds more police, and less where it doesn't.
+- **The news, from The Relay** ("News at the speed of the next jump"). The start screen carries the Council's latest decree, the main point of *The STA Tally* (the economy's daily figures from the Galactic Assay Office) and the latest Act of the STA, starting with *The Living Economy Act*. In game, new decrees and each day's Tally appear as news; a solar flare holds news from other worlds.
+
 # 0.8.12 — screens numbered left to right
 
 From your suggestions:

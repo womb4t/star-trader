@@ -74,13 +74,39 @@ def council_state(market, now):
     state.setdefault('rate', E.BASE_INTEREST)
     state.setdefault('treasury', START_TREASURY)
     state.setdefault('tax', {str(i): TAX_START.get(p['government'], DEFAULT_TAX) for i, p in enumerate(market.profiles)})
-    state.setdefault('safety', {str(i): 0. for i in range(len(market.profiles))})
+    # Worlds start policed as their government funds it, so customs and patrols work before the first review.
+    state.setdefault('safety', {str(i): 0. if p['government'] in E.LAWLESS else SAFEST*SAFETY_TARGET.get(p['government'], .75)
+                                for i, p in enumerate(market.profiles)})
     state.setdefault('house', 0.)
     state.setdefault('house_share', HOUSE_SHARE)
     state.setdefault('spent', dict(upkeep=0., police=0., licences=0., relief=0., grants=0.))
     state.setdefault('fund', 0.)
     state.setdefault('base_tax', DEFAULT_TAX)
     return state
+
+
+CUSTOMS_SEARCH = .55  # customs find contraband at a fully policed lawful world's dock (star_trader.inspect_cargo)
+CUSTOMS_FINE = 25     # per tonne seized
+
+
+# Acts of the STA: the galaxy's parliament sets the rules the Council acts within. Each arrives with a release.
+ACTS = [dict(title='The Living Economy Act', lines=[
+    'Worlds now change what they make when they cannot earn a living.',
+    'The Galactic Council sets trade tax and the interest rate, within the STA\'s rules.',
+    'Contraband is priced by demand and by the risk of bringing it in.'])]
+
+
+def customs(market, system):
+    """Chance customs seize contraband at this world's dock: the game's 55%, scaled by how well its police are funded."""
+    if market.profiles[system]['government'] in E.LAWLESS: return 0.
+    if 'council' not in market.state: return CUSTOMS_SEARCH
+    return CUSTOMS_SEARCH*market.state['council'].get('safety', {}).get(str(system), 0.)/SAFEST
+
+
+def contraband_risk(market, system):
+    """The share of contraband a smuggler expects to lose bringing it here: customs, then pirates on the way in."""
+    seized = customs(market, system)
+    return seized+(1-seized)*(risk(market, system) if 'council' in market.state else 0.)
 
 
 def risk(market, system):
@@ -196,10 +222,9 @@ def review(market, now, neighbours, contraband=(), names=None, goods=None):
     beacons = state.setdefault('beacons', [])
     reach = getattr(market, 'reach', None)
     if reach and state['treasury']-BEACON_COST >= RESERVE_AIM*target:
-        import econ_sim
         for system in sorted(range(len(market.stock)), key=lambda i: (counts[i], -weak[str(i)])):
             if system in beacons or weak[str(system)] < BEACON_WEAK_REVIEWS: continue
-            if not set(econ_sim.in_range(system, beacons+[system]))-set(neighbours[system]): continue   # nothing new in reach
+            if not set(market.in_range(system, beacons+[system]))-set(neighbours[system]): continue   # nothing new in reach
             beacons.append(system); reach(beacons)
             state['treasury'] -= BEACON_COST; state['spent']['beacons'] = state['spent'].get('beacons', 0.)+BEACON_COST
             record(state, dict(kind='beacon', good=None), system, now, names, goods, made)
@@ -246,7 +271,7 @@ def new_line(market, system, station, neighbours, legal, best=1.15):
 
 def record(state, decree, system, now, names, goods, made):
     """Log a decree (with its news line) in the Council's record."""
-    decree.update(system=system, at=now)
+    decree.update(system=system, at=now, id=f"{decree['kind']}-{system}-{int(now)}")
     if names and goods:
         world, good = names[system], goods[decree['good']] if decree.get('good') is not None else ''
         decree['text'] = {'relief': f'Relief convoy sent to {world}',

@@ -58,7 +58,7 @@ MIN_STEP = 300.
 # Real-economy behaviour: industries grow where their goods are scarce and dear and shrink in a glut
 # (supply responds to price); people buy less of what is expensive (demand responds to price); and a
 # world's prices come from what it actually makes and uses, so a new industry changes its prices.
-ADAPTIVE = False
+ADAPTIVE = True
 ADAPT_RATE = .10/(24*HOUR)      # industry growth per second at the scarcest prices (10% a day)
 INDUSTRY_RANGE = (0., 2.5)      # capacity of one industry line, as a share of a typical factory
 ELASTICITY = {g: .1 for g in range(10)}   # how much consumption falls as price rises (basics barely)
@@ -286,7 +286,7 @@ class Economy:
                 low, high = GROWTH_RANGE
                 station['traffic'] = station.get('traffic', 0.)+(self.commanders(system, moment)-station.get('traffic', 0.))*(1-math.exp(-dt/TRAFFIC_TIME))
                 size = max(low, min(high, (1+PER_COMMANDER*station['traffic'])*(.8+.4*station['prosperity'])))
-                station['population'] *= math.exp(SETTLE*math.log(size/station['population'])*dt)
+                station['population'] *= (size/station['population'])**(1-math.exp(-SETTLE*dt))   # closes the gap, never past it
             else:
                 low, high = POPULATION_RANGE
                 station['population'] = max(low, min(high, station['population']+(station['prosperity']-.5)*2*POPULATION_DRIFT*dt))

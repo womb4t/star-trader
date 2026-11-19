@@ -21,7 +21,7 @@ import fcntl
 import shutil
 import subprocess
 import textwrap
-from market import Market, demand_factor
+from market import Market, demand_factor, quote_price
 import economy
 
 VERSION = '0.8.12'
@@ -148,11 +148,23 @@ def static_price(system, good):
 
 # Station stock the prices respond to: the game points this at the live market (shared online).
 STOCK = None
+# The Galactic Council's view (tax, rate, police, beacons, decrees, price adjustments, contraband premiums), from the
+# shared market's snapshot or the offline market. None (an older server) keeps today's prices.
+VIEW = None
+
+
+def view_from(snapshot):
+    """The Council's view in a market snapshot, or None when the market has no Council."""
+    if not isinstance(snapshot, dict) or not isinstance(snapshot.get('council'), dict): return None
+    prices = snapshot.get('prices') if isinstance(snapshot.get('prices'), dict) else {}
+    return dict(snapshot['council'], adjust=prices.get('adjust'), contraband=prices.get('contraband'), tally=snapshot.get('tally'))
 
 
 def price(system, good):
     """Scarce goods cost more and gluts sell cheap; see market.demand_factor."""
     factor = demand_factor(STOCK[system][good],NORMAL_STOCK[system][good]) if STOCK is not None else 1
+    if VIEW and VIEW.get('adjust') and good not in ILLEGAL:   # the living economy: priced from what the world makes and uses
+        return round(BASE[good]*quirk(system, good)*VIEW['adjust'][system][good]*factor)
     return round(static_price(system, good) * factor)
 
 
@@ -163,7 +175,11 @@ def distance(a, b):
 def quote(system, good, buy=True):
     """Player buy price includes a spread; selling immediately costs money."""
     base = price(system, good)
-    return base + max(1, math.ceil(base * 0.08)) if buy else max(1, base - math.ceil(base * 0.08))
+    tax = VIEW['tax'][system] if VIEW else 0.
+    if not buy and good in ILLEGAL and VIEW and VIEW.get('contraband'):
+        premium, loss = VIEW['contraband'][system][ILLEGAL.index(good)]
+        return quote_price(base, tax, False, premium, loss)
+    return quote_price(base, tax, buy)
 
 
 def initial_stock():
@@ -182,8 +198,41 @@ def trader_travel_time(source, dest):
 ECONOMY_PROFILES = [dict(economy=SYSTEMS[i][1], government=PROFILES[i][0], population=PROFILES[i][1]) for i in range(8)]
 
 
-def new_market(state=None):
-    return Market(NORMAL_STOCK, static_price, trader_travel_time, state, profiles=ECONOMY_PROFILES)
+def quirk(system, good):
+    """A station's own +/-10% on a good's base price (the last step of static_price)."""
+    return random.Random(system * 97 + good * 13).uniform(0.9, 1.1)
+
+
+def jump_fuel(position, dest, beacons=(), source=None):
+    """Hyperspace fuel from `position` to system `dest`. A beacon at the destination, or at the system the jump
+    starts from (`source`, None in deep space), saves council.BEACON_SAVING."""
+    import council
+    cost = hyperspace_cost(galactic_distance(position, coordinates(dest)))
+    return cost*(1-council.BEACON_SAVING) if dest in beacons or (source is not None and source in beacons) else cost
+
+
+def systems_in_range(system, beacons=()):
+    """Worlds a full tank reaches from `system`, with any hyperspace beacons."""
+    here = coordinates(system)
+    return [j for j in range(len(SYSTEMS)) if j != system and jump_fuel(here, j, beacons, source=system) <= FUEL_CAPACITY]
+
+
+def new_market(state=None, seed=None):
+    """The shared market with the living economy and the Galactic Council (economy.py, council.py)."""
+    import council
+    market = Market(NORMAL_STOCK, static_price, trader_travel_time, state, seed=seed, profiles=ECONOMY_PROFILES)
+    market.in_range = systems_in_range
+    market.names = [s[0] for s in SYSTEMS]
+    market.reach = lambda beacons: market.range.update({i: systems_in_range(i, beacons) for i in range(len(SYSTEMS))})
+    market.range = {}
+    market.reach(market.state.get('council', {}).get('beacons', []))
+    if economy.ADAPTIVE:
+        market.adaptive_base = lambda system, good: BASE[good]*quirk(system, good)
+        market.contraband = ILLEGAL
+        market.contraband_risk = lambda system: council.contraband_risk(market, system)
+        names = [s[0] for s in SYSTEMS]
+        market.council = lambda m, now: council.review(m, now, m.range, ILLEGAL, names, GOODS)
+    return market
 
 
 def fuel_price(system):
@@ -700,6 +749,8 @@ class UpdateNotice:
 
 class Game:
     def __init__(self, display):
+        global VIEW
+        VIEW = None   # until this session's market reports the Council's view
         self.alert = None
         self._save_elapsed = 0.
         self._restoring = False
@@ -731,6 +782,8 @@ class Game:
         self.market_client = None
         self.shipments,self.market_offset,self.shown_shipments = [],0.,set()
         self.economy_reports,self.market_at,self.announced_events = None,0.,set()
+        self.announced_decrees = None   # decree ids already reported (seeded with those made before you arrived)
+        self.announced_tally = None     # the STA Tally day last reported
         self.station = [0., 0., 1500.]
         self.roll = self.station_angle = 0.
         self.autodock = False
@@ -1137,6 +1190,7 @@ class Game:
         self.save()
 
     def recover_destroyed_pilot(self):
+        self.report_contraband(lost=True)
         fee = min(100,self.p.bank_balance)
         self.p.bank_balance -= fee
         self.p.credits = 0
@@ -1175,7 +1229,7 @@ class Game:
         warnings = []
         w = self.p.waypoint
         distance = galactic_distance(self.p.position,w['position']) if w else 0
-        required = hyperspace_cost(distance)+(LOCAL_TRIP_METRES*THRUST_FUEL_PER_METRE*self.p.mass_factor if distance > .001 else 0) if w else 0
+        required = self.jump_fuel_to(w)+(LOCAL_TRIP_METRES*THRUST_FUEL_PER_METRE*self.p.mass_factor if distance > .001 else 0) if w else 0
         if self.p.fuel < 1 or required > self.p.fuel:
             warnings.append(f'Insufficient fuel reserve: aboard {self.p.fuel:.2f}; planned trip {required:.2f}.')
         if w:
@@ -1354,6 +1408,7 @@ class Game:
         system,now = self.p.system,time.time()
         police = self.p.station_police_defeated[system]
         days = police+int(self.station_hostilities[system])
+        self.report_contraband(lost=True)
         seized = sum(self.p.cargo[i] for i in ILLEGAL)
         for i in ILLEGAL: self.p.cargo[i] = 0
         fine = self.p.fine
@@ -1488,9 +1543,20 @@ class Game:
         self.message = f'SURRENDER VOID: {reason} Police response resumes!'
         self.alert = dict(text=self.message,remaining=5.,elapsed=0.)
 
+    def beacons(self):
+        return VIEW['beacons'] if VIEW and VIEW.get('beacons') else []
+
+    def jump_fuel_to(self, waypoint):
+        """Hyperspace fuel to a waypoint: a beacon at the destination world, or at the world you're leaving, saves 10%."""
+        import council
+        source = None if self.p.deep_space else self.p.system
+        if waypoint.get('system') is not None: return jump_fuel(self.p.position,waypoint['system'],self.beacons(),source)
+        cost = hyperspace_cost(galactic_distance(self.p.position,waypoint['position']))
+        return cost*(1-council.BEACON_SAVING) if source in self.beacons() else cost
+
     def systems_in_range(self, fuel=None):
         fuel = self.p.fuel if fuel is None else fuel
-        return [j for j in range(len(SYSTEMS)) if j != self.p.system and hyperspace_cost(galactic_distance(self.p.position,coordinates(j))) <= fuel]
+        return [j for j in range(len(SYSTEMS)) if j != self.p.system and self.jump_fuel_to(dict(position=coordinates(j),system=j)) <= fuel]
 
     def best_sale_in_range(self, good):
         """Highest sale price for a commodity among systems a full tank reaches.
@@ -1694,11 +1760,26 @@ class Game:
                  '', 'BACKSPACE returns. Distress 6 is available from the cockpit.']
         for i,line in enumerate(lines): d.text(35,85+i*34,line,GOLD if i==0 else GREEN)
 
+    def customs_chance(self, system):
+        """Customs search: 55% at a fully policed lawful world, less where the Council funds fewer police; none at lawless ones."""
+        import council
+        if PROFILES[system][0] in ('Anarchy','Feudal'): return 0.
+        if not VIEW or not VIEW.get('safety'): return council.CUSTOMS_SEARCH
+        return council.CUSTOMS_SEARCH*VIEW['safety'][system]/council.SAFEST
+
+    def report_contraband(self, lost=0, delivered=None):
+        """Tell the shared market about contraband lost on the way here (all aboard) or delivered (good, tonnes)."""
+        if not self.market_client: return
+        if delivered: self.market_client.report_smuggling(self.p.system,delivered[0],delivered=delivered[1]); return
+        for good in ILLEGAL:
+            if self.p.cargo[good]: self.market_client.report_smuggling(self.p.system,good,lost=self.p.cargo[good])
+
     def inspect_cargo(self):
         self.customs_checked = True
         if PROFILES[self.p.system][0] in ('Anarchy','Feudal'): return ''
         count = sum(self.p.cargo[i] for i in ILLEGAL)
-        if count and random.random() < .55:
+        if count and random.random() < self.customs_chance(self.p.system):
+            self.report_contraband(lost=True)
             for i in ILLEGAL: self.p.cargo[i] = 0
             self.p.fine += count*25
             return f' Customs seized {count}t contraband; fine {count*25} cr.'
@@ -3042,7 +3123,7 @@ class Game:
         w = self.p.waypoint
         if not w: self.message = 'Lock a course first (G, ENTER).'; return
         dist = galactic_distance(self.p.position,w['position'])
-        cost = hyperspace_cost(dist)
+        cost = self.jump_fuel_to(w)
         allowed = self.mode == 'flight' or (self.mode == 'map' and self.map_return == 'flight')
         if not allowed:
             self.message = 'Launch, or cancel cruise, before charging hyperspace.'
@@ -3164,7 +3245,7 @@ class Game:
             d.rect(x-4,y-4,8,8,GOLD if i == self.target and not self.cursor_mode else GREEN)
             presence = getattr(self,'presence',None)
             count = sum(p['system'] == i and p['mode'] not in ('transit','deep-space') for p in presence.snapshot['players']) if presence and not solar_flare() else 0
-            d.text(x+9,y-15,name+(f' [{count}]' if count else ''))
+            d.text(x+9,y-15,name+(f' [{count}]' if count else '')+(' beacon' if i in self.beacons() else ''))
         x,y = plot(p.position)
         d.rect(x-8,y-8,16,16,(140,185,255))
         d.text(x+12,y+7,'YOU',(140,185,255))
@@ -3178,7 +3259,7 @@ class Game:
         dist = galactic_distance(p.position,w['position'])
         sec = dist*CRUISE_SECONDS_PER_LY*p.mass_factor
         info = [w['name'],f'X {w["position"][0]:.2f}  Y {w["position"][1]:.2f}',
-                f'Distance {dist:.2f} LY',f'Jump fuel {hyperspace_cost(dist):.2f}',
+                f'Distance {dist:.2f} LY',f'Jump fuel {self.jump_fuel_to(w):.2f}'+(' (beacon -10%)' if self.jump_fuel_to(w) < hyperspace_cost(dist)-1e-9 else ''),
                 f'Cruise fuel {dist*.25*p.mass_factor:.2f}',f'Cruise ETA {int(sec//60)}m {int(sec%60)}s',f'Aboard fuel {p.fuel:.2f}/7']
         if w['system'] is not None:
             i = w['system']; govt,pop,size = PROFILES[i]
@@ -3218,7 +3299,8 @@ class Game:
                  f'Population: {self.economy_report(i)["population"] if self.economy_report(i) else population:.1f} billion',f'Diameter: {size:,} km',
                  f'Technology level: {TECH[i]}',
                  f'Police reserve: {self.p.station_police_remaining[i]}/{STATION_POLICE_CAPACITY}',
-                 'Customs: minimal' if government in ('Anarchy','Feudal') else 'Customs: regulated; contraband can be seized',
+                ('Customs: minimal'+('; no trade tax' if VIEW else '')) if government in ('Anarchy','Feudal') else
+                (f'Customs: regulated; trade tax {VIEW["tax"][i]*100:.1f}%' if VIEW else 'Customs: regulated; contraband can be seized'),
                  ('Docking: allowed' if self.station_allows(i) else 'Docking: refused')+(' / '+self.hostility_label(i) if self.station_hostilities[i] else '')]
         for row,line in enumerate(facts): d.text(35,140+row*31,line)
         d.text(35,410,'STATION FACILITIES',GOLD)
@@ -3243,6 +3325,8 @@ class Game:
                 lines.append(f'Prosperity: {economy.prosperity_label(report["prosperity"])}, {report["ships"]:.0f} ships trading')
                 if report['wanted']: lines.append('Wanted: '+', '.join(GOODS[g] for g in report['wanted']))
                 if report['surplus']: lines.append('Surplus: '+', '.join(GOODS[g] for g in report['surplus']))
+            decree = self.latest_decree(i)
+            if decree: lines.insert(1,'COUNCIL: '+decree['text'])
             for event in self.station_events():
                 if event['system'] == i: lines.insert(0,f'{event["title"].upper()}: {event["effect"]}')
         rows = [(part,WANTED_COLOR if line[:1].isupper() and line.split(':')[0].isupper() else GREEN) for line in lines for part in textwrap.wrap(line,42)]
@@ -3796,12 +3880,14 @@ class Game:
         stock = self.p.stock[self.p.system]
         before = stock[good]
         result = self.p.trade(good,buy,**options)
-        if stock[good] != before and self.market_client: self.market_client.queue_trade(self.p.system,good,stock[good]-before)
+        if stock[good] != before and self.market_client:
+            self.market_client.queue_trade(self.p.system,good,stock[good]-before)
+            if good in ILLEGAL and not buy: self.report_contraband(delivered=(good,stock[good]-before))
         return result
 
     def update_market(self):
         """Advance bot trading and station economies, keep prices tied to station stock, and show traders at this station."""
-        global STOCK
+        global STOCK, VIEW
         STOCK = self.p.stock
         now = time.time()
         known = {s['id']:s for s in self.shipments}
@@ -3813,6 +3899,7 @@ class Game:
                 for row,fresh in zip(self.p.stock,snap['stock']): row[:] = fresh
                 self.shipments,self.market_offset = snap['shipments'],snap['now']-now
                 if type(snap.get('economy')) is list and len(snap['economy']) == 8: self.economy_reports = snap['economy']
+                VIEW = view_from(snap)
         elif now-self.market_at >= 1 or self.market is None or self.market.state['stock'] is not self.p.stock:
             # Offline the game runs its own copy of the market, once a second.
             if self.market is None or self.market.state['stock'] is not self.p.stock:
@@ -3821,7 +3908,9 @@ class Game:
             self.market.advance(now)
             self.market_at = now
             self.shipments,self.market_offset = list(self.market.state['shipments']),0.
-            self.economy_reports = self.market.snapshot(now)['economy']
+            snap = self.market.snapshot(now)
+            self.economy_reports = snap['economy']
+            VIEW = view_from(snap)
         self.announce_events(now)
         if self.mode in ('market','vms') and not self.p.deep_space:
             here,current = self.p.system,{s['id'] for s in self.shipments}
@@ -3836,10 +3925,35 @@ class Game:
         """Demand events running now (famine, plague, booms...). The same for every commander."""
         return economy.events_at(time.time() if now is None else now,ECONOMY_PROFILES)
 
+    def tax_label(self, system):
+        """The station's trade tax for the exchange header (nothing from a market without a Council)."""
+        if not VIEW: return ''
+        return ' / NO TAX' if PROFILES[system][0] in ('Anarchy','Feudal') or not VIEW['tax'][system] else f' / TAX {VIEW["tax"][system]*100:.1f}%'
+
+    def latest_decree(self, system):
+        return next((d for d in reversed(VIEW['decrees']) if d['system'] == system),None) if VIEW and VIEW.get('decrees') else None
+
+    def announce_decrees(self, flare):
+        """Council decrees as news, once each. Those made before you arrived aren't news; a solar flare holds other worlds'."""
+        decrees = VIEW.get('decrees') if VIEW else None
+        if not decrees: return
+        if self.announced_decrees is None: self.announced_decrees = {d['id'] for d in decrees}; return
+        for decree in decrees:
+            if decree['id'] in self.announced_decrees: continue
+            local = not self.p.deep_space and decree['system'] == self.p.system
+            if flare and not local: continue
+            self.announced_decrees.add(decree['id'])
+            self.message = f'COUNCIL: {decree["text"]}.'
+
     def announce_events(self, now):
         """Galactic news: a new event is reported once. A solar flare blocks news from other systems."""
         if self.alert: return  # an urgent warning keeps the screen; the news waits
         flare = solar_flare(now)
+        self.announce_decrees(flare)
+        tally = VIEW.get('tally') if VIEW else None
+        if tally and tally.get('points') and tally['day'] != self.announced_tally and not flare:   # over the subnet
+            self.announced_tally = tally['day']
+            self.message = 'STA TALLY: '+tally['points'][0]
         for event in self.station_events(now):
             if event['id'] in self.announced_events: continue
             local = not self.p.deep_space and event['system'] == self.p.system
@@ -4382,7 +4496,7 @@ class Game:
             for i,line in enumerate(lines): d.text(30,80+i*31,line,GOLD if i==2 else GREEN)
         elif self.mode in ('market','outfit'):
             if self.mode == 'market':
-                d.text(35,85,'ORBITAL EXCHANGE / '+SYSTEMS[p.system][1].upper())
+                d.text(35,85,'ORBITAL EXCHANGE / '+SYSTEMS[p.system][1].upper()+self.tax_label(p.system))
                 for x,label in [(35,'COMMODITY'),(270,'BUY'),(340,'SELL'),(415,'STOCK'),(495,'HOLD'),(565,'BEST IN RANGE')]:
                     d.text(x,130,label)
                 flare = solar_flare()

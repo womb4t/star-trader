@@ -1,4 +1,5 @@
 """Shared station market: supply-and-demand prices, bot traders, server sync and visible traffic."""
+import json
 import tempfile
 import threading
 import time
@@ -99,6 +100,33 @@ class SharedMarketServerTests(unittest.TestCase):
         with self.assertRaises(RuntimeError): kenton.request(dict(trades=[[0,0,500]]),endpoint='/v1/market')
         with self.assertRaises(RuntimeError): kenton.request(dict(trades='lots'),endpoint='/v1/market')
 
+    def test_market_request_rejects_bad_smuggling(self):
+        kenton = self.remote('Kenton')
+        with self.assertRaises(RuntimeError): kenton.request(dict(smuggling=[[1,0,5,0]]),endpoint='/v1/market')
+        with self.assertRaises(RuntimeError): kenton.request(dict(smuggling='lots'),endpoint='/v1/market')
+
+    def test_market_client_reports_smuggling(self):
+        client = MarketClient(self.remote('Kenton'),interval=.05)
+        self.addCleanup(client.close)
+        client.report_smuggling(1,6,lost=4)
+        for _ in range(100):
+            if client.take() and not client.smuggling: break
+            time.sleep(.05)
+        self.assertEqual(client.smuggling,[])
+        self.assertEqual(json.loads(self.store_market())['smuggling']['1']['6'][0],4)   # 4 t lost, on the server's books
+
+    def store_market(self):
+        with self.store.connect() as db: return db.execute("SELECT value FROM settings WHERE key='market'").fetchone()[0]
+
+    def test_news_needs_no_token_and_has_the_act(self):
+        import urllib.request
+        self.store.market_exchange(trades=[[1,0,-1]])
+        with urllib.request.urlopen(self.url+'/v1/news',timeout=5) as reply: news = json.loads(reply.read())
+        self.assertEqual(news['protocol'],1)
+        self.assertEqual(news['acts'][0]['title'],'The Living Economy Act')
+        self.assertIsInstance(news['decrees'],list)
+        self.assertIn('tally',news)
+
     def test_market_client_syncs_trades_into_the_game(self):
         client = MarketClient(self.remote('Kenton'),interval=.05)
         self.addCleanup(client.close)
@@ -184,3 +212,120 @@ class TrafficTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class LiveEconomyTests(unittest.TestCase):
+    """Release 1: the live market runs the adaptive economy and the Galactic Council."""
+    START = 1.8e9
+
+    def setUp(self):
+        import economy
+        self.adaptive = economy.ADAPTIVE
+
+    def tearDown(self):
+        import economy
+        economy.ADAPTIVE = self.adaptive
+
+    def reviewed(self, market):
+        import council
+        market.advance(self.START)
+        market.advance(self.START+council.WARM_UP+council.REVIEW_EVERY+60)
+        return market
+
+    def test_new_market_runs_the_council(self):
+        m = self.reviewed(st.new_market(seed='t'))
+        self.assertIn('council', m.state)
+        self.assertEqual(len(m.state['council']['tax']), 8)
+
+    def test_legal_prices_follow_make_and_use(self):
+        m = self.reviewed(st.new_market(seed='t'))
+        i, g = 1, 0
+        expected = st.BASE[g]*st.quirk(i, g)*m.economy.price_adjust(i, g)*demand_factor(m.stock[i][g], m.normal[i][g]*m.depth(i))
+        self.assertAlmostEqual(m.price(i, g), expected)
+
+    def test_old_saved_market_still_loads(self):
+        import json, economy
+        economy.ADAPTIVE = False
+        old = st.new_market(dict(stock=[row[:] for row in st.NORMAL_STOCK], shipments=[], next_trade=None, seq=0, seed='old'))
+        old.advance(self.START)
+        saved = json.loads(json.dumps(old.state))
+        economy.ADAPTIVE = True
+        m = self.reviewed(st.new_market(saved))
+        self.assertEqual([len(r) for r in m.stock], [len(r) for r in st.NORMAL_STOCK])
+        self.assertIn('council', m.state)
+
+    def test_beacon_cuts_jump_fuel_both_ways(self):
+        here, there = st.coordinates(5), st.coordinates(0)
+        self.assertAlmostEqual(st.jump_fuel(here, 0, [5], source=5), st.jump_fuel(here, 0, [], source=5)*.9)
+        self.assertAlmostEqual(st.jump_fuel(there, 5, [5], source=0), st.jump_fuel(there, 5, [], source=0)*.9)
+        deep = [4.0, 4.0]   # in deep space only the destination's beacon counts
+        self.assertEqual(st.jump_fuel(deep, 5, [0]), st.jump_fuel(deep, 5, []))
+        self.assertAlmostEqual(st.jump_fuel(deep, 5, [5]), st.jump_fuel(deep, 5, [])*.9)
+
+    def test_beacon_brings_neighbours_in_range(self):
+        far = [j for j in range(8) if j != 5 and j not in st.systems_in_range(5)]
+        self.assertTrue(any(j in st.systems_in_range(5, [5]) for j in far))
+
+
+class CouncilViewTests(unittest.TestCase):
+    """Release 1: player trades pay tax, smuggling reports feed the risk premium, the snapshot carries the Council's view."""
+    START = 1.8e9
+
+    def market(self):
+        import council
+        m = st.new_market(seed='view')
+        m.advance(self.START)
+        m.advance(self.START+council.WARM_UP+council.REVIEW_EVERY+60)
+        self.now = self.START+council.WARM_UP+council.REVIEW_EVERY+60
+        return m
+
+    def test_player_trades_pay_tax(self):
+        import council
+        m = self.market()
+        m.state['council']['tax']['1'] = .05
+        before, price = m.state['council']['treasury'], m.price(1, 0)
+        m.apply([[1, 0, -2]], now=self.now)
+        self.assertAlmostEqual(m.state['council']['treasury']-before, 2*price*.05*(1-council.HOUSE_SHARE))
+
+    def test_smuggling_reports_move_the_premium(self):
+        m = self.market()
+        before = m.risk_premium(1, 6)
+        m.apply(smuggling=[[1, 6, 10, 0]], now=self.now)
+        self.assertGreater(m.risk_premium(1, 6), before)
+
+    def test_bad_smuggling_reports_are_refused(self):
+        m = self.market()
+        state = json.dumps(m.state, sort_keys=True)
+        for bad in ([[1, 0, 5, 0]], [[9, 6, 5, 0]], [[1, 6, -1, 0]], [[1, 6, 51, 0]], [['1', 6, 1, 0]], [[1, 6, 1]], [[1, 6, 1, 0]]*11, 'lots'):
+            with self.assertRaises(ValueError, msg=bad): m.apply(smuggling=bad, now=self.now)
+        self.assertEqual(json.dumps(m.state, sort_keys=True), state)
+
+    def test_snapshot_keeps_old_keys_and_adds_the_councils_view(self):
+        m = self.market()
+        m.state['council']['decrees'].append(dict(kind='relief', system=5, at=self.now, text='Relief convoy sent to Velmora', id='relief-5-1'))
+        snap = m.snapshot(self.now)
+        self.assertEqual(snap['protocol'], 1)
+        self.assertEqual(len(snap['stock']), 8)
+        self.assertIsInstance(snap['shipments'], list)
+        self.assertEqual(len(snap['economy']), 8)
+        council = snap['council']
+        self.assertEqual(len(council['tax']), 8)
+        self.assertEqual(len(council['safety']), 8)
+        self.assertIsInstance(council['rate'], float)
+        self.assertIsInstance(council['beacons'], list)
+        self.assertEqual(council['decrees'][-1], dict(id='relief-5-1', at=self.now, kind='relief', system=5, text='Relief convoy sent to Velmora'))
+        self.assertLessEqual(len(council['decrees']), 10)
+        prices = snap['prices']
+        self.assertEqual([len(r) for r in prices['adjust']], [10]*8)
+        self.assertEqual([len(r) for r in prices['contraband']], [len(st.ILLEGAL)]*8)
+        premium, loss = prices['contraband'][1][0]
+        self.assertAlmostEqual(premium, m.risk_premium(1, st.ILLEGAL[0]))
+        self.assertAlmostEqual(loss, m.loss_share(1, st.ILLEGAL[0]))
+        json.dumps(snap)   # it must travel as JSON
+
+    def test_decrees_get_ids(self):
+        import council
+        m = self.market()
+        made = []
+        council.record(m.state['council'], dict(kind='relief', good=None), 5, self.now, ['a']*8, st.GOODS, made)
+        self.assertEqual(made[0]['id'], f'relief-5-{int(self.now)}')
