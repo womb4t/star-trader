@@ -24,6 +24,17 @@ BASIC = {FOOD: 1.0, MEDICINE: .5}
 COMFORT = {TEXTILES: .7, COMPUTERS: .5, MACHINERY: .3}
 LUXURY = {NARCOTICS: .4, GOLD: .25, SILVER: .3, ARMS: .2}
 
+# Adaptive economy: households spend a budget up Maslow's hierarchy of needs, so when money is short or
+# food is dear, the higher needs go first. A share of every population wants narcotics and weapons (the
+# demand smuggling exists to meet), but not before it has eaten. Wants per head, lowest tier first.
+NEEDS = (('physiological', {FOOD: 1.0, MEDICINE: .5}),
+         ('safety', {ARMS: .12}),                          # self-defence; lawless worlds want more (LAWLESS_ARMS)
+         ('belonging', {TEXTILES: .7, NARCOTICS: .25}),     # clothes, and the habit
+         ('esteem', {COMPUTERS: .5, MACHINERY: .3}),
+         ('luxury', {GOLD: .25, SILVER: .3, NARCOTICS: .15, ARMS: .08}))
+LAWLESS_ARMS = .3
+MEANS = (1.6, 3.2)   # a household budget per head (in wants) of 1.6 + 3.2 x prosperity: a thriving world affords it all
+
 # Factories by economy: output per good, and the input they need to run (X4-style workforce
 # boosts output; missing inputs stall it).
 FACTORIES = {
@@ -42,6 +53,53 @@ POPULATION_RANGE = (.8, 1.25)
 VISIT_WINDOW = 30*60        # a ship counts towards traffic for this long after it trades or docks
 MAX_STEPS = 24
 MIN_STEP = 300.
+
+# ---------- adaptive economy (prototype, off unless ADAPTIVE) ----------
+# Real-economy behaviour: industries grow where their goods are scarce and dear and shrink in a glut
+# (supply responds to price); people buy less of what is expensive (demand responds to price); and a
+# world's prices come from what it actually makes and uses, so a new industry changes its prices.
+ADAPTIVE = False
+ADAPT_RATE = .10/(24*HOUR)      # industry growth per second at the scarcest prices (10% a day)
+INDUSTRY_RANGE = (0., 2.5)      # capacity of one industry line, as a share of a typical factory
+ELASTICITY = {g: .1 for g in range(10)}   # how much consumption falls as price rises (basics barely)
+ELASTICITY.update({1: .5, 3: .4, 5: .6, 6: .3, 7: .3, 8: .8, 9: .8})
+NATIVE = {e: set(f['output']) for e, f in FACTORIES.items()}
+OFF_SPECIALITY = .6             # a licensed line outside the economy's speciality starts this efficient...
+LEARNED = .9                    # ...and learns towards this while it runs (learning by doing)
+LEARN_RATE = .05/(24*HOUR)      # efficiency gained per second of running (5 points a day)
+TRAFFIC_TIME = 6*HOUR           # how long a station's remembered traffic takes to follow the present
+PER_COMMANDER = .55             # each commander regularly at a station supports this much more population
+SETTLE = 1/(2*24*HOUR)          # population closes on its supportable size over about two days
+GROWTH = .04/(24*HOUR)         # population change per second for a busy, thriving world (adaptive)
+GROWTH_RANGE = (.8, 8.)         # population as a share of the founding population (adaptive)
+BASE_INTEREST = .05             # the galactic rate at which industries invest at the normal pace
+SPENDING_GAIN, SPENDING_RANGE = .4, (.8, 1.3)   # demand: +20% at a 2.5% rate, -20% at 7.5%
+PRICE_POWER = .45                # base price = BASE * (use / make) ** PRICE_POWER, within PRICE_RANGE
+PRICE_RANGE = (.65, 1.45)
+
+
+def productivity(economy, good, station=None):
+    """How efficient a line is: native specialities 1.0; licensed lines start lower and learn."""
+    if good in NATIVE[economy]: return 1.
+    if station is not None and 'skill' in station: return station['skill'][good]
+    return OFF_SPECIALITY
+
+
+def investment(rate):
+    """Cheap money builds factories faster: 2x at 2%, 1x at 5%, a quarter at 11%."""
+    return 2**((BASE_INTEREST-rate)/.03)
+
+
+def spending(rate):
+    """Cheap money lifts what people buy (credit is easy), dear money damps it: 1x at the neutral rate."""
+    return max(SPENDING_RANGE[0], min(SPENDING_RANGE[1], 1+SPENDING_GAIN*(BASE_INTEREST-rate)/BASE_INTEREST))
+
+
+def scarcity(level, normal):
+    """The market's supply-and-demand factor (same curve as market.demand_factor)."""
+    ratio = level/max(1, normal)
+    return max(.75, min(1.5, 1+.5*(1-ratio)))
+
 
 # Demand events: a seeded schedule, the same for every commander without storing anything.
 EVENT_WINDOW = 3*HOUR
@@ -108,7 +166,18 @@ class Economy:
         stations = self.state['stations']
         key = str(system)
         if key not in stations: stations[key] = dict(population=1., prosperity=.6, last=now)
-        return stations[key]
+        station = stations[key]
+        if ADAPTIVE and 'industry' not in station:
+            station['industry'] = [0.]*GOODS
+            for good, out in FACTORIES[self.profiles[system]['economy']]['output'].items(): station['industry'][good] = out
+        return station
+
+    def industry(self, system, station):
+        """Output capacity per good: the economy type's factories, or what the station has grown into."""
+        if ADAPTIVE: return station['industry']
+        out = [0.]*GOODS
+        for good, n in FACTORIES[self.profiles[system]['economy']]['output'].items(): out[good] = n
+        return out
 
     # ---------- traffic ----------
     def visit(self, system, ship, now):
@@ -123,6 +192,11 @@ class Economy:
         for name in [n for n, t in visitors.items() if now-t > VISIT_WINDOW]: del visitors[name]
         return len(visitors)+.5*in_flight
 
+    def commanders(self, system, now):
+        """Player ships that used this station lately (bot traders don't count)."""
+        visitors = self.state['visitors'].get(str(system), {})
+        return sum(1 for n, t in visitors.items() if not n.startswith('bot:') and now-t <= VISIT_WINDOW)
+
     # ---------- needs and production ----------
     def flows(self, system, levels, station, events):
         """Consumption and production of every good, as shares of a typical world's flow."""
@@ -132,15 +206,25 @@ class Economy:
         prosperity = station['prosperity']
         consume = [0.]*GOODS
         produce = [0.]*GOODS
-        for good, need in BASIC.items(): consume[good] += people*need
-        for good, need in COMFORT.items(): consume[good] += people*need*(.4+.6*prosperity)
-        for good, need in LUXURY.items(): consume[good] += people*need*prosperity
-        if profile['government'] in LAWLESS: consume[ARMS] += .3*people
+        if ADAPTIVE:
+            for good, share in self.wants(profile, levels, normal, prosperity).items(): consume[good] += people*share
+        else:
+            for good, need in BASIC.items(): consume[good] += people*need
+            for good, need in COMFORT.items(): consume[good] += people*need*(.4+.6*prosperity)
+            for good, need in LUXURY.items(): consume[good] += people*need*prosperity
+            if profile['government'] in LAWLESS: consume[ARMS] += .3*people
         factory = FACTORIES[profile['economy']]
         supplied = min([1.]+[min(1., .3+levels[g]/(.5*max(1, normal[g]))) for g in factory['inputs']])
-        workforce = .6+.6*prosperity
-        for good, out in factory['output'].items(): produce[good] += out*workforce*supplied
-        for good, use in factory['inputs'].items(): consume[good] += use*workforce
+        workforce = (.6+.6*prosperity)*(station['population'] if ADAPTIVE else 1.)   # more people, more output
+        industry = self.industry(system, station)
+        base_total = sum(factory['output'].values())
+        scale = sum(industry)/base_total if base_total else 1.   # a bigger industrial base needs more inputs
+        for good, out in enumerate(industry):
+            produce[good] += out*workforce*supplied*(productivity(profile['economy'], good, station) if ADAPTIVE else 1.)
+        for good, use in factory['inputs'].items(): consume[good] += use*workforce*scale
+        if ADAPTIVE:   # dear goods are bought less
+            spend = spending(self.state.get('council', {}).get('rate', BASE_INTEREST))
+            for g in range(GOODS): consume[g] *= spend*scarcity(levels[g], normal[g])**-ELASTICITY[g]
         for event in events:
             if event['system'] != system: continue
             _, more, made, _ = EVENTS[event['kind']]
@@ -151,11 +235,31 @@ class Economy:
     def targets(self, system, levels, station, events):
         consume, produce = self.flows(system, levels, station, events)
         low, high = TARGET_RANGE
-        return [self.normal[system][g]*max(low, min(high, 1+TARGET_GAIN*(produce[g]-consume[g]))) for g in range(GOODS)]
+        depth = self.depth(system)
+        return [self.normal[system][g]*depth*max(low, min(high, 1+TARGET_GAIN*(produce[g]-consume[g])/depth)) for g in range(GOODS)]
+
+    def depth(self, system):
+        """How deep a station's market is: a bigger population keeps more stock (adaptive economy)."""
+        if not ADAPTIVE: return 1.
+        station = self.state['stations'].get(str(system))
+        return station['population'] if station else 1.
+
+    def wants(self, profile, levels, normal, prosperity):
+        """What one person buys: a budget spent up Maslow's hierarchy, each tier at today's local prices."""
+        budget = MEANS[0]+MEANS[1]*prosperity
+        out = {}
+        for tier, wants in NEEDS:
+            wants = dict(wants)
+            if tier == 'safety' and profile['government'] in LAWLESS: wants[ARMS] += LAWLESS_ARMS
+            cost = sum(n*scarcity(levels[g], normal[g]) for g, n in wants.items())
+            afford = min(1., budget/cost) if cost else 1.
+            for g, n in wants.items(): out[g] = out.get(g, 0.)+n*afford
+            budget = max(0., budget-cost*afford)
+        return out
 
     def needs_met(self, system, levels):
         """How well the people are supplied: basics weigh most."""
-        normal = self.normal[system]
+        normal = [n*self.depth(system) for n in self.normal[system]]
         def met(goods): return sum(min(1., levels[g]/(.5*max(1, normal[g]))) for g in goods)/len(goods)
         return .7*met(BASIC)+.3*met(COMFORT)
 
@@ -175,12 +279,44 @@ class Economy:
             keep = math.exp(-rate*dt)
             for g in range(GOODS):
                 levels[g] = max(0., min(cap[g], target[g]+(levels[g]-target[g])*keep))
+            if ADAPTIVE: self.adapt(system, levels, station, dt)
             follow = 1-math.exp(-dt/PROSPERITY_TIME)
             station['prosperity'] += (self.needs_met(system, levels)-station['prosperity'])*follow
-            low, high = POPULATION_RANGE
-            station['population'] = max(low, min(high, station['population']+(station['prosperity']-.5)*2*POPULATION_DRIFT*dt))
+            if ADAPTIVE:   # people move to where the work is: a size set by regular traffic and prosperity
+                low, high = GROWTH_RANGE
+                station['traffic'] = station.get('traffic', 0.)+(self.commanders(system, moment)-station.get('traffic', 0.))*(1-math.exp(-dt/TRAFFIC_TIME))
+                size = max(low, min(high, (1+PER_COMMANDER*station['traffic'])*(.8+.4*station['prosperity'])))
+                station['population'] *= math.exp(SETTLE*math.log(size/station['population'])*dt)
+            else:
+                low, high = POPULATION_RANGE
+                station['population'] = max(low, min(high, station['population']+(station['prosperity']-.5)*2*POPULATION_DRIFT*dt))
         station['last'] = now
+        if ADAPTIVE: self.reprice(system, levels, station, events_at(now, self.profiles))
         return station
+
+    def adapt(self, system, levels, station, dt):
+        """Supply follows price: a line grows while its good is scarce here and shrinks in a glut."""
+        industry, normal = station['industry'], [n*self.depth(system) for n in self.normal[system]]
+        skill = station.setdefault('skill', [OFF_SPECIALITY]*GOODS)
+        for g in range(GOODS):   # learning by doing: a running licensed line gets better at it
+            if industry[g] >= .2: skill[g] = min(LEARNED, skill[g]+LEARN_RATE*dt)
+        low, high = INDUSTRY_RANGE
+        for g in range(GOODS):
+            if industry[g] <= 0: continue
+            pull = (scarcity(levels[g], normal[g])-1)/.5      # +1 at the scarcest, -0.5 in the worst glut
+            if pull > 0: pull *= investment(self.state.get('council', {}).get('rate', BASE_INTEREST))
+            industry[g] = max(low, min(high, industry[g]*math.exp(ADAPT_RATE*pull*dt)))
+            if industry[g] < .05: industry[g] = 0.            # a line this small has closed
+
+    def reprice(self, system, levels, station, events):
+        """Base prices from what the station makes and uses: plenty makes a good cheap here."""
+        consume, produce = self.flows(system, levels, station, events)
+        low, high = PRICE_RANGE
+        station['adjust'] = [max(low, min(high, ((consume[g]+.15)/(produce[g]+.15))**PRICE_POWER)) for g in range(GOODS)]
+
+    def price_adjust(self, system, good):
+        station = self.state['stations'].get(str(system))
+        return station['adjust'][good] if station and 'adjust' in station else 1.
 
     def report(self, system, levels, now):
         """What a commander sees: people, mood, traffic and which goods are wanted or in surplus."""
