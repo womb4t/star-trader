@@ -1,3 +1,7 @@
+# 0.9.1 — fix: the game closed as soon as it went online
+
+- **0.9.0 closed a few seconds after starting** for anyone playing online: the installer did not copy two new files that came with the living economy, and the game crashed when the first market update arrived. Updating installs them. If the game closes before you can accept the update, run `python3 ~/.local/share/star-trader/update.py` in a terminal.
+
 # 0.9.0 — the living economy
 
 The galaxy's economy now behaves like a real one, and it has a government.
