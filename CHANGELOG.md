@@ -1,3 +1,16 @@
+# 0.8.13 — steady prices, attack alarm and scoop fixes
+
+From your requests:
+- **Prices hold for the whole deal.** Pressing B (or S) again and again on the same cargo keeps the price you started at. The deal ends when you pick other cargo, switch between buying and selling, stop for 10 seconds or leave the station; then the price catches up with the market. Your own trades only ever move prices against you during a visit, so buying a load and selling it straight back can't make money.
+- **Attack alarm.** A flashing red ALARM bar and a beep when a hostile ship or police are on you, you're under fire or taking damage, a mine is ahead, you're about to hit a rock, or you're overheating. X silences it until that danger is over; a new danger sounds again.
+- **Scooping is announced** as a ship announcement, and the cockpit shows the nearest ore and what the scoops need: SLOW BELOW 50, CLOSE TO 260 m, HOLD FULL or COLLECTING.
+- **The text cursor is a flashing solid block**, like an old terminal.
+
+From your bug reports:
+- **Y turns approach guidance on and off again** (0.8.10 had moved it to Ctrl+G only; Ctrl+G still works).
+- **"Write a description first." no longer follows you back to the cockpit.** It now shows on the bug report screen only.
+- The cockpit shows fine steering as ^F (it said I, its old key).
+
 # 0.8.12 — screens numbered left to right
 
 From your suggestions:
