@@ -62,6 +62,7 @@ SETTLE = 1/(2*24*HOUR)          # population closes on its supportable size over
 GROWTH = .04/(24*HOUR)         # population change per second for a busy, thriving world (adaptive)
 GROWTH_RANGE = (.8, 8.)         # population as a share of the founding population (adaptive)
 BASE_INTEREST = .05             # the galactic rate at which industries invest at the normal pace
+SPENDING_GAIN, SPENDING_RANGE = .4, (.8, 1.3)   # demand: +20% at a 2.5% rate, -20% at 7.5%
 PRICE_POWER = .45                # base price = BASE * (use / make) ** PRICE_POWER, within PRICE_RANGE
 PRICE_RANGE = (.65, 1.45)
 
@@ -76,6 +77,11 @@ def productivity(economy, good, station=None):
 def investment(rate):
     """Cheap money builds factories faster: 2x at 2%, 1x at 5%, a quarter at 11%."""
     return 2**((BASE_INTEREST-rate)/.03)
+
+
+def spending(rate):
+    """Cheap money lifts what people buy (credit is easy), dear money damps it: 1x at the neutral rate."""
+    return max(SPENDING_RANGE[0], min(SPENDING_RANGE[1], 1+SPENDING_GAIN*(BASE_INTEREST-rate)/BASE_INTEREST))
 
 
 def scarcity(level, normal):
@@ -203,7 +209,8 @@ class Economy:
             produce[good] += out*workforce*supplied*(productivity(profile['economy'], good, station) if ADAPTIVE else 1.)
         for good, use in factory['inputs'].items(): consume[good] += use*workforce*scale
         if ADAPTIVE:   # dear goods are bought less
-            for g in range(GOODS): consume[g] *= scarcity(levels[g], normal[g])**-ELASTICITY[g]
+            spend = spending(self.state.get('council', {}).get('rate', BASE_INTEREST))
+            for g in range(GOODS): consume[g] *= spend*scarcity(levels[g], normal[g])**-ELASTICITY[g]
         for event in events:
             if event['system'] != system: continue
             _, more, made, _ = EVENTS[event['kind']]

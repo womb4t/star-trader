@@ -390,6 +390,7 @@ def run(days=5, players=2, seed='sim', start=1.8e9, setup=None, quiet=False, ada
     for i, rows in stats.items():
         result[st.SYSTEMS[i][0]] = dict(
             dead=sum(1 for n, _ in rows if n == 0)/len(rows),
+            dead_late=sum(1 for n, _ in rows[len(rows)//2:] if n == 0)/max(1, len(rows)-len(rows)//2),   # once settled
             mean_ops=sum(n for n, _ in rows)/len(rows),
             best=sorted(m for _, m in rows)[len(rows)//2])
     earned = sum(c.earned for c in crew)/max(1, players)/(days*24)

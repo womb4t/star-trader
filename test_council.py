@@ -54,9 +54,11 @@ class CouncilTests(unittest.TestCase):
         self.assertGreater(taken, 0)
         self.review()
         self.assertGreaterEqual(state['fund']+state['spent']['grants'], council.DEV_SHARE*taken-1e-6)
-        state['treasury'] = 1e7
+        state['treasury'], tax = 1e7, state['base_tax']   # a big surplus fills the fund to its cap; the rest cuts tax
         self.review()
-        self.assertLessEqual(state['treasury'], council.SURPLUS*state['target']+1e-6)
+        self.assertAlmostEqual(state['fund']+sum(council.GRANT_COST for d in state['decrees'] if d['kind'] == 'grant' and d['at'] == self.now),
+                               council.FUND_CAP, delta=1e-6)
+        self.assertLess(state['base_tax'], tax)
 
     def test_grants_go_to_the_weakest_worlds_and_are_paid_from_the_fund(self):
         self.review()

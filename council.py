@@ -55,6 +55,9 @@ GRANT_COST = 8000.
 GRANT_SKILL = .10     # a grant lifts a licensed line's efficiency by this much (up to economy.LEARNED+.05)...
 GRANT_CAPACITY = .25  # ...or, where there is none to lift, adds this much capacity to the world's best export line
 WEAK = MIN_EXPORTS+1  # worlds with this few worthwhile exports or fewer can get grants
+FUND_CAP = 8*GRANT_COST   # what the fund can't spend goes back to the treasury (and so to lower tax)
+DIVERSIFY = False     # grants fund a promising new line first (industrial policy), then efficiency, then capacity
+TAYLOR_PRICES = .5    # rate rise per unit of inflation (prices up 4% in a day: 2 points on the rate)
 
 
 def council_state(market, now):
@@ -115,11 +118,22 @@ def review(market, now, neighbours, contraband=(), names=None, goods=None):
     struggling = sum(1 for n in counts.values() if n < MIN_EXPORTS)
     lo, hi = RATE_RANGE
     lending = market.state.get('bank', {}).get('use', 0.)       # how much of the banks' capacity is lent out
-    state['slow'] = state.get('slow', 0)+1 if struggling >= 3 else 0
-    if pressure > 1.12 or lending > .85: state['rate'] = min(hi, state['rate']+RATE_STEP)   # overheating, or credit too loose
-    elif state['slow'] >= 2 and lending < .6: state['rate'] = max(lo, state['rate']-RATE_STEP)  # stagnant for a day: cheaper money
-    elif abs(state['rate']-E.BASE_INTEREST) > 1e-9:   # nothing wrong: drift back towards the neutral rate
-        state['rate'] += RATE_STEP/2 if state['rate'] < E.BASE_INTEREST else -RATE_STEP/2
+    # A Taylor rule: the neutral rate, plus more for inflation (less in deflation), plus more if credit runs
+    # short; approached a step per review (gradualism). Money works through demand (economy.spending) and
+    # investment. Struggling worlds are the treasury's job (tax discounts, grants), not the rate's: cutting
+    # the rate for them builds factories everywhere and deepens the gluts that leave them without trade.
+    slack = sum(max(0, WEAK-n) for n in counts.values())/(WEAK*len(counts))
+    # Inflation: how far a galactic price index (every legal good everywhere, against its base) moved in a day.
+    index = sum(market.price(i, g)/max(1e-9, market.static_price(i, g)) for i in range(len(market.stock)) for g in legal)
+    index /= len(market.stock)*len(legal)
+    log = [(t, x) for t, x in state.get('index_log', []) if now-t <= (24*E.HOUR)+REVIEW_EVERY]+[(now, index)]
+    state['index_log'] = log
+    inflation = index/log[0][1]-1 if now-log[0][0] >= (24*E.HOUR)/2 else 0.
+    state['inflation'] = inflation
+    aim = E.BASE_INTEREST+TAYLOR_PRICES*inflation+(.02 if lending > .85 else 0.)
+    aim = max(lo, min(hi, aim))
+    state['rate_aim'], state['pressure'], state['slack'] = aim, pressure, slack
+    state['rate'] += max(-RATE_STEP, min(RATE_STEP, aim-state['rate']))
 
     # The budget: every world's upkeep, and police wherever there is law, before anything else.
     spend = 0.
@@ -139,7 +153,7 @@ def review(market, now, neighbours, contraband=(), names=None, goods=None):
     state['target'] = target
     revenue = state.get('revenue', 0.)-state.get('revenue_seen', 0.); state['revenue_seen'] = state.get('revenue', 0.)
     put = DEV_SHARE*max(0., revenue)+max(0., state['treasury']-SURPLUS*target)
-    put = min(put, max(0., state['treasury']))
+    put = max(0., min(put, state['treasury'], FUND_CAP-state.get('fund', 0.)))
     state['treasury'] -= put; state['fund'] = state.get('fund', 0.)+put
     # Fiscal rule: steer the tax rate towards the reserve aim.
     tlo, thi = TAX_RANGE
@@ -163,14 +177,7 @@ def review(market, now, neighbours, contraband=(), names=None, goods=None):
             decree = dict(kind='relief', good=None)
         elif counts[system] < MIN_EXPORTS and state['treasury'] >= LICENCE_COST:
             industry = economy.industry(system, station)
-            kind = market.profiles[system]['economy']
-            best, choice = 1.15, None
-            for g in legal:
-                if industry[g] >= .2: continue
-                # What it would fetch next door against what it would cost to make here.
-                here = market.price(system, g)/max(.5, economy.price_adjust(system, g))*.8/E.productivity(kind, g, station)
-                there = max(market.price(j, g) for j in neighbours[system])
-                if there/here > best: best, choice = there/here, g
+            choice = new_line(market, system, station, neighbours, legal)
             if choice is not None:
                 industry[choice] = max(industry[choice], NEW_LINE)
                 state['treasury'] -= LICENCE_COST; state['spent']['licences'] += LICENCE_COST
@@ -185,7 +192,11 @@ def review(market, now, neighbours, contraband=(), names=None, goods=None):
         industry, kind = economy.industry(system, station), market.profiles[system]['economy']
         skill = station.setdefault('skill', [E.OFF_SPECIALITY]*len(industry))
         lines = [g for g in legal if industry[g] >= .2 and g not in E.NATIVE[kind] and skill[g] < E.LEARNED+.05]
-        if lines:   # make a licensed line competitive
+        fresh = new_line(market, system, station, neighbours, legal) if DIVERSIFY else None
+        if fresh is not None:   # diversify: a new line in something the neighbours pay well for
+            g = fresh
+            industry[g] = max(industry[g], NEW_LINE)
+        elif lines:   # make a licensed line competitive
             g = max(lines, key=lambda g: industry[g])
             skill[g] = min(E.LEARNED+.05, skill[g]+GRANT_SKILL)
         else:       # a capital grant to the line whose goods fetch most next door, for what they cost here
@@ -197,6 +208,19 @@ def review(market, now, neighbours, contraband=(), names=None, goods=None):
         state['last'][key] = now
         record(state, dict(kind='grant', good=g), system, now, names, goods, made)
     return made
+
+
+def new_line(market, system, station, neighbours, legal, best=1.15):
+    """The good this world doesn't make that would pay best: what it fetches next door against what it
+    would cost to make here (None if nothing clears `best`)."""
+    economy, kind = market.economy, market.profiles[system]['economy']
+    industry, choice = economy.industry(system, station), None
+    for g in legal:
+        if industry[g] >= .2: continue
+        here = market.price(system, g)/max(.5, economy.price_adjust(system, g))*.8/E.productivity(kind, g, station)
+        there = max(market.price(j, g) for j in neighbours[system])
+        if there/here > best: best, choice = there/here, g
+    return choice
 
 
 def record(state, decree, system, now, names, goods, made):
