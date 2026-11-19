@@ -58,6 +58,7 @@ RATE_CAP = .20        # the bank never charges more than this, whatever the rati
 WANTED_DECAY = 12*HOUR
 CONTRABAND_RISK = .25 # chance a contraband sale raises the wanted level
 SMUGGLERS = .3        # share of commanders who trade contraband
+SMUGGLER_STAKE = .5   # the share of their credits a smuggler risks on one run (a seizure isn't ruin)
 from council import CUSTOMS_SEARCH as SEIZURE, CUSTOMS_FINE   # noqa: E402
 # The bank's own money is limited: it can lend LEVERAGE times its capital. Capital grows with the
 # number of active ships (their deposits and business) and with interest earned, and shrinks when
@@ -311,7 +312,8 @@ class Commander:
         n = 0
         if best:
             margin, g, dest = best[0]
-            n = min(self.hold, market.stock[self.system][g], int(self.credits//max(1, quote(market, self.system, g))))
+            stake = self.credits*(SMUGGLER_STAKE if g in st.ILLEGAL else 1.)   # never bet everything on one run
+            n = min(self.hold, market.stock[self.system][g], int(stake//max(1, quote(market, self.system, g))))
         if n > 0:
             paid = n*quote(market, self.system, g)
             self.credits -= paid

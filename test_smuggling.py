@@ -77,5 +77,29 @@ class StartingPoliceTests(unittest.TestCase):
             else: self.assertAlmostEqual(council.customs(market, i), council.CUSTOMS_SEARCH*council.SAFETY_TARGET[government])
 
 
+
+class StakeTests(unittest.TestCase):
+    def buy(self, good, smuggler=True):
+        from unittest.mock import patch
+        import council
+        market = econ_sim.make_market('stake', adaptive=True)
+        market.council = None
+        market.advance(START)
+        council.council_state(market, START)
+        cmdr = econ_sim.Commander('t', 1, __import__('random').Random(2))
+        cmdr.smuggler, cmdr.credits, cmdr.came_from = smuggler, 2000., 1
+        market.stock[1][good] = 50
+        with patch.object(econ_sim, 'opportunities', return_value=[(1., good, 2)]), patch.object(cmdr, 'bank'):
+            cmdr.act(market, START+60)
+        return cmdr.cargo[2] if cmdr.cargo else 0.
+
+    def test_smugglers_stake_at_most_half_their_credits(self):
+        self.assertLessEqual(self.buy(st.ILLEGAL[0]), 1000.)
+        self.assertGreater(self.buy(st.ILLEGAL[0]), 0.)
+
+    def test_legal_cargo_is_not_limited(self):
+        self.assertGreater(self.buy(8), 1000.)   # gold: dear enough that a hold costs more than half
+
+
 if __name__ == '__main__':
     unittest.main()
