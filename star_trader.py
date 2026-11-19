@@ -24,7 +24,7 @@ import textwrap
 from market import Market, demand_factor, quote_price
 import economy
 
-VERSION = '0.9.2'
+VERSION = '0.9.3'
 HOSTILITY_COOLDOWN_SECONDS = 30*60
 STATION_POLICE_CAPACITY = 6
 # Career points needed for each commander rank: kills, trade profit and hyperspace jumps all count.
