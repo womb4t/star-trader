@@ -41,6 +41,9 @@ def quote(market, system, good, buy=True):
     """The exchange's quote: the market price with the game's 8% spread, plus the station's trade tax."""
     base = round(market.price(system, good))
     tax = round(base*market.tax(system))
+    if not buy and good in st.ILLEGAL:   # a world pays smugglers for the risk of bringing it in: losses, fines and a reward
+        share = market.loss_share(system, good)
+        base = round(base*market.risk_premium(system, good)+CUSTOMS_FINE*share/(1-share))
     return base+max(1, math.ceil(base*.08))+tax if buy else max(1, base-math.ceil(base*.08)-tax)
 
 
@@ -60,6 +63,8 @@ RATE_CAP = .20        # the bank never charges more than this, whatever the rati
 WANTED_DECAY = 12*HOUR
 CONTRABAND_RISK = .25 # chance a contraband sale raises the wanted level
 SMUGGLERS = .3        # share of commanders who trade contraband
+SEIZURE = .55         # customs find contraband at a lawful world's dock (star_trader.inspect_cargo)
+CUSTOMS_FINE = 25     # per tonne seized
 # The bank's own money is limited: it can lend LEVERAGE times its capital. Capital grows with the
 # number of active ships (their deposits and business) and with interest earned, and shrinks when
 # a default leaves debt the ship's sale doesn't cover. Near the limit it rations credit.
@@ -114,13 +119,30 @@ def loss_risk(market, a, b):
     return ((.05 if lawless(a) else .02)+(.05 if lawless(b) else .02))/2
 
 
+def lawless(system):
+    return st.PROFILES[system][0] in ('Anarchy', 'Feudal')
+
+
+def customs(market, system):
+    """Chance customs seize contraband at this world's dock: the game's 55%, scaled by how well its police are funded."""
+    if lawless(system): return 0.
+    import council
+    if 'council' not in market.state: return SEIZURE
+    return SEIZURE*market.state['council'].get('safety', {}).get(str(system), 0.)/council.SAFEST
+
+
+def contraband_risk(market, system):
+    """The share of contraband a smuggler expects to lose bringing it here: customs, then pirates on the way in."""
+    return customs(market, system)+(1-customs(market, system))*loss_risk(market, system, system)
+
+
 def opportunities(market, i, goods=LEGAL):
     """(margin, good, dest) for every good that can be bought at i and sold in range at a profit."""
     out = []
     for g in goods:
         if market.stock[i][g] < 1: continue
         buy = quote(market, i, g)
-        sell, dest = max((quote(market, j, g, False), j) for j in market.range[i])
+        sell, dest = max((quote(market, j, g, False), j) for j in market.range[i])   # the price already carries the risk
         out.append(((sell-buy)/buy, g, dest))
     return sorted(out, reverse=True)
 
@@ -138,6 +160,7 @@ class Commander:
         self.smuggler = rng.random() < SMUGGLERS
         self.shipless_since = None
         self.lost_cargo = self.lost_ships = self.wipeouts = 0
+        self.seized = 0
         self.recoveries = []      # hours from wipe-out to a ship again
         self.first_seen = None
         self.income = []          # (time, profit) of each sale
@@ -270,6 +293,7 @@ class Commander:
         if now < self.busy_until: return
         if self.shipless_since is not None: return self.hitch(market, now)
         if self.cargo and self.rng.random() < loss_risk(market, self.came_from, self.system):   # pirates
+            if self.cargo[0] in st.ILLEGAL: market.smuggling(self.system, self.cargo[0], lost=self.cargo[1], now=now)
             self.lost_cargo += 1; self.earned -= self.cargo[2]; self.cargo = None
             if self.rng.random() < SHIP_LOSS:
                 self.lost_ships += 1
@@ -279,8 +303,14 @@ class Commander:
                 else:
                     self.debt = max(0., self.debt-max(0., self.credits)); self.wipe(now); self.last_tick = now
                     return
+        if self.cargo and self.cargo[0] in st.ILLEGAL and self.rng.random() < customs(market, self.system):
+            g, n, paid, _ = self.cargo   # customs
+            market.smuggling(self.system, g, lost=n, now=now)
+            self.seized += n; self.earned -= paid+n*CUSTOMS_FINE; self.credits = max(0., self.credits-n*CUSTOMS_FINE)
+            self.cargo = None
         if self.cargo:   # arrived: sell
             g, n, paid, _ = self.cargo
+            if g in st.ILLEGAL: market.smuggling(self.system, g, delivered=n, now=now)
             takings = n*quote(market, self.system, g, False)
             self.earned += takings-paid
             self.income.append((now, takings-paid)); self.income = self.income[-200:]
@@ -333,6 +363,7 @@ def make_market(seed, adaptive=False):
     if adaptive:
         market.adaptive_base = lambda s, g: st.BASE[g]*quirk(s, g)
         market.contraband = st.ILLEGAL
+        market.contraband_risk = lambda system: contraband_risk(market, system)
         names, goods = [s[0] for s in st.SYSTEMS], st.GOODS
         market.council = lambda m, now: council.review(m, now, m.range, st.ILLEGAL, names, goods)
     return market
@@ -377,6 +408,7 @@ def run(days=5, players=2, seed='sim', start=1.8e9, setup=None, quiet=False, ada
     market.treasury_log = []
     stats = defaultdict(list)
     t, end, next_sample = start, start+days*24*HOUR, start+sample
+    market.premium_log = []
     while t < end:
         market.advance(t)
         market.bank_state(t)
@@ -391,6 +423,7 @@ def run(days=5, players=2, seed='sim', start=1.8e9, setup=None, quiet=False, ada
             for i in range(len(st.SYSTEMS)):
                 ops = [o for o in opportunities(market, i) if o[0] >= MARGIN]
                 stats[i].append((len(ops), ops[0][0] if ops else 0.))
+            market.premium_log.append([round(market.risk_premium(i, g), 3) for i in range(len(st.SYSTEMS)) for g in st.ILLEGAL])
             next_sample += sample
         t += 30.
     result = {}

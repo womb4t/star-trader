@@ -30,4 +30,13 @@ out = dict(players=players, seed=seed, days=days, secs=round(time.time()-t0),
     wiped=sum(x.wipeouts for x in m.crew), repossessed=sum(x.defaults for x in m.crew),
     borrowed=round(sum(x.borrowed for x in m.crew)), debt_end=round(sum(x.debt for x in m.crew)),
     lost_ships=sum(x.lost_ships for x in m.crew), population=round(sum(v["population"] for v in m.state["stations"].values()), 2), use_max=round(max(b.get("use_log", [b["use"]])), 3))
+import star_trader as st
+pl = m.premium_log
+cols = [f'{st.SYSTEMS[i][0]}/{st.GOODS[g]}' for i in range(len(st.SYSTEMS)) for g in st.ILLEGAL]
+smugglers = [x for x in m.crew if x.smuggler]; honest = [x for x in m.crew if not x.smuggler]
+out.update(premium_max={c: max(r[k] for r in pl) for k, c in enumerate(cols) if max(r[k] for r in pl) > 1.01},
+    premium_mean={c: round(sum(r[k] for r in pl)/len(pl), 3) for k, c in enumerate(cols) if max(r[k] for r in pl) > 1.01},
+    seized=sum(x.seized for x in m.crew),
+    smuggler_earned=round(sum(x.earned for x in smugglers)/max(1, len(smugglers))/(days*24)),
+    honest_earned=round(sum(x.earned for x in honest)/max(1, len(honest))/(days*24)))
 print(json.dumps(out))

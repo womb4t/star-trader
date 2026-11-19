@@ -24,6 +24,17 @@ BASIC = {FOOD: 1.0, MEDICINE: .5}
 COMFORT = {TEXTILES: .7, COMPUTERS: .5, MACHINERY: .3}
 LUXURY = {NARCOTICS: .4, GOLD: .25, SILVER: .3, ARMS: .2}
 
+# Adaptive economy: households spend a budget up Maslow's hierarchy of needs, so when money is short or
+# food is dear, the higher needs go first. A share of every population wants narcotics and weapons (the
+# demand smuggling exists to meet), but not before it has eaten. Wants per head, lowest tier first.
+NEEDS = (('physiological', {FOOD: 1.0, MEDICINE: .5}),
+         ('safety', {ARMS: .12}),                          # self-defence; lawless worlds want more (LAWLESS_ARMS)
+         ('belonging', {TEXTILES: .7, NARCOTICS: .25}),     # clothes, and the habit
+         ('esteem', {COMPUTERS: .5, MACHINERY: .3}),
+         ('luxury', {GOLD: .25, SILVER: .3, NARCOTICS: .15, ARMS: .08}))
+LAWLESS_ARMS = .3
+MEANS = (1.6, 3.2)   # a household budget per head (in wants) of 1.6 + 3.2 x prosperity: a thriving world affords it all
+
 # Factories by economy: output per good, and the input they need to run (X4-style workforce
 # boosts output; missing inputs stall it).
 FACTORIES = {
@@ -195,10 +206,13 @@ class Economy:
         prosperity = station['prosperity']
         consume = [0.]*GOODS
         produce = [0.]*GOODS
-        for good, need in BASIC.items(): consume[good] += people*need
-        for good, need in COMFORT.items(): consume[good] += people*need*(.4+.6*prosperity)
-        for good, need in LUXURY.items(): consume[good] += people*need*prosperity
-        if profile['government'] in LAWLESS: consume[ARMS] += .3*people
+        if ADAPTIVE:
+            for good, share in self.wants(profile, levels, normal, prosperity).items(): consume[good] += people*share
+        else:
+            for good, need in BASIC.items(): consume[good] += people*need
+            for good, need in COMFORT.items(): consume[good] += people*need*(.4+.6*prosperity)
+            for good, need in LUXURY.items(): consume[good] += people*need*prosperity
+            if profile['government'] in LAWLESS: consume[ARMS] += .3*people
         factory = FACTORIES[profile['economy']]
         supplied = min([1.]+[min(1., .3+levels[g]/(.5*max(1, normal[g]))) for g in factory['inputs']])
         workforce = (.6+.6*prosperity)*(station['population'] if ADAPTIVE else 1.)   # more people, more output
@@ -229,6 +243,19 @@ class Economy:
         if not ADAPTIVE: return 1.
         station = self.state['stations'].get(str(system))
         return station['population'] if station else 1.
+
+    def wants(self, profile, levels, normal, prosperity):
+        """What one person buys: a budget spent up Maslow's hierarchy, each tier at today's local prices."""
+        budget = MEANS[0]+MEANS[1]*prosperity
+        out = {}
+        for tier, wants in NEEDS:
+            wants = dict(wants)
+            if tier == 'safety' and profile['government'] in LAWLESS: wants[ARMS] += LAWLESS_ARMS
+            cost = sum(n*scarcity(levels[g], normal[g]) for g, n in wants.items())
+            afford = min(1., budget/cost) if cost else 1.
+            for g, n in wants.items(): out[g] = out.get(g, 0.)+n*afford
+            budget = max(0., budget-cost*afford)
+        return out
 
     def needs_met(self, system, levels):
         """How well the people are supplied: basics weigh most."""

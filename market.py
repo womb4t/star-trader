@@ -20,6 +20,12 @@ MAX_SHIPMENTS = 40
 MAX_OPS = 50                # player stock changes accepted per request
 # Bots only haul when the gap is wide, so they smooth extremes but leave margins for commanders.
 BOT_MARGIN = 1.6
+# Contraband carries a risk premium: where smugglers lose cargo to customs or pirates, the goods that do
+# get through fetch more (the "risks and prices" view of illicit markets: price compensates for losses).
+SMUGGLING_HALF_LIFE = 6*3600.   # seconds for the record of losses and deliveries to halve
+SMUGGLING_PRIOR = 20.           # tonnes of experience the expected risk counts for, so one seizure isn't a price shock
+RISK_PREMIUM_CAP = 3.           # covers customs' full 55% search with the reward below (1.25/0.45 = 2.8)
+RISK_REWARD = .25               # smuggling must pay more than honest trade on average, or nobody would take the risk
 
 
 def demand_factor(stock, normal):
@@ -71,6 +77,32 @@ class Market:
             if ADAPTIVE: base = self.adaptive_base(system, good)*self.economy.price_adjust(system, good)
         return base*demand_factor(self.stock[system][good], self.normal[system][good]*self.depth(system))
 
+    def smuggling(self, system, good, lost=0., delivered=0., now=None):
+        """Record contraband seized or destroyed on its way to a world, or delivered there; returns the record."""
+        now = getattr(self, 'clock', 0.) if now is None else now
+        books = self.state.setdefault('smuggling', {}).setdefault(str(system), {})
+        record = books.get(str(good), [0., 0., now])
+        keep = .5**(max(0., now-record[2])/SMUGGLING_HALF_LIFE)
+        record = [record[0]*keep+lost, record[1]*keep+delivered, now]
+        books[str(good)] = record
+        return record
+
+    def risk_premium(self, system, good):
+        """Contraband price multiplier: what a smuggler needs to break even after the share of cargo lost here, capped."""
+        expected = self.contraband_risk(system) if getattr(self, 'contraband_risk', None) else 0.
+        record = self.state.get('smuggling', {}).get(str(system), {}).get(str(good))
+        lost = delivered = 0.
+        if record:
+            keep = .5**(max(0., getattr(self, 'clock', record[2])-record[2])/SMUGGLING_HALF_LIFE)
+            lost, delivered = record[0]*keep, record[1]*keep
+        # the expected risk counts as SMUGGLING_PRIOR tonnes of experience; real losses and deliveries outweigh it
+        share = (lost+SMUGGLING_PRIOR*expected)/(lost+delivered+SMUGGLING_PRIOR)
+        return min(RISK_PREMIUM_CAP, (1+RISK_REWARD)/(1-share))
+
+    def loss_share(self, system, good):
+        """The share of contraband expected to be lost bringing it here (as priced into the premium)."""
+        return 1-(1+RISK_REWARD)/self.risk_premium(system, good) if self.risk_premium(system, good) > 1+RISK_REWARD else 0.
+
     def depth(self, system):
         return self.economy.depth(system) if self.economy else 1.
 
@@ -97,6 +129,7 @@ class Market:
 
     def advance(self, now):
         state = self.state
+        self.clock = now
         self.reconcile()
         if self.economy:
             for system in range(len(self.stock)):
