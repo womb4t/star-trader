@@ -22,13 +22,18 @@ HOLD = 20             # tonnes a commander carries
 DOCK_TIME = 180.      # seconds spent docked, trading and refuelling
 
 
-def in_range(i):
-    here = st.coordinates(i)
-    return [j for j in range(len(st.SYSTEMS)) if j != i and
-            st.hyperspace_cost(st.galactic_distance(here, st.coordinates(j))) <= st.FUEL_CAPACITY]
+def fuel(i, j, beacons=()):
+    """Fuel for a jump between two worlds; a hyperspace beacon at either end saves council.BEACON_SAVING."""
+    import council
+    cost = st.hyperspace_cost(st.galactic_distance(st.coordinates(i), st.coordinates(j)))
+    return cost*(1-council.BEACON_SAVING) if i in beacons or j in beacons else cost
 
 
-RANGE = {i: in_range(i) for i in range(len(st.SYSTEMS))}
+def in_range(i, beacons=()):
+    return [j for j in range(len(st.SYSTEMS)) if j != i and fuel(i, j, beacons) <= st.FUEL_CAPACITY]
+
+
+RANGE = {i: in_range(i) for i in range(len(st.SYSTEMS))}   # reach with no beacons (each market keeps its own)
 LEGAL = [g for g in range(len(st.GOODS)) if g not in st.ILLEGAL]
 
 
@@ -115,7 +120,7 @@ def opportunities(market, i, goods=LEGAL):
     for g in goods:
         if market.stock[i][g] < 1: continue
         buy = quote(market, i, g)
-        sell, dest = max((quote(market, j, g, False), j) for j in RANGE[i])
+        sell, dest = max((quote(market, j, g, False), j) for j in market.range[i])
         out.append(((sell-buy)/buy, g, dest))
     return sorted(out, reverse=True)
 
@@ -247,7 +252,7 @@ class Commander:
             self.recoveries.append((now-self.shipless_since)/HOUR); self.shipless_since = None
             return
         best = [o for o in opportunities(market, self.system) if o[0] >= .2]
-        dest = best[0][2] if best else self.rng.choice(RANGE[self.system])
+        dest = best[0][2] if best else self.rng.choice(market.range[self.system])
         if WAYS_BACK['courier']:   # carry a parcel instead of trading the tonne
             self.credits += self.rng.randint(*COURIER_FEE)
         elif best and self.credits >= HITCH_FARE+quote(market, self.system, best[0][1]):
@@ -302,7 +307,7 @@ class Commander:
             trade(market, self.system, g, -n, self.name, now)
             self.cargo = (g, n, paid, dest)
         else:
-            dest = self.rng.choice(RANGE[self.system])   # nothing here: fly on empty and look elsewhere
+            dest = self.rng.choice(market.range[self.system])   # nothing here: fly on empty and look elsewhere
         self.busy_until = now+DOCK_TIME+st.trader_travel_time(self.system, dest)*self.slowdown
         self.came_from, self.system = self.system, dest
 
@@ -323,11 +328,13 @@ def make_market(seed, adaptive=False):
     import economy, council
     economy.ADAPTIVE = adaptive
     market = Market(st.NORMAL_STOCK, st.static_price, st.trader_travel_time, None, seed=seed, profiles=st.ECONOMY_PROFILES)
+    market.range = {i: list(r) for i, r in RANGE.items()}
+    market.reach = lambda beacons: market.range.update({i: in_range(i, beacons) for i in range(len(st.SYSTEMS))})
     if adaptive:
         market.adaptive_base = lambda s, g: st.BASE[g]*quirk(s, g)
         market.contraband = st.ILLEGAL
         names, goods = [s[0] for s in st.SYSTEMS], st.GOODS
-        market.council = lambda m, now: council.review(m, now, RANGE, st.ILLEGAL, names, goods)
+        market.council = lambda m, now: council.review(m, now, m.range, st.ILLEGAL, names, goods)
     return market
 
 

@@ -24,7 +24,7 @@ class CouncilTests(unittest.TestCase):
     def review(self):
         self.now += council.REVIEW_EVERY
         self.market.advance(self.now)
-        return council.review(self.market, self.now, econ_sim.RANGE, st.ILLEGAL, [s[0] for s in st.SYSTEMS], st.GOODS)
+        return council.review(self.market, self.now, self.market.range, st.ILLEGAL, [s[0] for s in st.SYSTEMS], st.GOODS)
 
     def test_tax_rises_when_the_treasury_runs_low_and_falls_when_it_is_flush(self):
         state = self.market.state['council']
@@ -77,6 +77,22 @@ class CouncilTests(unittest.TestCase):
         self.assertEqual(counts[grants[0]['system']], min(counts.values()))
         self.assertAlmostEqual(state['fund'], 10*council.GRANT_COST-len(grants)*council.GRANT_COST, delta=council.GRANT_COST*3)
         self.assertIn('Council funds', grants[0]['text'])
+
+
+    def test_a_beacon_brings_new_markets_in_reach_of_a_world_weak_for_a_day(self):
+        velmora = [s[0] for s in st.SYSTEMS].index('Velmora')
+        self.assertEqual(len(self.market.range[velmora]), 3)
+        state = self.market.state['council']
+        self.review()
+        state['treasury'] = 1e6
+        state['weak_streak'] = {str(i): (council.BEACON_WEAK_REVIEWS if i == velmora else 0) for i in range(len(st.SYSTEMS))}
+        counts = {i: len(council.exports(self.market, i, self.market.range, st.ILLEGAL)) for i in range(len(st.SYSTEMS))}
+        if counts[velmora] > council.WEAK: self.skipTest('Velmora is doing well in this market')
+        made = self.review()
+        self.assertIn(velmora, state['beacons'])
+        self.assertGreater(len(self.market.range[velmora]), 3)
+        self.assertIn(velmora, self.market.range[[s[0] for s in st.SYSTEMS].index('Halvora')])   # both ways
+        self.assertIn('hyperspace beacon at Velmora', ' '.join(d['text'] for d in made))
 
 
 class BankPricingTests(unittest.TestCase):

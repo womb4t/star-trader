@@ -55,6 +55,11 @@ GRANT_COST = 8000.
 GRANT_SKILL = .10     # a grant lifts a licensed line's efficiency by this much (up to economy.LEARNED+.05)...
 GRANT_CAPACITY = .25  # ...or, where there is none to lift, adds this much capacity to the world's best export line
 WEAK = MIN_EXPORTS+1  # worlds with this few worthwhile exports or fewer can get grants
+# Infrastructure: a hyperspace beacon cuts the fuel for jumps to and from a world, bringing more markets in
+# reach; built from the treasury's surplus for a world weak for a day, where it would open new routes.
+BEACON_COST = 50000.
+BEACON_SAVING = .10
+BEACON_WEAK_REVIEWS = 4
 FUND_CAP = 8*GRANT_COST   # what the fund can't spend goes back to the treasury (and so to lower tax)
 DIVERSIFY = False     # grants fund a promising new line first (industrial policy), then efficiency, then capacity
 TAYLOR_PRICES = .5    # rate rise per unit of inflation (prices up 4% in a day: 2 points on the rate)
@@ -183,6 +188,22 @@ def review(market, now, neighbours, contraband=(), names=None, goods=None):
                 state['treasury'] -= LICENCE_COST; state['spent']['licences'] += LICENCE_COST
                 decree = dict(kind='industry', good=choice)
         if decree: record(state, decree, system, now, names, goods, made)
+    # Infrastructure: a beacon for a world that has been weak for a day, if it would open new routes.
+    weak = state.setdefault('weak_streak', {})
+    for system in range(len(market.stock)):
+        key = str(system)
+        weak[key] = weak.get(key, 0)+1 if counts[system] <= WEAK else 0
+    beacons = state.setdefault('beacons', [])
+    reach = getattr(market, 'reach', None)
+    if reach and state['treasury']-BEACON_COST >= RESERVE_AIM*target:
+        import econ_sim
+        for system in sorted(range(len(market.stock)), key=lambda i: (counts[i], -weak[str(i)])):
+            if system in beacons or weak[str(system)] < BEACON_WEAK_REVIEWS: continue
+            if not set(econ_sim.in_range(system, beacons+[system]))-set(neighbours[system]): continue   # nothing new in reach
+            beacons.append(system); reach(beacons)
+            state['treasury'] -= BEACON_COST; state['spent']['beacons'] = state['spent'].get('beacons', 0.)+BEACON_COST
+            record(state, dict(kind='beacon', good=None), system, now, names, goods, made)
+            break
     # Grants from the development fund, weakest worlds first (their own cooldown, apart from decrees).
     for system in sorted(range(len(market.stock)), key=lambda i: (counts[i], economy.station(i, now)['prosperity'])):
         key = 'grant:'+str(system)
@@ -227,9 +248,11 @@ def record(state, decree, system, now, names, goods, made):
     """Log a decree (with its news line) in the Council's record."""
     decree.update(system=system, at=now)
     if names and goods:
-        decree['text'] = {'relief': f'Relief convoy sent to {names[system]}',
-                          'grant': f'Council funds {names[system]}\'s {goods[decree["good"]].lower()} industry',
-                          'industry': f'{names[system]} licensed to produce {goods[decree["good"]]}'}[decree['kind']]
+        world, good = names[system], goods[decree['good']] if decree.get('good') is not None else ''
+        decree['text'] = {'relief': f'Relief convoy sent to {world}',
+                          'beacon': f'Council builds a hyperspace beacon at {world}',
+                          'grant': f"Council funds {world}'s {good.lower()} industry",
+                          'industry': f'{world} licensed to produce {good}'}[decree['kind']]
     state['decrees'] = (state['decrees']+[decree])[-KEEP:]
     if decree['kind'] != 'grant': state['last'][str(system)] = now
     made.append(decree)
