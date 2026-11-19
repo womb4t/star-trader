@@ -1,3 +1,11 @@
+# 0.8.12 — screens numbered left to right
+
+From your suggestions:
+- **The top bar now runs 1 Nav, 2 VMS, 3 Money, 4 Menu, left to right, with each number on its button.** The number row matches: 0 home (the market when docked, the cockpit when flying), 1 Nav, 2 VMS, 3 Money, 4 Menu, 5 Comms, 6 trade log, 8 engineering, 9 help. Press the same number again to go back.
+- **Bug reports and suggestions moved to Ctrl+0**, from anywhere. Menu (4), Report a bug still works.
+- **Text boxes show a blinking cursor:** bug reports, notes, commander name and credit codes.
+- Breakdown messages now point to Ctrl+E for a distress call (the old key was 6).
+
 # 0.8.11 — fix: Flight controls button overlap
 
 From your bug report:

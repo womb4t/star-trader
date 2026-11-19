@@ -61,11 +61,11 @@ You start docked with 150 credits, a full 7-unit fuel tank, a pulse laser, three
 
 | Screen | Controls |
 | --- | --- |
-| Screens (from anywhere) | 1 home (market or cockpit); 2 Nav; 3 VMS; 4 Money; 5 Comms (DSC); 6 trade log; 8 engineering; 9 help; 0 feedback. Press again to go back |
+| Screens (from anywhere) | 0 home (market or cockpit); 1 Nav; 2 VMS; 3 Money; 4 Menu; 5 Comms (DSC); 6 trade log; 8 engineering; 9 help; Ctrl+0 feedback. Press again to go back |
 | Station | Up/Down select; B buy; S sell; U outfitting; L requests departure clearance, then L launches once granted |
-| VMS (3) | F buys a full fuel refill; K sells fuel; R repairs hull; U outfitting; L launch |
+| VMS (2) | F buys a full fuel refill; K sells fuel; R repairs hull; U outfitting; L launch |
 | Outfitting | Up/Down browse; B or Enter buy and fit; U returns to market |
-| Money (4) | B bank and storage; X Crymto exchange; R redeem a code; F pay fines; J station jobs; T trade log |
+| Money (3) | B bank and storage; X Crymto exchange; R redeem a code; F pay fines; J station jobs; T trade log |
 | Bank/storage | D deposit money, W withdraw; S store selected cargo, T retrieve; R rent, B buy bay |
 | Flight | Arrows steer; W accelerate; S brake, then reverse; Q/E roll |
 | View | F toggles front/rear view; Space fires the current view’s fitted laser |
@@ -74,7 +74,7 @@ You start docked with 150 credits, a full 7-unit fuel tank, a pulse laser, three
 | Safety and radio | R requests docking clearance; N hails a disabled ship; Ctrl+E distress/recovery; 8 engineering and training |
 | Local beacons | Ctrl+S station; Ctrl+P planet; Ctrl+R asteroid/ore; Ctrl+U sun; O collects nearby ore |
 | Steering aids | Ctrl+F fine steering; Ctrl+G approach guidance |
-| Galaxy map (2) | arrows select planet; / searches names; C enters X,Y; I planet profile |
+| Galaxy map (1) | arrows select planet; / searches names; C enters X,Y; I planet profile |
 | Free map cursor | Tab switches between planet selection and coordinate cursor; arrows move cursor |
 | Course/travel | Enter locks course; hold H for 3 seconds to enter hyperspace; T interstellar cruise; T in cruise cancels |
 | Scanner | Click a ship contact to select it; Tab cycles ship targets |
@@ -261,7 +261,7 @@ Left/Right or Previous/Next browses profiles without changing your waypoint.
 I or the Back button returns to the map. The main header shows your current system
 name, economy and technology level, with credits/kills below.
 
-FEEDBACK: click Feedback 0 or press 0, choose Bug report or Suggestion,
+FEEDBACK: press Ctrl+0 (or Menu 4, Report a bug), choose Bug report or Suggestion,
 then type a description and click Log report. Each report is saved as its own
 entry and sent to the developers the next time you play online. Only your text,
 game version, platform, screen and system are included; no save file is attached.
@@ -303,15 +303,15 @@ Menu; arrows and Enter select items, Back returns. Escape always saves and close
 Flight controls button opens Flight/Nav/Combat/Safety mouse controls. Buttons
 use consistent 32px targets, clear labels and context-specific actions.
 
-Open Money (9) then Station jobs (5) to earn credits. Jobs return to Money.
+Open Money (3) then Station jobs (J) to earn credits. Jobs return to Money.
 
 VMS (Vessel Management System) is in the top bar, alongside Money and
-Navigation. 3 opens VMS: check hull/shields, fuel/heat, cargo/mass, maintenance,
+Navigation. 2 opens VMS: check hull/shields, fuel/heat, cargo/mass, maintenance,
 weapons and fitted equipment. While docked, buy fuel, service, fit equipment,
 train engineering and launch from VMS. In flight, view status and open field
-engineering; station facilities stay unavailable until docking. Money (9) is
+engineering; station facilities stay unavailable until docking. Money (3) is
 also viewable in flight, with financial services restricted to stations.
-Nav is the name for G; its map, search and planet profiles remain.
+Nav (1) opens the galaxy map; its map, search and planet profiles remain.
 
 Top navigation order: Money, Nav, VMS, Menu. Bottom action bars use compact
 buttons with separate keyboard badges, consistent spacing and right-aligned

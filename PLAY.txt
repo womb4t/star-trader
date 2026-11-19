@@ -4,11 +4,11 @@ Install: bash install.sh
 Play: open your app launcher and search for Star Trader.
 Or run: python3 star_trader.py
 
-Screens, from anywhere: 1 home, 2 Nav, 3 VMS, 4 Money, 5 Comms, 6 trade log,
-8 engineering, 9 help, 0 feedback. Ctrl+M: full screen. ESC: save and quit. Update from a clean checkout: python3 update.py
+Screens, from anywhere: 0 home, 1 Nav, 2 VMS, 3 Money, 4 Menu, 5 Comms,
+6 trade log, 8 engineering, 9 help. Ctrl+0: feedback. Ctrl+M: full screen. ESC: save and quit. Update from a clean checkout: python3 update.py
 
-Station: arrows select, B buy, S sell, U outfitting. In VMS (3): F buy fuel,
-R service hull/maintenance. In Money (4): F pay fines. L requests departure;
+Station: arrows select, B buy, S sell, U outfitting. In VMS (2): F buy fuel,
+R service hull/maintenance. In Money (3): F pay fines. L requests departure;
 wait for clearance, then L launches. A low/insufficient-fuel warning
 lets you buy fuel, cancel, or explicitly proceed. Buy and sell prices differ.
 Cargo affects speed, turning, braking, fuel use and cruise time.
@@ -130,7 +130,7 @@ Left/Right or Previous/Next browses profiles without changing your waypoint.
 I or Escape returns to the map. The main header shows your current system
 name, economy and technology level, with credits/kills below.
 
-FEEDBACK: click Feedback 0 or press 0, choose Bug report or Suggestion,
+FEEDBACK: press Ctrl+0 (or Menu 4, Report a bug), choose Bug report or Suggestion,
 then type a description and click Log report. Each report is saved as its own
 entry and sent to the developers the next time you play online. Only your text,
 game version, platform, screen and system are included; no save file is attached.
@@ -172,15 +172,15 @@ Menu; arrows and Enter select items, Escape returns. The flight-only bottom-left
 Flight controls button opens Flight/Nav/Combat/Safety mouse controls. Buttons
 use consistent 32px targets, clear labels and context-specific actions.
 
-Open Money (9) then Station jobs (5) to earn credits. Jobs return to Money.
+Open Money (3) then Station jobs (J) to earn credits. Jobs return to Money.
 
 VMS (Vessel Management System) is in the top bar, alongside Money and
-Navigation. 3 opens VMS: check hull/shields, fuel/heat, cargo/mass, maintenance,
+Navigation. 2 opens VMS: check hull/shields, fuel/heat, cargo/mass, maintenance,
 weapons and fitted equipment. While docked, buy fuel, service, fit equipment,
 train engineering and launch from VMS. In flight, view status and open field
-engineering; station facilities stay unavailable until docking. Money (9) is
+engineering; station facilities stay unavailable until docking. Money (3) is
 also viewable in flight, with financial services restricted to stations.
-Nav is the name for G; its map, search and planet profiles remain.
+Nav (1) opens the galaxy map; its map, search and planet profiles remain.
 
 Top navigation order: Money, Nav, VMS, Menu. Bottom action bars use compact
 buttons with separate keyboard badges, consistent spacing and right-aligned

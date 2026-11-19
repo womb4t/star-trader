@@ -27,27 +27,62 @@ class KeymapTests(unittest.TestCase):
 
     def test_number_row_opens_the_same_screens_from_the_market(self):
         g = self.g
-        for key, mode in ((k('2'),'map'),(k('3'),'vms'),(k('4'),'money'),(k('8'),'engineering'),(k('9'),'help'),(k('0'),'feedback')):
+        for key, mode in ((k('1'),'map'),(k('2'),'vms'),(k('3'),'money'),(k('4'),'menu'),(k('8'),'engineering'),(k('9'),'help')):
             with self.subTest(key=chr(key)):
                 g.mode = 'market'
                 g.keyboard(key)
                 self.assertEqual(g.mode, mode)
-                if mode != 'feedback':   # feedback is a text field: digits type
-                    g.keyboard(key)
-                    self.assertEqual(g.mode, 'market', 'pressing the screen key again goes back')
+                g.keyboard(key)
+                self.assertEqual(g.mode, 'market', 'pressing the screen key again goes back')
 
-    def test_one_is_home_and_six_is_the_trade_log(self):
+    def test_zero_is_home_and_six_is_the_trade_log(self):
         g = self.g
-        g.mode = 'market'; g.keyboard(k('3')); g.keyboard(k('1'))
+        g.mode = 'market'; g.keyboard(k('2')); g.keyboard(k('0'))
         self.assertEqual(g.mode, 'market')
         g.keyboard(k('6'))
         self.assertEqual(g.mode, 'trades')
+
+    def test_ctrl_zero_opens_and_closes_feedback(self):
+        g = self.g
+        g.mode = 'market'
+        g.keyboard(k('0'), ctrl=True)
+        self.assertEqual(g.mode, 'feedback')
+        g.text_input('0')   # the same key press arriving as text is not typed
+        self.assertEqual(g.feedback_text, '')
+        g.keyboard(k('h')); g.text_input('h')
+        self.assertEqual(g.feedback_text, 'h')
+        g.keyboard(k('0')); g.text_input('0')
+        self.assertEqual(g.feedback_text, 'h0', 'a plain 0 types while writing a report')
+        g.keyboard(k('0'), ctrl=True)
+        self.assertEqual(g.mode, 'market')
+
+    def test_menu_waits_for_a_choice_except_four(self):
+        g = self.g
+        g.mode = 'market'; g.keyboard(k('4'))
+        g.keyboard(k('2'))
+        self.assertEqual(g.mode, 'menu')
+        g.keyboard(k('0'), ctrl=True)
+        self.assertEqual(g.mode, 'menu')
+
+    def test_top_bar_runs_left_to_right_with_its_numbers(self):
+        g = self.g
+        xs = [x for x,_,_,_ in st.TOP_BAR]
+        self.assertEqual(xs, sorted(xs))
+        self.assertEqual([label for *_,label,_ in st.TOP_BAR], ['1 Nav','2 VMS','3 Money','4 Menu'])
+        for (x,w,_,_),(nx,_,_,_) in zip(st.TOP_BAR, st.TOP_BAR[1:]): self.assertLessEqual(x+w, nx, 'buttons overlap')
+        self.assertLessEqual(st.TOP_BAR[-1][0]+st.TOP_BAR[-1][1], 545, 'clear of Back')
+        from unittest.mock import MagicMock
+        g.d = MagicMock()
+        for (x,w,_,_),mode in zip(st.TOP_BAR, ('map','vms','money','menu')):
+            g.mode = 'market'; g.draw_mouse_ui()
+            g.click(x+w//2, 30)
+            self.assertEqual(g.mode, mode)
 
     def test_money_letters_open_its_services(self):
         g = self.g
         for key, mode in ((k('b'),'bank'),(k('r'),'redeem'),(k('j'),'jobs'),(k('t'),'trades')):
             with self.subTest(key=chr(key)):
-                g.mode = 'market'; g.keyboard(k('4'))
+                g.mode = 'market'; g.keyboard(k('3'))
                 g.keyboard(key)
                 self.assertEqual(g.mode, mode)
 
@@ -112,8 +147,10 @@ class KeymapTests(unittest.TestCase):
         self.assertEqual(g.key_hint(k('c')), 'D')
         self.assertEqual(g.key_hint(k('7')), 'R')
         g.mode = 'market'
-        self.assertEqual(g.key_hint(k('g')), '2')
-        self.assertEqual(g.key_hint(k('x')), '3')
+        self.assertEqual(g.key_hint(k('g')), '1')
+        self.assertEqual(g.key_hint(k('x')), '2')
+        self.assertEqual(g.key_hint(k('9')), '3')
+        self.assertEqual(g.key_hint(k('0')), 'Ctrl+0')
 
     def test_buttons_without_a_key_show_no_hint(self):
         g = self.g

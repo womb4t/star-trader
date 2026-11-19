@@ -24,7 +24,7 @@ import textwrap
 from market import Market, demand_factor
 import economy
 
-VERSION = '0.8.11'
+VERSION = '0.8.12'
 HOSTILITY_COOLDOWN_SECONDS = 30*60
 STATION_POLICE_CAPACITY = 6
 # Career points needed for each commander rank: kills, trade profit and hyperspace jumps all count.
@@ -86,7 +86,8 @@ F11, TAB = 1073741892, 9
 # current screen, named for what they do; Ctrl+letter is for rarer flight controls. The game's
 # handlers still speak the older keys, so each screen's letters are translated to them here (only
 # for the keyboard: on-screen buttons send their actions directly). None retires an old key.
-SCREENS = {1: 'Home', 2: 'Nav', 3: 'VMS', 4: 'Money', 5: 'Comms', 6: 'Logs', 7: 'Guide', 8: 'Engineering', 9: 'Help', 0: 'Feedback'}
+# Numbered left to right along the top bar; 0 is home. Feedback is Ctrl+0 (and Menu, 4).
+SCREENS = {0: 'Home', 1: 'Nav', 2: 'VMS', 3: 'Money', 4: 'Menu', 5: 'Comms', 6: 'Logs', 7: 'Guide', 8: 'Engineering', 9: 'Help'}
 RETIRED = {ord('x'): None, ord('g'): None, ord('-'): None}   # screens that moved to the number row
 SCREEN_LETTERS = {
     'flight': {ord('d'): ord('c'), ord('r'): ord('7'), ord('f'): ord('4'), ord('l'): ord('b'), ord('j'): ord('z'),
@@ -102,7 +103,10 @@ FLIGHT_CTRL = {ord('p'): ord('p'), ord('s'): ord('d'), ord('r'): ord('a'), ord('
                ord('f'): ord('i'), ord('g'): ord('y'), ord('e'): ord('6')}
 ANY_CTRL = {ord('n'): ord('-'), ord('m'): ord('3')}   # quick note; full screen (the Pixelbook has no F11)
 # While these are showing, the number row waits: they need an answer first.
-HOLD_SCREENS = ('hyperspace', 'dead', 'prison', 'intro', 'hail', 'distress', 'departure', 'trade_deal', 'menu')
+# The top bar, left to right, labelled with its number-row keys: (x, width, label, action).
+TOP_BAR = ((155,90,'1 Nav',('open_navigation',)), (250,90,'2 VMS',('open_hub','vms')),
+           (345,105,'3 Money',('open_hub','money')), (455,85,'4 Menu',('open_utility','menu')))
+HOLD_SCREENS = ('hyperspace', 'dead', 'prison', 'intro', 'hail', 'distress', 'departure', 'trade_deal')
 GREEN, GOLD, RED = (68, 227, 182), (255, 206, 113), (255, 112, 100)
 WANTED_COLOR, SURPLUS_COLOR = (240, 150, 70), (110, 170, 240)  # station stock the economy wants or has too much of
 SYSTEMS = [
@@ -1189,7 +1193,7 @@ class Game:
 
     def request_launch(self):
         if self.p.fine and PROFILES[self.p.system][0] not in ('Anarchy','Feudal'):
-            self.message = f'STATION CONTROL: launch clearance withheld until your {self.p.fine} cr fine is paid: 4 Money, then F Pay fines.'
+            self.message = f'STATION CONTROL: launch clearance withheld until your {self.p.fine} cr fine is paid: 3 Money, then F Pay fines.'
             return
         if self.launch_warnings():
             self.launch_return = self.mode
@@ -1713,7 +1717,7 @@ class Game:
         self.autodock = False
         self.keys.clear()
         self.cloaked = False
-        self.message = ('Docked.' + inspection) if inspection else 'Docked. 3 VMS for ship services; 4 Money; 2 Nav.'
+        self.message = ('Docked.' + inspection) if inspection else 'Docked. 2 VMS for ship services; 3 Money; 1 Nav.'
         if solar_flare() and not inspection: self.message = 'Docked. A solar flare is blocking comms; BEST IN RANGE has no signal.'
         if arrest: self.arrest()
         self.save()
@@ -2153,6 +2157,8 @@ class Game:
         return None
 
     def text_input(self, text):
+        swallow,self.swallow_text = getattr(self,'swallow_text',None),None
+        if swallow and text == swallow: return
         field = self.active_text_field()
         if field is None: return
         owner,name,limit = field
@@ -2221,6 +2227,7 @@ class Game:
         lines = []
         for paragraph in self.feedback_text.split('\n'):
             lines.extend(textwrap.wrap(paragraph,89) or [''])
+        lines[-1] += self.caret()
         for i,line in enumerate(lines[-11:]): d.text(45,215+i*25,line)
         d.text(45,490,f'{len(self.feedback_text)}/1500 characters',GOLD)
         d.text(35,535,'Each report is logged separately and sent to the developers when you play online.')
@@ -2239,7 +2246,7 @@ class Game:
             'Online, other commanders fly in the same universe: you will see their ships on your scanner.']),
         ('HOW TO PLAY',[
             'Docked: select cargo with UP / DOWN, then B buys and S sells. Food is cheap on agricultural worlds and sells well at industrial ones.',
-            'Money (4), Nav (2), VMS (3) and Menu run along the top; the number row opens every screen. VMS refuels, repairs and fits equipment.',
+            'Nav (1), VMS (2), Money (3) and Menu (4) run along the top, and 0 always brings you home to the market or cockpit. VMS refuels, repairs and fits equipment.',
             'L launches. In flight W / S set the throttle, the arrows steer and Q / E roll. In Nav, lock a destination, fly 5,000 m clear of the station, then hold H for 3 seconds to jump. Watch your fuel.',
             'Near a station press R for docking clearance, then fly slowly into the slot, matching its roll. Within 5,000 m of a lawful station, pirates leave you alone.',
             'BACKSPACE goes back. ESC saves and closes the game at any time. Menu, Controls has the full pilot handbook.']),
@@ -2352,6 +2359,7 @@ class Game:
         for paragraph in self.p.notes.split('\n'): lines.extend(textwrap.wrap(paragraph,89) or [''])
         self.notes_scroll = max(0,min(self.notes_scroll,max(0,len(lines)-17)))
         end = len(lines)-self.notes_scroll
+        if self.notes_scroll == 0: lines[-1] += self.caret()
         for i,line in enumerate(lines[max(0,end-17):end]): d.text(45,140+i*25,line)
         d.text(35,615,f'{len(self.p.notes)}/4000 characters. Typing appends; arrows scroll; ENTER adds a line.')
 
@@ -2429,9 +2437,9 @@ class Game:
         return [
             ('Controls',lambda:self.open_utility('help')),
             ('Notes',lambda:self.open_utility('notes')),
-            ('Report a bug / 0',lambda:self.open_utility('feedback')),
-            ('Check updates / 2',lambda:self.open_utility('updates')),
-            ('Fullscreen / 3',self.mouse_fullscreen),
+            ('Report a bug / Ctrl+0',lambda:self.open_utility('feedback')),
+            ('Check updates',lambda:self.open_utility('updates')),
+            ('Fullscreen / Ctrl+M',self.mouse_fullscreen),
             ('Save and quit',self.request_exit),
             ('Commander name',lambda:self.open_utility('rename')),
             ('Introduction',lambda:self.open_utility('intro'))]
@@ -2454,11 +2462,17 @@ class Game:
             x,y = 35+(i%2)*515,200+(i//2)*110
             d.text(x+10,y+42,description,(135,175,185))
 
+    @staticmethod
+    def caret():
+        return '_' if int(time.monotonic()*2)%2 == 0 else ' '
+
     def typing(self):
         return bool(self.active_text_field()) or (self.mode == 'map' and self.map_input)
 
     def keyboard(self, k, ctrl=False):
         """A key from the keyboard: the key map above, then the game's own handlers."""
+        self.swallow_text = None
+        if ctrl and k == ord('0'): return self.toggle_feedback()
         if k == 27 or self.typing(): return self.key(k)   # Esc, and typing into text fields, as before
         if k == F11: return self.key(ord('3'))             # full screen
         if ctrl:
@@ -2471,14 +2485,20 @@ class Game:
 
     def open_screen(self, n):
         """The number row: the same screen from anywhere (pressing it again goes back)."""
+        if self.mode == 'menu':
+            if n == 4: self.mode = self.menu_return
+            return   # the menu waits for a choice
         if self.mode in HOLD_SCREENS: return
         self.alert = None
-        if n == 1:   # home: the market when docked, the cockpit when flying
+        if n == 0:   # home: the market when docked, the cockpit when flying
             base = self.session_mode()
             if base in ('market','flight','cruise'): self.mode = base; self.keys.clear()
-        elif n == 2: self.key(ord('g')) if self.mode == 'launch_warning' else self.open_navigation()
-        elif n == 3: self.open_hub('vms')
-        elif n == 4: self.open_hub('money')
+        elif n == 1: self.key(ord('g')) if self.mode == 'launch_warning' else self.open_navigation()
+        elif n == 2: self.open_hub('vms')
+        elif n == 3: self.open_hub('money')
+        elif n == 4:
+            self.menu_return,self.mode = self.mode,'menu'
+            self.release_mouse(); self.keys.clear()
         elif n == 5:
             if self.mode == 'dsc': self.mode = 'flight'
             elif self.mode in ('flight','cruise'): self.open_dsc()
@@ -2494,16 +2514,20 @@ class Game:
         elif n == 9:
             if self.mode == 'help': self.mode = self.help_return
             else: self.help_return,self.mode = self.mode,'help'; self.keys.clear()
-        elif n == 0:
-            if self.mode == 'feedback': self.mode = self.feedback_return
-            else:
-                self.feedback_return,self.mode = self.mode,'feedback'
-                self.release_mouse(); self.keys.clear()
+
+    def toggle_feedback(self):
+        """Ctrl+0: the bug and suggestion screen from anywhere (again goes back)."""
+        if self.mode == 'feedback': self.mode = self.feedback_return; return
+        if self.mode in HOLD_SCREENS or self.mode == 'menu': return
+        self.alert = None
+        self.feedback_return,self.mode = self.mode,'feedback'
+        self.release_mouse(); self.keys.clear()
+        self.swallow_text = '0'   # some keyboards also type the 0
 
     def key_hint(self, legacy):
         """The keyboard key that does what an on-screen button's action key does, for its label."""
         if legacy is None: return None   # a button with no key (its retired-key entries are None too)
-        screens = {ord('g'): '2', ord('x'): '3', ord('9'): '4', ord('8'): '8', ord('1'): '9', ord('0'): '0'}
+        screens = {ord('g'): '1', ord('x'): '2', ord('9'): '3', ord('8'): '8', ord('1'): '9', ord('0'): 'Ctrl+0'}
         letters = SCREEN_LETTERS.get(self.mode, {})
         for new, old in letters.items():
             if old == legacy: return 'Tab' if new == TAB else chr(new).upper()
@@ -3012,7 +3036,7 @@ class Game:
 
     def jump(self):
         if self.broken_down:
-            self.message = 'Drive disabled. Engineering 8 or distress 6.'
+            self.message = 'Drive disabled. Engineering 8 or distress Ctrl+E.'
             return
         if self.jump_charge: return
         w = self.p.waypoint
@@ -3036,7 +3060,7 @@ class Game:
 
     def begin_cruise(self):
         if self.broken_down:
-            self.message = 'Drive disabled. Engineering 8 or distress 6.'
+            self.message = 'Drive disabled. Engineering 8 or distress Ctrl+E.'
             return
         if self.mode == 'map' and self.map_return not in ('flight','cruise'):
             self.message = 'Launch before beginning interstellar cruise.'
@@ -3556,7 +3580,7 @@ class Game:
                 self.autodock = False
                 self.jump_charge = None
                 self.speed = 0
-                self.message = 'DRIVE BREAKDOWN. Engineering 8 for repairs, or 6 for rescue.'
+                self.message = 'DRIVE BREAKDOWN. Engineering 8 for repairs, or Ctrl+E for rescue.'
         self.update_station_security(dt)
         self.assist_spawn_timer -= dt
         if self.assist_spawn_timer <= 0 and self.disabled_ship is None and self.enemy is None and math.sqrt(sum(v*v for v in self.station)) > 1000:
@@ -4008,13 +4032,10 @@ class Game:
         self.footer_actions = []
         d = self.d
         if self.mode not in ('feedback','notes','redeem','rename','menu','prison','intro'):
-            self.mouse_button(155,18,95,'Money',action=lambda:self.open_hub('money'))
-            self.mouse_button(365,18,75,'VMS',action=lambda:self.open_hub('vms'))
-            self.mouse_button(260,18,95,'Nav',action=self.open_navigation)
-            self.mouse_button(450,18,85,'Menu',action=lambda:self.open_utility('menu'))
+            for x,w,label,action in TOP_BAR: self.mouse_button(x,18,w,label,action=getattr(self,action[0]) if len(action) == 1 else (lambda a=action:getattr(self,a[0])(a[1])))
             section = 'money' if self.mode in ('money','bank','jobs','exchange') else 'vms' if self.mode in ('vms','outfit','engineering') else 'map' if self.mode in ('map','planet_profile') else None
             if section:
-                x,w = {'money':(155,95),'vms':(365,75),'map':(260,95)}[section]
+                x,w = {'map':TOP_BAR[0][:2],'vms':TOP_BAR[1][:2],'money':TOP_BAR[2][:2]}[section]
                 d.rect(x,18,w,32,GOLD)
         modal = self.mode not in ('market','flight','cruise','hyperspace','dead','prison')
         self.mouse_button(545,18,85,'Back' if modal else 'Quit',action=self.mouse_back)
@@ -4159,7 +4180,7 @@ class Game:
             self.mouse_button(35,674,190,'Flight controls',action=lambda:setattr(self,'mouse_controls',not self.mouse_controls))
         if self.mode == 'flight' and self.mouse_controls:
             groups=[('Flight', [('Thrust W',ord('w'),True),('Brake S',ord('s'),True),('Fire Spc',32,True),('Left',LEFT,True),('Up',UP,True),('Right',RIGHT,True),('Roll Q',ord('q'),True),('Down',DOWN,True),('Roll E',ord('e'),True)]),
-                ('Nav',[('Nav 2',ord('g'),False),('Hold jump',ord('h'),True),('Cruise',ord('t'),False),('Station',ord('d'),False),('Planet',ord('p'),False),('Rocks',ord('a'),False),('Sun',ord('j'),False),('Scoop',ord('o'),False),('Guide ON' if self.course_assist else 'Guide ^G',ord('y'),False)]),
+                ('Nav',[('Nav 1',ord('g'),False),('Hold jump',ord('h'),True),('Cruise',ord('t'),False),('Station',ord('d'),False),('Planet',ord('p'),False),('Rocks',ord('a'),False),('Sun',ord('j'),False),('Scoop',ord('o'),False),('Guide ON' if self.course_assist else 'Guide ^G',ord('y'),False)]),
                 ('Combat',[('Fire',32,True),('View F',ord('4'),False),('Laser',ord('v'),False),('Missile',ord('m'),False),('Mine',ord('b'),False),('Jammer',ord('z'),False),('Cloak',ord('k'),False),('Target',ord('5'),False)]),
                 ('Safety',[('Surrender R' if not self.p.deep_space and self.station_hostilities[self.p.system] and self.arrest_pending() and not self.surrendering else 'Radio R',ord('7'),False),('Hail N',ord('n'),False),('Autodock',ord('c'),False),('Skills',ord('8'),False),('Distress',ord('6'),False),('Fine ON' if self.fine_control else 'Fine ^F',ord('i'),False)])]
             d.fill(30,105,350,270,(5,16,27));d.rect(30,105,350,270,GREEN)
@@ -4204,12 +4225,12 @@ class Game:
     def help_sections(self):
         return [
             ('Keys',[
-                ('Screens: the number row','1 2 3 4 5 6 8 9 0','1 Home (market or cockpit), 2 Nav, 3 VMS, 4 Money, 5 Comms, 6 Logs, 8 Engineering, 9 Help, 0 Feedback. Press again to go back.'),
+                ('Screens: the number row','0 1 2 3 4 5 6 8 9','0 Home (market or cockpit), 1 Nav, 2 VMS, 3 Money, 4 Menu, 5 Comms, 6 Logs, 8 Engineering, 9 Help. Press again to go back.'),
                 ('Actions: letters','B buy, S sell, D dock...','Letters act on the screen you are on and are named for what they do. Every button shows its key.'),
-                ('Rarer controls','CTRL + letter (^)','Ctrl+N quick note, Ctrl+M full screen; in flight Ctrl+P/S/R/U beacons, Ctrl+F fine steering, Ctrl+G guidance, Ctrl+E distress.'),
+                ('Rarer controls','CTRL + letter (^)','Ctrl+0 bug report or suggestion, Ctrl+N quick note, Ctrl+M full screen; in flight Ctrl+P/S/R/U beacons, Ctrl+F fine steering, Ctrl+G guidance, Ctrl+E distress.'),
                 ('Back and close','BACKSPACE / ESC','Backspace goes back. Esc saves and closes from every screen.'),
-                ('Menu','`','Notes, feedback, updates, display size and save and close.'),
-                ('Changed keys','In this update','Nav is now 2 (was G), VMS 3 (was X), Money 4 (was 9), Help 9 (was 1), docking computer D (was C), request docking R (was 7).')]),
+                ('Menu','4 or `','Notes, feedback, updates, display size and save and close.'),
+                ('Changed keys','In this update','Screens now run left to right: 0 Home, 1 Nav, 2 VMS, 3 Money, 4 Menu. Feedback moved to Ctrl+0.')]),
             ('Quick start',[
                 ('First trade','B / S','Buy food on Halvora. Sell it at an industrial port such as Corvant.'),
                 ('Mouse flight controls','Flight controls','Open the bottom-left panel. Flight, Nav, Combat and Safety group the actions.'),
@@ -4297,7 +4318,7 @@ class Game:
             d.text(45,180,'Type a name (up to 24 characters), then press ENTER or click Save name.')
             d.rect(35,245,1030,60,GREEN)
             if self.text_selection_all and self.text_selection_mode == 'rename': d.fill(40,250,max(20,len(p.name)*11+20),42,(20,65,70))
-            d.text(45,265,p.name+'_',GOLD)
+            d.text(45,265,p.name+self.caret(),GOLD)
             remote = getattr(self,'remote_save',None)
             if remote and remote.player_name: d.text(45,360,f'Shown on your status panel. Other pilots online see your account name: {remote.player_name}.')
             d.text(45,415,'ESC saves and closes.')
@@ -4306,7 +4327,7 @@ class Game:
             d.text(45,180,'Type a code or paste with CTRL+V, then press ENTER to redeem.')
             d.rect(35,245,1030,60,GREEN)
             if self.text_selection_all and self.text_selection_mode == 'redeem': d.fill(40,250,max(20,len(self.credit_code_text)*11+20),42,(20,65,70))
-            d.text(45,265,self.credit_code_text+'_',GOLD)
+            d.text(45,265,self.credit_code_text+self.caret(),GOLD)
             d.text(45,360,'Codes can only be redeemed once by this pilot.')
             d.text(45,415,'Click Return to Money. ESC saves and closes.')
         elif self.mode == 'trade_deal':
@@ -4404,7 +4425,7 @@ class Game:
             wanted = self.wanted_level()
             for i,t in enumerate(['COMMANDER STATUS',f'Cmdr  {self.commander_name()[:16]}',f'Rank  {p.rank}',f'Wanted {"*"*wanted}{"-"*(5-wanted)} {wanted}/5',f'Cargo {sum(p.cargo)}/{p.capacity} t',f'Fuel  {p.fuel:.2f}/7',f'Hull  {p.hull:.0f}%',f'Refill {p.fuel_cost()} cr',f'Service {p.service_cost()} cr',f'Mines {p.mines}/4',f'Fine {p.fine} cr',f'Wear {p.maintenance:.0f}%',f'Eng. {p.engineering_level}/5']): d.text(790,130+i*35,t,RED if i == 3 and wanted else GREEN)
             d.text(35,562,'Ship fuel, service, fitting and engineering: open VMS above.')
-            d.text(35,590,'4 Money / station jobs   3 VMS   2 Nav')
+            d.text(35,590,'3 Money / station jobs   2 VMS   1 Nav')
         elif self.mode == 'planet_profile':
             self.draw_planet_profile()
         elif self.mode == 'map':
