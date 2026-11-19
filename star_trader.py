@@ -70,6 +70,13 @@ EQUIPMENT = [
     ('rear', 'Rear laser mount', 600, 4, 'Comes with a pulse laser; in rear view (F), V mounts any laser you own'),
 ]
 RESALE = 0.5   # outfitters buy kit back at half its new price
+LAWLESS = ('Anarchy','Feudal')
+# Crymto exchanges, by government: (% fee Crymto -> credits, % fee credits -> Crymto, compliance checks as a
+# share of the world's customs search). Lawless ports launder quietly; lawful ones charge more and check.
+EXCHANGE_TERMS = {'Anarchy':(20,10,0.), 'Feudal':(20,10,0.), 'Dictatorship':(30,10,.25), 'Communist':(30,10,.25),
+                  'Confederacy':(30,10,.25), 'Democracy':(40,10,.5), 'Corporate state':(40,10,.5)}
+COMPLIANCE_SEIZE = 50    # % of the Crymto being exchanged that a compliance check freezes
+COMPLIANCE_FINE = 10     # % of it added to your fines
 LASERS = {'pulse': (0.30, 1), 'beam': (0.14, 1), 'military': (0.12, 2), 'mining': (0.65, 1)}
 # Full strength of NPC ships; the first half of it is shields, the rest hull.
 ENEMY_STRENGTH = {'pirate': 6, 'police': 10}
@@ -471,8 +478,8 @@ class Pilot:
         if buy:
             if stock[good] <= 0: return 'Station has no stock.'
             if sum(self.cargo) >= self.capacity: return 'Cargo hold full.'
-            dirty = min(self.crymto,value) if good in ILLEGAL and use_crymto else 0
-            if self.credits < value-dirty: return 'Insufficient funds (Crymto is only accepted for contraband).'
+            dirty = min(self.crymto,value) if (good in ILLEGAL and use_crymto) or self.crymto_accepted else 0
+            if self.credits < value-dirty: return 'Insufficient funds.' if self.crymto_accepted else 'Insufficient funds (Crymto pays for contraband here; anarchy and feudal ports take it for anything).'
             self.crymto -= dirty
             self.credits -= value-dirty
             if self.cargo[good] == 0: self.cargo_paid[good] = 0
@@ -525,8 +532,8 @@ class Pilot:
         if key in self.equipment: return 'Already installed.'
         if key == 'mine' and self.mines >= 4: return 'Mine rack full (4).'
         if key == 'missile' and self.missiles >= 4: return 'Missile rack full (4).'
-        if self.credits < cost: return 'Insufficient credits.'
-        self.credits -= cost
+        dirty = self.spend(cost)
+        if dirty is None: return 'Insufficient credits.'
         self.book('equipment',-cost)
         if key == 'missile': self.missiles += 1
         elif key == 'mine': self.mines += 1
@@ -534,8 +541,29 @@ class Pilot:
         if key in LASERS:
             self.laser = key
             if 'rear' in self.equipment: return label+' fitted to the front mount. In rear view (F), V moves it to the rear mount.'
-            return label+' fitted. Pulse laser kept: V switches; a rear mount fits it behind you.'
-        return label + ' fitted.'
+            return label+' fitted. Pulse laser kept: V switches; a rear mount fits it behind you.'+self.paid_note(dirty)
+        return label + ' fitted.'+self.paid_note(dirty)
+
+    @property
+    def crymto_accepted(self):
+        """Anarchy and feudal ports take Crymto for anything, as good as credits."""
+        return not self.deep_space and PROFILES[self.system][0] in LAWLESS
+
+    def funds(self):
+        return self.credits+(self.crymto if self.crymto_accepted else 0)
+
+    def spend(self, cost):
+        """Pays cost: Crymto first where it is accepted (it is worth less than credits anywhere else), then credits.
+        Returns the Crymto used, or None when funds are short (nothing is taken)."""
+        dirty = min(self.crymto,cost) if self.crymto_accepted else 0
+        if self.credits < cost-dirty: return None
+        self.crymto -= dirty
+        self.credits -= cost-dirty
+        return dirty
+
+    @staticmethod
+    def paid_note(dirty):
+        return f' Paid {dirty} in Crymto.' if dirty else ''
 
     def resale_value(self, index):
         return int(EQUIPMENT[index][2]*RESALE)
@@ -577,16 +605,16 @@ class Pilot:
 
     def refuel(self):
         cost = self.fuel_cost()
-        if self.credits >= cost:
-            self.credits -= cost
+        if self.funds() >= cost:
+            dirty = self.spend(cost)
             self.book('running',-cost)
             self.fuel = 7.0
-            return f'Fuel purchased: {cost} cr. Tank full.'
+            return f'Fuel purchased: {cost} cr. Tank full.'+self.paid_note(dirty)
         # A short wallet still buys whole units, so a broke pilot can always limp to the next job.
         price = fuel_price(self.system)
-        units = min(int(7-self.fuel),int(self.credits)//price)
+        units = min(int(7-self.fuel),int(self.funds())//price)
         if units <= 0: return f'Fuel costs {price} cr per unit here. Sell cargo or take a station job.'
-        self.credits -= units*price
+        self.spend(units*price)
         self.book('running',-units*price)
         self.fuel = round(self.fuel+units,5)
         return f'Bought {units} fuel unit{"s" if units > 1 else ""} for {units*price} cr (all you can afford). Tank {self.fuel:.2f}/7.'
@@ -599,13 +627,13 @@ class Pilot:
 
     def repair(self):
         cost = self.service_cost()
-        if self.credits < cost: return f'Repairs cost {cost} cr.'
-        self.credits -= cost
+        dirty = self.spend(cost)
+        if dirty is None: return f'Repairs cost {cost} cr.'
         self.book('running',-cost)
         self.hull = 100
         self.maintenance = 0.
         self.flights_since_service = 0
-        return f'Hull and maintenance serviced: {cost} cr. Fuel sold separately (F).'
+        return f'Hull and maintenance serviced: {cost} cr. Fuel sold separately (F).'+self.paid_note(dirty)
 
     def save(self):
         SAVE.parent.mkdir(parents=True, exist_ok=True)
@@ -1390,8 +1418,7 @@ class Game:
         bay = self.p.storage[self.p.system]
         if bay['owned']: self.message = 'You already own this station bay.'; return
         cost = 50 if rent else 750
-        if self.p.credits < cost: self.message = f'Bay {"rental" if rent else "purchase"} costs {cost} cr.'; return
-        self.p.credits -= cost
+        if self.p.spend(cost) is None: self.message = f'Bay {"rental" if rent else "purchase"} costs {cost} cr.'; return
         self.p.book('running',-cost)
         if rent: bay['rented_until'] = max(time.time(),bay['rented_until'])+7*86400
         else: bay['owned'] = True
@@ -1919,10 +1946,9 @@ class Game:
             self.message = 'Engineering level 5: training complete.'
             return
         cost = [200,400,800,1600,3200][self.p.engineering_level]
-        if self.p.credits < cost:
+        if self.p.spend(cost) is None:
             self.message = f'Next engineering course costs {cost} cr.'
             return
-        self.p.credits -= cost
         self.p.book('equipment',-cost)
         self.p.engineering_level += 1
         self.message = f'Engineering trained to level {self.p.engineering_level}.'
@@ -1948,10 +1974,9 @@ class Game:
         elif not self.broken_down and self.p.hull >= 100 and self.p.maintenance <= 0:
             self.message = 'Your ship needs no field repair.'
             return
-        if self.p.credits < 15:
+        if self.p.spend(15) is None:
             self.message = 'A repair attempt needs 15 credits of parts. Distress rescue remains available.'
             return
-        self.p.credits -= 15
         self.p.book('running',-15)
         if random.random() < self.engineering_chance(other):
             self.p.engineering_failures = 0
@@ -2435,16 +2460,30 @@ class Game:
         d.text(45,610,f'Workshop experience: {self.p.workshop_xp} XP. BACKSPACE returns to Money.')
 
     def exchange_available(self):
-        return not self.p.deep_space and PROFILES[self.p.system][0] in ('Anarchy','Feudal')
+        return not self.p.deep_space
+
+    def exchange_terms(self):
+        """(fee % Crymto -> credits, fee % credits -> Crymto, chance of a compliance check) at this port."""
+        launder, buy, check = EXCHANGE_TERMS.get(PROFILES[self.p.system][0],(40,10,.5))
+        return launder, buy, check*self.customs_chance(self.p.system)
 
     def convert_crymto(self, launder=True):
         if self.mode != 'exchange' or not self.exchange_available(): return
         balance = self.p.crymto if launder else self.p.credits
         amount = math.floor(balance if self.exchange_amount is None else min(balance,self.exchange_amount))
-        rate = 80 if launder else 90
-        received = amount*rate//100
+        launder_fee,buy_fee,check = self.exchange_terms()
+        received = amount*(100-(launder_fee if launder else buy_fee))//100
         if received < 1:
             self.message = 'Amount too small after the exchange fee. No funds taken.'
+            return
+        if launder and check and random.random() < check:
+            # A lawful port's compliance check: part of the Crymto is frozen and the rest is refused; a fine follows.
+            seized,fine = amount*COMPLIANCE_SEIZE//100, amount*COMPLIANCE_FINE//100
+            self.p.crymto -= seized
+            self.p.fine += fine
+            self.p.book('fines',-seized)
+            self.message = f'COMPLIANCE CHECK: {seized} Crymto frozen as suspected contraband proceeds and a {fine} cr fine added. Nothing exchanged.'
+            self.checkpoint()
             return
         if launder:
             self.p.crymto -= amount
@@ -2459,14 +2498,19 @@ class Game:
         d = self.d
         d.text(35,85,'CRYMTO EXCHANGE / '+SYSTEMS[self.p.system][0].upper(),GOLD)
         d.text(45,145,f'Credits: {self.p.credits:.2f}    Crymto: {self.p.crymto}')
+        launder_fee,buy_fee,check = self.exchange_terms()
+        government = PROFILES[self.p.system][0]
         d.text(45,205,'Contraband sales pay Crymto. Crymto survives ship loss; banks hold credits.')
-        d.text(45,250,'B buys with credits. C at the market buys contraband using Crymto first.')
-        d.text(45,310,'Crymto to credits: 20% fee. Credits to Crymto: 10% fee.',GOLD)
+        if self.p.crymto_accepted: d.text(45,240,f'{government} port: Crymto pays for anything here, before credits.',(120,220,140))
+        else: d.text(45,240,'C at the market buys contraband with Crymto. Anarchy and feudal ports take it for anything.')
+        d.text(45,290,f'Crymto to credits: {launder_fee}% fee. Credits to Crymto: {buy_fee}% fee.',GOLD)
+        if check: d.text(45,320,f'{government} compliance: {check*100:.0f}% chance of a check; it freezes {COMPLIANCE_SEIZE}% and fines {COMPLIANCE_FINE}%.',RED)
+        else: d.text(45,320,'No compliance checks at this port.',(120,220,140))
         d.text(45,355,'Exchange proceeds are rounded down to whole units; no fee-free loop.')
         for i,launder in enumerate((True,False)):
             balance = self.p.crymto if launder else self.p.credits
             amount = math.floor(balance if self.exchange_amount is None else min(balance,self.exchange_amount))
-            net = amount*(80 if launder else 90)//100
+            net = amount*(100-(launder_fee if launder else buy_fee))//100
             d.text(45,425+i*45,f'{amount} '+('Crymto -> ' if launder else 'credits -> ')+str(net)+(' credits' if launder else ' Crymto'))
         d.text(45,550,'Select an amount, then choose a conversion. BACKSPACE returns to Money.')
 
@@ -2636,11 +2680,11 @@ class Game:
             self.checkpoint()
 
     def pay_fines(self):
-        if self.p.credits < self.p.fine:
+        if self.p.funds() < self.p.fine:
             self.message = f'Insufficient credits. Outstanding fines: {self.p.fine} cr.'
         else:
             amount = self.p.fine
-            self.p.credits -= amount
+            self.p.spend(amount)
             self.p.book('fines',-amount)
             self.p.fine = 0
             self.message = f'Paid {amount} cr in fines. Station hostility is separate.'
@@ -2653,7 +2697,8 @@ class Game:
                                  f'Bank: {p.bank_balance:,.2f} credits',f'Outstanding fines: {p.fine:,} credits']):
             d.text(45,155+i*45,line)
         d.text(45,350,'Banking, exchange, codes, fines and paid station jobs.')
-        d.text(45,435,'Crymto exchange: '+('available here' if self.exchange_available() else 'feudal and anarchy ports only'))
+        launder_fee = self.exchange_terms()[0] if self.exchange_available() else None
+        d.text(45,435,'Crymto exchange: '+(f'{launder_fee}% fee to cash Crymto here' if launder_fee is not None else 'dock to exchange'))
         if self.money_return != 'market': d.text(45,480,'T Trade log and E Reports are available anywhere.')
 
         d.text(45,320,f'Pay fines costs {p.fine:,} credits. Code redemption is single-use per pilot.')
@@ -3032,7 +3077,7 @@ class Game:
             elif k == ord('1'): self.mode = 'bank'
             elif k == ord('2'):
                 if self.exchange_available(): self.mode = 'exchange'
-                else: self.message = 'No Crymto exchange here. Visit a feudal or anarchy port.'
+                else: self.message = 'Dock at a station to use a Crymto exchange.'
             elif k == ord('3'): self.mode = 'redeem'
             elif k == ord('4'): self.pay_fines()
             elif k in (ord('5'),ord('j')): self.mode = 'jobs'; self.alert = None
@@ -3066,7 +3111,7 @@ class Game:
             return
         if k == ord('e') and self.mode in ('market','outfit','bank'):
             if self.exchange_available(): self.mode = 'exchange'; self.alert = None
-            else: self.message = 'Crymto exchanges operate at feudal and anarchy ports.'
+            else: self.message = 'Dock at a station to use a Crymto exchange.'
             return
         if self.mode == 'feedback':
             if k in (27,ord('0')):
@@ -3245,8 +3290,8 @@ class Game:
                 self.message = self.p.refuel()
                 self.save()
             if k == ord('p'):
-                if self.p.credits >= self.p.fine:
-                    self.p.credits -= self.p.fine
+                if self.p.funds() >= self.p.fine:
+                    self.p.spend(self.p.fine)
                     self.p.book('fines',-self.p.fine)
                     self.p.fine = 0
                     self.message = 'Fines cleared.'

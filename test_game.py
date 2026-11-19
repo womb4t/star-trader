@@ -533,23 +533,26 @@ class GameplayTests(unittest.TestCase):
         self.assertEqual(restored.p.crymto,500)
         self.assertEqual(restored.p.credits,0)
 
-    def test_crymto_exchange_is_restricted_and_charges_fees(self):
+    def test_crymto_exchange_works_everywhere_with_fees_by_government(self):
         g = self.game
         g.p.crymto = 100
-        g.key(ord('e'))
-        self.assertEqual(g.mode,'market')
-        g.p.system = 6
+        g.p.system = 0      # Halvora, a dictatorship: 30% and compliance checks
         g.key(ord('e'))
         self.assertEqual(g.mode,'exchange')
         g.exchange_amount = 100
         cash = g.p.credits
-        g.convert_crymto(True)
-        self.assertEqual(g.p.crymto,0)
-        self.assertEqual(g.p.credits,cash+80)
+        with patch('random.random', return_value=.99): g.convert_crymto(True)
+        self.assertEqual((g.p.crymto,g.p.credits),(0,cash+70))
+        g.mode,g.p.system = 'market',6      # Duskholt, feudal: 20%, no checks
+        g.p.crymto = 100
+        g.key(ord('e'))
+        self.assertEqual(g.mode,'exchange')
+        with patch('random.random', return_value=0.): g.convert_crymto(True)
+        self.assertEqual((g.p.crymto,g.p.credits),(0,cash+150))
         g.exchange_amount = 80
         g.convert_crymto(False)
         self.assertEqual(g.p.crymto,72)
-        self.assertEqual(g.p.credits,cash)
+        self.assertEqual(g.p.credits,cash+70)
 
     def test_clean_payment_requires_explicit_deal_and_rewards_cover_fees(self):
         g = self.game

@@ -5,6 +5,8 @@ From your suggestions:
 - **The trade log has In, Out and Balance columns**, and totals money in and out at the top.
 - **Sell your ship's kit.** In Outfitting, S sells the selected item back for half its new price: lasers, mounts, scoops, the cargo bay (once the hold is down to 20 t), docking computer, missiles and mines. Selling a laser puts the built-in pulse laser back on that mount. Buying a laser now tells you the pulse laser is kept: V switches lasers, and a rear laser mount carries one behind you.
 
+- **Crymto goes further.** Anarchy and feudal ports take Crymto for anything (market goods, kit, fuel, service, bays, training and fines), spending it before credits. Every station now has a Crymto exchange: cashing Crymto costs 20% at lawless ports, 30% under dictatorships, communists and confederacies, and 40% in democracies and corporate states. Lawful ports also run compliance checks, more often where the Council funds more police: a check freezes half the Crymto you tried to exchange and adds a 10% fine. Buying Crymto costs 10% everywhere.
+
 From your bug reports:
 - **Selling scooped or salvaged cargo no longer shows a false loss.** Cargo lost when your ship is destroyed, seized by customs, taken as a rescue fee or moved to a station bay used to leave its purchase cost behind, and the next free tonne of that good was charged for it. The cost now goes with the cargo (station bays keep it until you take the cargo back), and saves are cleaned up when loaded.
 # 0.9.1 — fix: the game closed as soon as it went online

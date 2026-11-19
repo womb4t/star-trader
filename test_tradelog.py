@@ -307,5 +307,76 @@ class SellKitTests(Base):
         self.assertIn('sold for 262 cr', g.message)
 
 
+class CrymtoTests(Base):
+    FEUDAL, ANARCHY, DICTATORSHIP, DEMOCRACY = 6, 4, 0, 2
+
+    def test_lawless_ports_take_crymto_for_anything_first(self):
+        p = self.p
+        p.system, p.credits, p.crymto = self.FEUDAL, 1000, 500
+        p.equipment = []
+        message = p.buy_equipment(1)              # 400 cr cargo bay
+        self.assertEqual((p.crymto, p.credits), (100, 1000))
+        self.assertIn('Paid 400 in Crymto', message)
+        p.trade(FOOD, True, value=150)            # a legal good with B: Crymto first, then credits
+        self.assertEqual((p.crymto, p.credits), (0, 950))
+        p.hull = 50
+        p.repair()
+        self.assertLess(p.credits, 950)
+
+    def test_crymto_alone_can_pay_at_lawless_ports(self):
+        p = self.p
+        p.system, p.credits, p.crymto = self.ANARCHY, 0, 2000
+        p.fuel = 2
+        self.assertIn('Tank full', p.refuel())
+        self.assertIn('fitted', p.buy_equipment(1))
+        self.g.p.fine = 100
+        self.g.pay_fines()
+        self.assertEqual(p.fine, 0)
+
+    def test_lawful_ports_still_want_credits(self):
+        p = self.p
+        p.system, p.credits, p.crymto = self.DEMOCRACY, 10, 5000
+        p.equipment = []
+        self.assertEqual(p.buy_equipment(1), 'Insufficient credits.')
+        self.assertEqual(p.crymto, 5000)
+        self.assertIn('anarchy and feudal ports take it for anything', p.trade(FOOD, True, value=150))
+        p.credits = 1000
+        p.buy_equipment(1)
+        self.assertEqual((p.crymto, p.credits), (5000, 600))
+
+    def test_exchange_terms_by_government(self):
+        g = self.g
+        for system, fee in ((self.FEUDAL, 20), (self.ANARCHY, 20), (self.DICTATORSHIP, 30), (self.DEMOCRACY, 40)):
+            g.p.system = system
+            launder, buy, check = g.exchange_terms()
+            self.assertEqual((launder, buy), (fee, 10))
+            self.assertEqual(check == 0, system in (self.FEUDAL, self.ANARCHY))
+        g.p.system = self.DEMOCRACY
+        self.assertGreater(g.exchange_terms()[2], 0)
+
+    def test_compliance_check_freezes_half_and_fines(self):
+        g = self.g
+        g.p.system, g.mode = self.DEMOCRACY, 'exchange'
+        g.p.crymto, g.p.fine = 1000, 0
+        g.exchange_amount = 1000
+        cash = g.p.credits
+        with unittest.mock.patch('random.random', return_value=0.):
+            g.convert_crymto(True)
+        self.assertEqual((g.p.crymto, g.p.fine, g.p.credits), (500, 100, cash))
+        self.assertIn('COMPLIANCE CHECK', g.message)
+        self.assertEqual(g.p.ledger['total']['fines'], -500)
+
+    def test_exchange_screen_shows_the_local_terms(self):
+        g = self.g
+        g.d = MagicMock()
+        g.mode = 'exchange'
+        for system, expect in ((self.DEMOCRACY, 'compliance'), (self.FEUDAL, 'Crymto pays for anything')):
+            g.p.system = system
+            g.d.reset_mock()
+            g.draw_exchange()
+            lines = ' '.join(c.args[2] for c in g.d.text.call_args_list)
+            self.assertIn(expect, lines)
+
+
 if __name__ == '__main__':
     unittest.main()

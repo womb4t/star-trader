@@ -278,12 +278,17 @@ entry and sent to the developers the next time you play online. Only your text,
 game version, platform, screen and system are included; no save file is attached.
 
 CRYMTO (CYM): contraband sales normally pay this separate account balance.
-Crymto survives ship destruction and is exempt from salvage claims. B always
-buys with credits; C at the market buys contraband with Crymto first, with
-credits covering any shortfall. Ordinary shops, fuel and banks use credits.
-N negotiates a one-tonne contraband sale for clean credits at a 15% discount;
-review the offer and press Y to accept. E opens the exchange at feudal and
-anarchy ports: Crymto -> credits costs 20%; credits -> Crymto costs 10%.
+Crymto survives ship destruction and is exempt from salvage claims.
+At anarchy and feudal ports Crymto pays for anything (goods, kit, fuel, service,
+bays, training, fines) before credits. Elsewhere B buys with credits and C buys
+contraband with Crymto first, credits covering any shortfall.
+N negotiates a one-tonne contraband sale for clean credits at a 15% discount
+(review the offer and press Y to accept). Every station has a Crymto exchange
+(Money, X). Credits -> Crymto costs 10%.
+Crymto -> credits costs 20% at anarchy and feudal ports, 30% under dictatorship,
+communist or confederacy rule and 40% in democracies and corporate states, where a
+compliance check (more likely where police are well funded) can freeze half the
+amount and add a 10% fine.
 Conversion previews show net proceeds before you choose to convert. Exchange
 proceeds round down to whole units. Smuggling demand prices include room
 for these fees; route choice still matters.
