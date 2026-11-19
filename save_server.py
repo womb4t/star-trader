@@ -161,6 +161,23 @@ class Store:
             db.execute("INSERT OR REPLACE INTO settings VALUES ('market',?)",(encode(market.state).decode(),))
             return market.snapshot(now)
 
+    def report_averages(self, now=None):
+        """Money / Reports averages across every commander's ledger, worked out at most every five minutes."""
+        from star_trader import report_averages, ledger_day, valid_ledger
+        now = time.time() if now is None else now
+        cached = getattr(self,'_averages',None)
+        if cached and now-cached[0] < 300: return cached[1]
+        ledgers = []
+        with self.connect() as db:
+            for (save,) in db.execute('SELECT save FROM players WHERE save IS NOT NULL'):
+                try: ledger = json.loads(save).get('ledger')
+                except (ValueError,AttributeError): continue
+                if valid_ledger(ledger): ledgers.append(ledger)
+        try: averages = report_averages(ledgers,ledger_day(now))
+        except (KeyError,TypeError,ValueError,AttributeError): averages = None
+        self._averages = (now,averages)
+        return averages
+
     def relay(self):
         """The Relay's news for the start screen: Acts of the STA, the Council's latest decrees and the STA Tally.
         Read from the stored market without advancing it; public, so it needs no token."""
@@ -286,7 +303,10 @@ class Handler(BaseHTTPRequestHandler):
                     player = db.execute('SELECT name FROM players WHERE token_hash=?',(self.server.store.token_hash(token),)).fetchone()[0]
                 smuggling = data.get('smuggling',[])
                 if type(smuggling) is not list: raise ValueError('Invalid smuggling report')
-                return self.reply(200,self.server.store.market_exchange(trades,data.get('intercepts',[]),ship=player,system=system,smuggling=smuggling))
+                snapshot = self.server.store.market_exchange(trades,data.get('intercepts',[]),ship=player,system=system,smuggling=smuggling)
+                averages = self.server.store.report_averages()
+                if averages is not None: snapshot['reports'] = averages
+                return self.reply(200,snapshot)
             if self.path == '/v1/feedback':
                 self.server.store.add_feedback(self.server.store.read(token)['player'],data)
                 return self.reply(201,dict(received=data['id']))

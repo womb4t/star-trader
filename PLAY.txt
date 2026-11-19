@@ -65,6 +65,10 @@ rocks dead ahead and overheating. X silences it until that danger has passed.
 
 Deal prices: pressing B or S repeatedly on the same cargo keeps one price for the whole deal.
 Pick other cargo, switch between buying and selling, wait 10 seconds or leave, and prices catch up.
+
+Money reports: Money (3) then E shows where your money came from and went (today, the last 7 days
+or all time; LEFT/RIGHT), how you compare with the average commander, and what to do about it.
+The trade log (Money then T) shows money in, money out and your balance after each trade.
 Use H/T for remote galaxy destinations. Ctrl+F toggles fine steering (20% arrows and Q/E roll),
 useful for docking. Mouse: Actions > Nav > Guide; Actions > Safety > Fine.
 

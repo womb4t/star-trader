@@ -153,6 +153,94 @@ STOCK = None
 VIEW = None
 DEAL_PAUSE = 10   # seconds without pressing B or S that end a deal (the price is held until then)
 
+# The money ledger behind Money / Reports: signed credits per category, per day, plus play time, trips and deaths.
+LEDGER_MONEY = ('trade','bounty','jobs','running','fines','rescue','destroyed')   # make up net earnings
+LEDGER_KEYS = LEDGER_MONEY+('contraband','equipment','seconds','trips','deaths')
+LEDGER_DAYS = 60
+REPORT_MIN_COMMANDERS = 3     # averages are only shown when this many commanders played in the period
+REPORT_MIN_SECONDS = 600      # a commander counts towards an average after 10 minutes of play in the period
+
+
+def ledger_day(t=None):
+    return time.strftime('%Y-%m-%d',time.localtime(time.time() if t is None else t))
+
+
+def valid_ledger(ledger):
+    def bucket(b): return isinstance(b,dict) and all(k in LEDGER_KEYS and type(v) in (int,float) and math.isfinite(v) for k,v in b.items())
+    if not isinstance(ledger,dict) or set(ledger) != {'days','total'} or not bucket(ledger['total']) or not isinstance(ledger['days'],dict): return False
+    if len(ledger['days']) > LEDGER_DAYS: return False
+    for day,b in ledger['days'].items():
+        if type(day) is not str or len(day) != 10 or not bucket(b): return False
+        try: time.strptime(day,'%Y-%m-%d')
+        except ValueError: return False
+    return True
+
+
+def ledger_period(ledger, period, today=None):
+    """Summed ledger for 'today', 'week' (the last 7 days) or 'all'."""
+    if not isinstance(ledger,dict): return {}
+    if period == 'all': return dict(ledger.get('total',{}))
+    today = today or ledger_day()
+    first = today if period == 'today' else time.strftime('%Y-%m-%d',time.localtime(time.mktime(time.strptime(today,'%Y-%m-%d'))-6*86400+3600))
+    out = {}
+    for day,bucket in ledger.get('days',{}).items():
+        if first <= day <= today:
+            for key,value in bucket.items(): out[key] = out.get(key,0)+value
+    return out
+
+
+def ledger_metrics(bucket):
+    """Rates used to compare commanders: everything per hour played, trading also per trip."""
+    hours = bucket.get('seconds',0)/3600
+    net = sum(bucket.get(k,0) for k in LEDGER_MONEY)
+    losses = -sum(bucket.get(k,0) for k in ('fines','rescue','destroyed'))
+    per_hour = (lambda v: v/hours) if hours >= .05 else (lambda v: None)
+    trips = bucket.get('trips',0)
+    return dict(hours=hours,net=net,losses=losses,net_hr=per_hour(net),trade_hr=per_hour(bucket.get('trade',0)),
+                loss_hr=per_hour(losses),trade_trip=bucket.get('trade',0)/trips if trips else None,
+                deaths_hr=per_hour(bucket.get('deaths',0)))
+
+
+def report_averages(ledgers, today=None):
+    """Average rates across commanders for each period; None where too few commanders played.
+    Only these averages leave the server, never one commander's figures."""
+    out = {}
+    for period in ('today','week','all'):
+        rows = [ledger_metrics(ledger_period(l,period,today)) for l in ledgers]
+        rows = [r for r in rows if r['hours']*3600 >= REPORT_MIN_SECONDS]
+        if len(rows) < REPORT_MIN_COMMANDERS: out[period] = dict(commanders=len(rows),average=None); continue
+        average = {}
+        for key in ('net_hr','trade_hr','loss_hr','trade_trip','deaths_hr'):
+            values = [r[key] for r in rows if r[key] is not None]
+            average[key] = round(sum(values)/len(values),2) if values else None
+        out[period] = dict(commanders=len(rows),average=average)
+    return out
+
+
+def report_verdict(bucket, average=None):
+    """How the commander is doing, in at most three short sentences."""
+    m = ledger_metrics(bucket)
+    if m['hours'] < .05: return ['Not enough play recorded in this period yet.']
+    lines = []
+    income = sum(max(0,bucket.get(k,0)) for k in ('trade','bounty','jobs'))
+    worst = min(('destroyed','fines','rescue'),key=lambda k: bucket.get(k,0))
+    if m['losses'] > 0 and m['losses'] >= .3*max(1,income):
+        lost = -bucket.get(worst,0)
+        lines.append({'destroyed':f'Losing your ship cost {lost:,.0f} cr: that is where your money went. Bank spare credits before launching and avoid fights with a full hold.',
+                      'fines':f'Fines and seizures cost {lost:,.0f} cr. Pay attention to customs and police before you carry contraband.',
+                      'rescue':f'Rescue fees cost {lost:,.0f} cr. Carry enough fuel and keep the hull serviced.'}[worst])
+    if m['trade_trip'] is not None and bucket.get('trips',0) >= 2 and m['trade_trip'] < 150:
+        lines.append(f'Your trading makes {m["trade_trip"]:,.0f} cr a trip. Higher value goods such as Computers, Medicine and Machinery earn far more per tonne.')
+    avg = (average or {}).get('net_hr')
+    if avg is not None and m['net_hr'] is not None:
+        if avg > 0 and m['net_hr'] >= avg*1.1: lines.append(f'You earn {m["net_hr"]:,.0f} cr an hour, {round((m["net_hr"]/avg-1)*100)}% more than the average commander.')
+        elif m['net_hr'] < avg*.9:
+            mine = f'You earn {m["net_hr"]:,.0f} cr an hour' if m['net_hr'] >= 0 else f'You are losing {-m["net_hr"]:,.0f} cr an hour'
+            lines.append(f'{mine}; the average commander earns {avg:,.0f} cr.')
+        else: lines.append(f'You earn {m["net_hr"]:,.0f} cr an hour, about the same as the average commander.')
+    elif not lines: lines.append(f'Steady: {m["net_hr"]:+,.0f} cr an hour after costs and losses.' if m['net_hr'] is not None else 'Steady progress.')
+    return lines[:3]
+
 
 def view_from(snapshot):
     """The Council's view in a market snapshot, or None when the market has no Council."""
@@ -348,6 +436,16 @@ class Pilot:
         self.prison = None
         self.intro_seen = False
         self.trade_log = []
+        self.ledger = dict(days={},total={})
+
+    def book(self, kind, amount=1):
+        """Record money (signed credits), play seconds, a trip or a death in today's and the all-time ledger."""
+        if not amount: return
+        amount = round(amount,2) if kind == 'seconds' or type(amount) is float else amount
+        days = self.ledger['days']
+        for bucket in (days.setdefault(ledger_day(),{}),self.ledger['total']):
+            bucket[kind] = round(bucket.get(kind,0)+amount,2)
+        for day in sorted(days)[:-LEDGER_DAYS]: del days[day]
 
     @property
     def career_points(self):
@@ -388,6 +486,7 @@ class Pilot:
             basis = self.cargo_paid[good]//self.cargo[good]
             self.trade_profit += max(0,value-basis)
             self.log_trade('sell',good,value,'CYM' if good in ILLEGAL and not clean_deal else 'cr',value-basis)
+            self.book('contraband' if good in ILLEGAL and not clean_deal else 'trade',value-basis)
             self.cargo_paid[good] = 0 if self.cargo[good] == 1 else self.cargo_paid[good]-basis
             self.cargo[good] -= 1
             stock[good] += 1
@@ -411,7 +510,8 @@ class Pilot:
         return share
 
     def clear_cargo(self, goods=None):
-        for good in (range(len(GOODS)) if goods is None else goods): self.remove_cargo(good,self.cargo[good])
+        """Empties the hold (or these goods) and returns what had been paid for it."""
+        return sum(self.remove_cargo(good,self.cargo[good]) for good in (range(len(GOODS)) if goods is None else goods))
 
     def log_trade(self, side, good, price, unit, profit=0):
         balance = self.crymto if unit == 'CYM' else self.credits
@@ -426,6 +526,7 @@ class Pilot:
         if key == 'missile' and self.missiles >= 4: return 'Missile rack full (4).'
         if self.credits < cost: return 'Insufficient credits.'
         self.credits -= cost
+        self.book('equipment',-cost)
         if key == 'missile': self.missiles += 1
         elif key == 'mine': self.mines += 1
         else: self.equipment.append(key)
@@ -447,12 +548,14 @@ class Pilot:
         value = fuel_price(self.system)*3//4
         self.fuel = round(self.fuel-1,5)
         self.credits += value
+        self.book('running',value)
         return f'Sold 1 unit of fuel for {value} cr. Tank {self.fuel:.2f}/7.'
 
     def refuel(self):
         cost = self.fuel_cost()
         if self.credits >= cost:
             self.credits -= cost
+            self.book('running',-cost)
             self.fuel = 7.0
             return f'Fuel purchased: {cost} cr. Tank full.'
         # A short wallet still buys whole units, so a broke pilot can always limp to the next job.
@@ -460,6 +563,7 @@ class Pilot:
         units = min(int(7-self.fuel),int(self.credits)//price)
         if units <= 0: return f'Fuel costs {price} cr per unit here. Sell cargo or take a station job.'
         self.credits -= units*price
+        self.book('running',-units*price)
         self.fuel = round(self.fuel+units,5)
         return f'Bought {units} fuel unit{"s" if units > 1 else ""} for {units*price} cr (all you can afford). Tank {self.fuel:.2f}/7.'
 
@@ -473,6 +577,7 @@ class Pilot:
         cost = self.service_cost()
         if self.credits < cost: return f'Repairs cost {cost} cr.'
         self.credits -= cost
+        self.book('running',-cost)
         self.hull = 100
         self.maintenance = 0.
         self.flights_since_service = 0
@@ -530,6 +635,7 @@ class Pilot:
         if type(self.name) is not str or len(self.name)>24 or not all(c.isprintable() for c in self.name): raise ValueError('name')
         if not integer(self.trade_profit) or not integer(self.jumps): raise ValueError('career')
         if type(self.intro_seen) is not bool: raise ValueError('introduction')
+        if not valid_ledger(self.ledger): raise ValueError('ledger')
         if not isinstance(self.trade_log,list) or len(self.trade_log) > TRADE_LOG_SIZE: raise ValueError('trade log')
         for entry in self.trade_log:
             if not isinstance(entry,dict) or entry.get('side') not in ('buy','sell') or not integer(entry.get('good')) or entry['good'] >= len(GOODS): raise ValueError('trade entry')
@@ -901,6 +1007,8 @@ class Game:
         self.intro_page = 0
         self.intro_name_skipped = False
         self.trades_page = 0
+        self.report_period = 1          # Money / Reports shows 0 today, 1 the last 7 days, 2 all time
+        self.report_averages = None     # averages across commanders, from the shared market (online only)
         self.text_selection_all = False
         self.text_selection_mode = None
         self.credit_code_text = ""
@@ -928,6 +1036,7 @@ class Game:
     def launch(self, departure=True):
         self.end_trading_visit()
         if departure:
+            self.p.book('trips')
             self.p.flights_since_service += 1
             self.p.maintenance = min(100,self.p.maintenance+self.p.departure_wear())
         self.breakdown_in = random.uniform(8,25) if departure and random.random() < self.breakdown_risk() else None
@@ -1130,6 +1239,10 @@ class Game:
 
     def update(self,dt):
         before = self.mode
+        # Play time for Money / Reports, written to the ledger every ten seconds or so.
+        self.play_seconds = getattr(self,'play_seconds',0.)+min(dt,1.)
+        if self.mode in ('intro','prison'): self.play_seconds = 0.
+        elif self.play_seconds >= 10: self.p.book('seconds',self.play_seconds); self.play_seconds = 0.
         if self.alert:
             self.alert['remaining'] -= dt
             self.alert['elapsed'] += dt
@@ -1255,6 +1368,7 @@ class Game:
         cost = 50 if rent else 750
         if self.p.credits < cost: self.message = f'Bay {"rental" if rent else "purchase"} costs {cost} cr.'; return
         self.p.credits -= cost
+        self.p.book('running',-cost)
         if rent: bay['rented_until'] = max(time.time(),bay['rented_until'])+7*86400
         else: bay['owned'] = True
         self.message = '40-tonne bay rented for seven real days.' if rent else '100-tonne station bay purchased.'
@@ -1282,9 +1396,14 @@ class Game:
     def recover_destroyed_pilot(self):
         self.report_contraband(lost=True)
         fee = min(100,self.p.bank_balance)
-        self.p.bank_balance -= fee
+        p = self.p
+        prices = {key:cost for key,_,cost,_,_ in EQUIPMENT}
+        gear = sum(prices.get(key,0) for key in p.equipment)+p.missiles*prices['missile']+p.mines*prices['mine']
+        p.bank_balance -= fee
+        lost = p.credits+p.clear_cargo()+gear+fee
+        p.book('destroyed',-round(lost))
+        p.book('deaths')
         self.p.credits = 0
-        self.p.clear_cargo()
         self.p.equipment = []
         self.p.laser = 'pulse'
         self.p.missiles = self.p.mines = 0
@@ -1405,7 +1524,8 @@ class Game:
         # One settlement, before changing location; further keypresses cannot pay twice.
         self.rescue = None
         self.p.credits -= fee['credits']
-        for good,fee_n in enumerate(fee['cargo']): self.p.remove_cargo(good,fee_n)
+        cargo_cost = sum(self.p.remove_cargo(good,fee_n) for good,fee_n in enumerate(fee['cargo']))
+        self.p.book('rescue',-(fee['credits']+cargo_cost))
         self.arrive(coordinates(contract['destination']),contract['destination'])
         self.p.fuel = 7.
         self.p.hull = max(25,self.p.hull)
@@ -1500,12 +1620,13 @@ class Game:
         days = police+int(self.station_hostilities[system])
         self.report_contraband(lost=True)
         seized = sum(self.p.cargo[i] for i in ILLEGAL)
-        self.p.clear_cargo(ILLEGAL)
+        seized_cost = self.p.clear_cargo(ILLEGAL)
         fine = self.p.fine
         paid = min(fine,int(self.p.credits))
         self.p.credits -= paid
         from_bank = min(fine-paid,int(self.p.bank_balance))
         self.p.bank_balance -= from_bank
+        self.p.book('fines',-(seized_cost+paid+from_bank))
         unpaid = fine-paid-from_bank
         days = min(PRISON_MAX_DAYS,days+math.ceil(unpaid/250))
         self.p.fine = 0
@@ -1551,7 +1672,7 @@ class Game:
         if j['bribe_day'] == self.prison_day():
             self.message = 'The guards will not risk another deal today.'
             return
-        if self.p.credits >= PRISON_BRIBE: self.p.credits -= PRISON_BRIBE; paid = f'{PRISON_BRIBE} cr'
+        if self.p.credits >= PRISON_BRIBE: self.p.credits -= PRISON_BRIBE; self.p.book('fines',-PRISON_BRIBE); paid = f'{PRISON_BRIBE} cr'
         elif self.p.crymto >= PRISON_BRIBE: self.p.crymto -= PRISON_BRIBE; paid = f'{PRISON_BRIBE} Crymto'
         else:
             self.message = f'A bribe needs {PRISON_BRIBE} credits or {PRISON_BRIBE} Crymto.'
@@ -1778,6 +1899,7 @@ class Game:
             self.message = f'Next engineering course costs {cost} cr.'
             return
         self.p.credits -= cost
+        self.p.book('equipment',-cost)
         self.p.engineering_level += 1
         self.message = f'Engineering trained to level {self.p.engineering_level}.'
         self.save()
@@ -1806,12 +1928,14 @@ class Game:
             self.message = 'A repair attempt needs 15 credits of parts. Distress rescue remains available.'
             return
         self.p.credits -= 15
+        self.p.book('running',-15)
         if random.random() < self.engineering_chance(other):
             self.p.engineering_failures = 0
             self.p.engineering_ready_at = 0
             if other:
                 reward = 60+self.p.engineering_level*15
                 self.p.credits += reward
+                self.p.book('jobs',reward)
                 self.disabled_ship = None
                 self.ship_target = None
                 self.assist_spawn_timer = self.distress_delay()
@@ -1870,7 +1994,7 @@ class Game:
         count = sum(self.p.cargo[i] for i in ILLEGAL)
         if count and random.random() < self.customs_chance(self.p.system):
             self.report_contraband(lost=True)
-            self.p.clear_cargo(ILLEGAL)
+            self.p.book('fines',-self.p.clear_cargo(ILLEGAL))
             self.p.fine += count*25
             return f' Customs seized {count}t contraband; fine {count*25} cr.'
         return ''
@@ -1943,6 +2067,7 @@ class Game:
         if self.p.fuel < 1: self.message = 'You need at least 1 unit of fuel to restart their drive.'; return
         self.p.fuel = round(self.p.fuel-1,5)
         self.p.credits += fee
+        self.p.book('jobs',fee)
         self.end_hail(f'Drive restarted with 1 unit of your fuel. The crew paid {fee} credits and jumped clear.')
 
     def hail_cargo(self):
@@ -2145,7 +2270,7 @@ class Game:
                 self.station_hostile_until[system] = time.time()+HOSTILITY_COOLDOWN_SECONDS
                 self.p.station_police_defeated[system] = min(STATION_POLICE_CAPACITY,self.p.station_police_defeated[system]+1)
             self.enemy_police_system = None
-        else: self.p.credits += 35
+        else: self.p.credits += 35; self.p.book('bounty',35)
         self.p.kills += 1
         self.spawn = 24
         self.message = ('Police ship destroyed. Fine increased by 150 cr.' if self.enemy_kind == 'police' else 'Hostile destroyed. Bounty: 35 credits.')+(' Cargo canisters spilled: fly slowly to scoop them.' if spilled else '')
@@ -2251,6 +2376,7 @@ class Game:
         base,bonus = ((15,2),(20,3),(25,3))[j['kind']]
         pay = base+bonus*j['correct']
         self.p.credits += pay
+        self.p.book('jobs',pay)
         if j['kind'] == 2: self.p.workshop_xp += 10
         self.p.dock_job = None
         self.message = f'Shift complete: {pay} cr paid.'+(' Workshop experience +10.' if j['kind'] == 2 else '')
@@ -2491,6 +2617,7 @@ class Game:
         else:
             amount = self.p.fine
             self.p.credits -= amount
+            self.p.book('fines',-amount)
             self.p.fine = 0
             self.message = f'Paid {amount} cr in fines. Station hostility is separate.'
             self.checkpoint()
@@ -2503,7 +2630,7 @@ class Game:
             d.text(45,155+i*45,line)
         d.text(45,350,'Banking, exchange, codes, fines and paid station jobs.')
         d.text(45,435,'Crymto exchange: '+('available here' if self.exchange_available() else 'feudal and anarchy ports only'))
-        if self.money_return != 'market': d.text(45,480,'6 Trade log is available anywhere.')
+        if self.money_return != 'market': d.text(45,480,'T Trade log and E Reports are available anywhere.')
 
         d.text(45,320,f'Pay fines costs {p.fine:,} credits. Code redemption is single-use per pilot.')
         d.text(45,570,'Crymto survives ship destruction. Bank funds and stored cargo are protected.')
@@ -2532,6 +2659,52 @@ class Game:
             d.text(45,200+i*27,f'{when:<12} {SYSTEMS[e["system"]][0]:<10} {e["side"].upper():<5} {GOODS[e["good"]]:<15} {money_in:>10} {money_out:>10} {profit:>10} {balance:>11}',color)
         pages = max(1,math.ceil(len(log)/14))
         d.text(45,595,f'Page {self.trades_page+1} of {pages}. UP shows older trades, DOWN newer. BACKSPACE returns.',(135,175,185))
+
+    REPORT_ROWS = (('trade','Trading profit'),('bounty','Bounties'),('jobs','Jobs and assists'),('running','Fuel, repairs, services'),
+                   ('fines','Fines and seizures'),('rescue','Rescue fees'),('destroyed','Ship destroyed'))
+
+    def draw_reports(self):
+        d,p = self.d,self.p
+        period = ('today','week','all')[self.report_period]
+        title = ('TODAY','LAST 7 DAYS','ALL TIME')[self.report_period]
+        d.text(35,85,'MONEY / REPORTS / '+title,GOLD)
+        bucket = ledger_period(p.ledger,period)
+        m = ledger_metrics(bucket)
+        dim = (135,175,185)
+        d.text(45,125,'Where your money came from and went',GOLD)
+        for i,(key,label) in enumerate(self.REPORT_ROWS):
+            value = bucket.get(key,0)
+            if key == 'destroyed' and bucket.get('deaths'): label += f' ({bucket["deaths"]:.0f}x)'
+            d.text(45,160+i*27,f'{label:<26}{value:>+12,.0f} cr',RED if value < 0 else (120,220,140) if value > 0 else GREEN)
+        d.line(45,352,530,352)
+        d.text(45,360,f'{"Net earnings":<26}{m["net"]:>+12,.0f} cr',GOLD)
+        d.text(45,395,f'{"Equipment and training":<26}{bucket.get("equipment",0):>+12,.0f} cr',dim)
+        if bucket.get('contraband'): d.text(45,422,f'{"Contraband profit":<26}{bucket["contraband"]:>+11,.0f} CYM',dim)
+        hours = int(m['hours']); minutes = int((m['hours']-hours)*60)
+        d.text(45,449,f'Played {hours}h {minutes:02d}m, {bucket.get("trips",0):.0f} trips.',dim)
+
+        d.text(580,125,'Compared with the average commander',GOLD)
+        d.text(580,160,f'{"":<20}{"YOU":>11}{"AVERAGE":>12}',GOLD)
+        info = (self.report_averages or {}).get(period) if isinstance(self.report_averages,dict) else None
+        average = info.get('average') if isinstance(info,dict) and isinstance(info.get('average'),dict) else None
+        def fmt(v, scale=1): return '-' if v is None else f'{v*scale:,.0f}' if scale == 1 else f'{v*scale:,.1f}'
+        rows = (('Net per hour','net_hr',1),('Trading per hour','trade_hr',1),('Trading per trip','trade_trip',1),('Losses per hour','loss_hr',1),('Ships lost per 10h','deaths_hr',10))
+        for i,(label,key,scale) in enumerate(rows):
+            d.text(580,195+i*27,f'{label:<20}{fmt(m[key],scale):>11}{fmt(average.get(key) if average else None,scale):>12}')
+        if average is None:
+            if isinstance(info,dict): note = f'Averages appear once {REPORT_MIN_COMMANDERS} commanders have played 10+ minutes in this period ({info.get("commanders",0)} so far).'
+            elif self.market_client is None: note = 'Averages need an online connection.'
+            else: note = 'Averages arrive from the server shortly.'
+            for j,line in enumerate(textwrap.wrap(note,44)): d.text(580,340+j*25,line,dim)
+        else: d.text(580,340,f'Average of {info["commanders"]} commanders.',dim)
+
+        d.line(35,488,W-35,488)
+        y = 500
+        for line in report_verdict(bucket,average):
+            for part in textwrap.wrap(line,90):
+                if y > 610: break
+                d.text(45,y,part,GOLD); y += 25
+        d.text(45,630,'LEFT / RIGHT changes the period. Records start from version 0.9.2. BACKSPACE returns.',dim)
 
     def draw_notepad(self):
         d = self.d
@@ -2765,6 +2938,10 @@ class Game:
             elif k == 8: self.p.notes = self.p.notes[:-1]
             elif k == 13: self.text_input('\n')
             return
+        if self.mode == 'reports':
+            if k in (LEFT,ord('a')): self.report_period = (self.report_period-1)%3
+            elif k in (RIGHT,ord('d')): self.report_period = (self.report_period+1)%3
+            return
         if self.mode == 'trades':
             pages = max(1,math.ceil(len(self.p.trade_log)/14))
             if k == UP: self.trades_page = min(pages-1,self.trades_page+1)
@@ -2826,6 +3003,7 @@ class Game:
         if self.mode == 'money':
             if k in (27,ord('9')): self.mode = self.money_return
             elif k == ord('6'): self.trades_page,self.mode = 0,'trades'
+            elif k == ord('e'): self.mode = 'reports'
             elif self.money_return != 'market' and k != ord('0'): self.message = 'Dock at a station to use Money services.'
             elif k == ord('1'): self.mode = 'bank'
             elif k == ord('2'):
@@ -3045,6 +3223,7 @@ class Game:
             if k == ord('p'):
                 if self.p.credits >= self.p.fine:
                     self.p.credits -= self.p.fine
+                    self.p.book('fines',-self.p.fine)
                     self.p.fine = 0
                     self.message = 'Fines cleared.'
                     self.save()
@@ -4045,6 +4224,7 @@ class Game:
                 for row,fresh in zip(self.p.stock,snap['stock']): row[:] = fresh
                 self.shipments,self.market_offset = snap['shipments'],snap['now']-now
                 if type(snap.get('economy')) is list and len(snap['economy']) == 8: self.economy_reports = snap['economy']
+                if isinstance(snap.get('reports'),dict): self.report_averages = snap['reports']
                 VIEW = view_from(snap)
         elif now-self.market_at >= 1 or self.market is None or self.market.state['stock'] is not self.p.stock:
             # Offline the game runs its own copy of the market, once a second.
@@ -4332,11 +4512,17 @@ class Game:
             for i,(label,key) in enumerate([('Bank / storage  B',ord('1')),('Crymto exchange  X',ord('2')),('Redeem code  R',ord('3')),('Pay fines  F',ord('4'))]):
                 self.mouse_button(35+(i%2)*515,380+(i//2)*100,490,label,key)
             self.mouse_button(35,535,490,'Station jobs / earn credits  J',ord('5'))
-            self.mouse_button(550,535,490,'Trade log  T',ord('6'))
+            self.mouse_button(550,535,240,'Trade log  T',ord('6'))
+            self.mouse_button(800,535,240,'Reports  E',ord('e'))
             self.mouse_button(35,674,1000,'Return to market',ord('9'))
         elif self.mode == 'money':
-            self.mouse_button(35,535,490,'Trade log  T',ord('6'))
+            self.mouse_button(35,535,240,'Trade log  T',ord('6'))
+            self.mouse_button(290,535,240,'Reports  E',ord('e'))
             self.mouse_button(35,674,1000,'Return',ord('9'))
+        elif self.mode == 'reports':
+            for i,label in enumerate(('Today','7 days','All time')):
+                self.mouse_button(35+i*255,674,240,('> ' if i == self.report_period else '')+label,action=lambda i=i: setattr(self,'report_period',i))
+            self.mouse_button(800,674,240,'Return to Money',action=self.mouse_back)
         elif self.mode == 'trades':
             self.mouse_button(35,674,240,'Older',UP)
             self.mouse_button(290,674,240,'Newer',DOWN)
@@ -4471,7 +4657,7 @@ class Game:
                        'menu':'menu_return','notes':'notes_return','rename':'rename_return','intro':'intro_return','feedback':'feedback_return',
                        'money':'money_return','vms':'vms_return','outfit':'outfit_return',
                        'engineering':'engineering_return','launch_warning':'launch_return'}
-            fixed = {'planet_profile':'map','redeem':'money','bank':'money','jobs':'money','trades':'money','hail':'flight','dsc':'flight',
+            fixed = {'planet_profile':'map','redeem':'money','bank':'money','jobs':'money','trades':'money','reports':'money','hail':'flight','dsc':'flight',
                      'exchange':'money','trade_deal':'market','departure':'market'}
             if self.mode in returns: self.mode = getattr(self,returns[self.mode],'market')
             elif self.mode in fixed: self.mode = fixed[self.mode]
@@ -4571,6 +4757,8 @@ class Game:
             self.draw_intro()
         elif self.mode == 'trades':
             self.draw_trades()
+        elif self.mode == 'reports':
+            self.draw_reports()
         elif self.mode == 'prison':
             self.draw_prison()
         elif self.mode == 'rename':
