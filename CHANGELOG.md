@@ -1,4 +1,4 @@
-# 0.9.0 — the living economy (draft, not released)
+# 0.9.0 — the living economy
 
 The galaxy's economy now behaves like a real one, and it has a government.
 - **Worlds change what they make.** Industries grow where their goods are scarce and dear and shrink in a glut, so a world that can't earn a living turns to something else. Prices come from what each world actually makes and uses, and populations grow with the traffic they get, so the galaxy gets busier as more commanders join.
@@ -6,6 +6,19 @@ The galaxy's economy now behaves like a real one, and it has a government.
 - **The Galactic Council governs.** Every 6 hours it reviews every world. It sets a **trade tax** on every purchase and sale (shown in each exchange's header; lawless worlds pay none, struggling worlds pay less) and a galactic **interest rate** that steers spending and building. It funds station upkeep and police, licenses new industries, sends relief convoys, pays development grants to the weakest worlds, and builds **hyperspace beacons**: jumps to and from a beaconed world take 10% less fuel, shown on the Nav map.
 - **Contraband follows demand and risk.** Smugglers don't avoid policed worlds; worlds pay them for the risk of bringing contraband in. Where customs and pirates take more cargo, contraband sells for more. Customs search harder where the Council funds more police, and less where it doesn't.
 - **The news, from The Relay** ("News at the speed of the next jump"). The start screen carries the Council's latest decree, the main point of *The STA Tally* (the economy's daily figures from the Galactic Assay Office) and the latest Act of the STA, starting with *The Living Economy Act*. In game, new decrees and each day's Tally appear as news; a solar flare holds news from other worlds.
+
+# 0.8.13 — steady prices, attack alarm and scoop fixes
+
+From your requests:
+- **Prices hold for the whole deal.** Pressing B (or S) again and again on the same cargo keeps the price you started at. The deal ends when you pick other cargo, switch between buying and selling, stop for 10 seconds or leave the station; then the price catches up with the market. Your own trades only ever move prices against you during a visit, so buying a load and selling it straight back can't make money.
+- **Attack alarm.** A flashing red ALARM bar and a beep when a hostile ship or police are on you, you're under fire or taking damage, a mine is ahead, you're about to hit a rock, or you're overheating. X silences it until that danger is over; a new danger sounds again.
+- **Scooping is announced** as a ship announcement, and the cockpit shows the nearest ore and what the scoops need: SLOW BELOW 50, CLOSE TO 260 m, HOLD FULL or COLLECTING.
+- **The text cursor is a flashing solid block**, like an old terminal.
+
+From your bug reports:
+- **Y turns approach guidance on and off again** (0.8.10 had moved it to Ctrl+G only; Ctrl+G still works).
+- **"Write a description first." no longer follows you back to the cockpit.** It now shows on the bug report screen only.
+- The cockpit shows fine steering as ^F (it said I, its old key).
 
 # 0.8.12 — screens numbered left to right
 

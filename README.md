@@ -73,7 +73,7 @@ You start docked with 150 credits, a full 7-unit fuel tank, a pulse laser, three
 | Equipment | D docking computer; J signal jammer; K phase cloak |
 | Safety and radio | R requests docking clearance; N hails a disabled ship; Ctrl+E distress/recovery; 8 engineering and training |
 | Local beacons | Ctrl+S station; Ctrl+P planet; Ctrl+R asteroid/ore; Ctrl+U sun; O collects nearby ore |
-| Steering aids | Ctrl+F fine steering; Ctrl+G approach guidance |
+| Steering aids | Ctrl+F fine steering; Y (or Ctrl+G) approach guidance; X silences the alarm |
 | Galaxy map (1) | arrows select planet; / searches names; C enters X,Y; I planet profile |
 | Free map cursor | Tab switches between planet selection and coordinate cursor; arrows move cursor |
 | Course/travel | Enter locks course; hold H for 3 seconds to enter hyperspace; T interstellar cruise; T in cruise cancels |
@@ -197,8 +197,14 @@ You can run `python3 star_trader.py` directly without installing. System librari
 
 MIT. An original tribute, not a port of Elite; no original Elite code or assets are included. The galaxy is currently eight predefined planets, not the original's generated galaxies. Several flight and combat mechanics are deliberately simplified.
 
-Approach guidance: Ctrl+G toggles centring on the selected local navigation target ahead.
+Approach guidance: Y (or Ctrl+G) toggles centring on the selected local navigation target ahead.
 You retain throttle and roll control; arrows cancel guidance. It does not grant docking clearance.
+
+Alarm: a flashing red ALARM bar and a beep warn of hostile ships, incoming fire, mines ahead,
+rocks dead ahead and overheating. X silences it until that danger has passed.
+
+Deal prices: pressing B or S repeatedly on the same cargo keeps one price for the whole deal.
+Pick other cargo, switch between buying and selling, wait 10 seconds or leave, and prices catch up.
 Use H/T for remote galaxy destinations. Ctrl+F toggles fine steering (20% arrows and Q/E roll),
 useful for docking. Mouse: Actions > Nav > Guide; Actions > Safety > Fine.
 

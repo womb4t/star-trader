@@ -24,7 +24,7 @@ import textwrap
 from market import Market, demand_factor, quote_price
 import economy
 
-VERSION = '0.8.12'
+VERSION = '0.9.0'
 HOSTILITY_COOLDOWN_SECONDS = 30*60
 STATION_POLICE_CAPACITY = 6
 # Career points needed for each commander rank: kills, trade profit and hyperspace jumps all count.
@@ -92,7 +92,7 @@ RETIRED = {ord('x'): None, ord('g'): None, ord('-'): None}   # screens that move
 SCREEN_LETTERS = {
     'flight': {ord('d'): ord('c'), ord('r'): ord('7'), ord('f'): ord('4'), ord('l'): ord('b'), ord('j'): ord('z'),
                TAB: ord('5'), ord('c'): None, ord('b'): None, ord('z'): None, ord('p'): None, ord('a'): None,
-               ord('i'): None, ord('y'): None},
+               ord('i'): None},
     'money': {ord('b'): ord('1'), ord('x'): ord('2'), ord('r'): ord('3'), ord('f'): ord('4'), ord('j'): ord('5'), ord('t'): ord('6')},
     'jobs': {ord('a'): ord('1'), ord('b'): ord('2'), ord('c'): ord('3')},
     'hail': {ord('a'): ord('1'), ord('b'): ord('2'), ord('c'): ord('3'), ord('y'): ord('4'), ord('p'): ord('5')},
@@ -151,6 +151,7 @@ STOCK = None
 # The Galactic Council's view (tax, rate, police, beacons, decrees, price adjustments, contraband premiums), from the
 # shared market's snapshot or the offline market. None (an older server) keeps today's prices.
 VIEW = None
+DEAL_PAUSE = 10   # seconds without pressing B or S that end a deal (the price is held until then)
 
 
 def view_from(snapshot):
@@ -160,10 +161,11 @@ def view_from(snapshot):
     return dict(snapshot['council'], adjust=prices.get('adjust'), contraband=prices.get('contraband'), depth=prices.get('depth'), tally=snapshot.get('tally'))
 
 
-def price(system, good):
-    """Scarce goods cost more and gluts sell cheap; see market.demand_factor."""
+def price(system, good, stock=None):
+    """Scarce goods cost more and gluts sell cheap; see market.demand_factor. stock: as if the station held this much."""
     depth = VIEW['depth'][system] if VIEW and VIEW.get('depth') else 1   # busy worlds hold deeper stock (as on the server)
-    factor = demand_factor(STOCK[system][good],NORMAL_STOCK[system][good]*depth) if STOCK is not None else 1
+    level = stock if stock is not None else STOCK[system][good] if STOCK is not None else None
+    factor = demand_factor(level,NORMAL_STOCK[system][good]*depth) if level is not None else 1
     if VIEW and VIEW.get('adjust') and good not in ILLEGAL:   # the living economy: priced from what the world makes and uses
         return round(BASE[good]*quirk(system, good)*VIEW['adjust'][system][good]*factor)
     return round(static_price(system, good) * factor)
@@ -173,9 +175,10 @@ def distance(a, b):
     return math.hypot(SYSTEMS[a][2] - SYSTEMS[b][2], SYSTEMS[a][3] - SYSTEMS[b][3]) * 10
 
 
-def quote(system, good, buy=True):
-    """Player buy price includes a spread; selling immediately costs money."""
-    base = price(system, good)
+def quote(system, good, buy=True, stock=None):
+    """Player buy price includes a spread (and the station's trade tax); selling immediately costs money.
+    stock: price as if the station held this much."""
+    base = price(system, good, stock)
     tax = VIEW['tax'][system] if VIEW else 0.
     if not buy and good in ILLEGAL and VIEW and VIEW.get('contraband'):
         premium, loss = VIEW['contraband'][system][ILLEGAL.index(good)]
@@ -362,8 +365,8 @@ class Pilot:
     def capacity(self):
         return 35 if 'cargo' in self.equipment else 20
 
-    def trade(self, good, buy, clean_deal=False, use_crymto=False):
-        value = quote(self.system, good, buy)
+    def trade(self, good, buy, clean_deal=False, use_crymto=False, value=None):
+        if value is None: value = quote(self.system, good, buy)
         if clean_deal and not buy and good in ILLEGAL: value = value*85//100
         stock = self.stock[self.system]
         if buy:
@@ -637,6 +640,29 @@ class Display:
         self.color(self.r, *color, 255)
         self.drawline(self.r, int(x1), int(y1), int(x2), int(y2))
 
+    def beep(self, tones):
+        """Queue square-wave tones [(hz, seconds), ...]. Best effort: no sound device, no sound."""
+        try:
+            if not hasattr(self,'audio'):
+                self.audio = 0
+                class Spec(C.Structure):
+                    _fields_ = [('freq',C.c_int),('format',C.c_uint16),('channels',C.c_uint8),('silence',C.c_uint8),
+                                ('samples',C.c_uint16),('padding',C.c_uint16),('size',C.c_uint32),('callback',C.c_void_p),('userdata',C.c_void_p)]
+                if bind(self.sdl,'SDL_InitSubSystem',C.c_int,[C.c_uint32])(0x10) != 0: return
+                want,have = Spec(22050,0x8010,1,0,1024,0,0,None,None),Spec()
+                self.audio = bind(self.sdl,'SDL_OpenAudioDevice',C.c_uint32,[C.c_char_p,C.c_int,C.c_void_p,C.c_void_p,C.c_int])(None,0,C.byref(want),C.byref(have),0)
+                if self.audio: bind(self.sdl,'SDL_PauseAudioDevice',None,[C.c_uint32,C.c_int])(self.audio,0)
+            if not self.audio: return
+            import array
+            samples = array.array('h')
+            for hz,seconds in tones:
+                period = max(2,int(22050/hz)) if hz else 0
+                samples.extend((3000 if period and (i%period) < period//2 else -3000 if period else 0) for i in range(int(22050*seconds)))
+            data = samples.tobytes()
+            bind(self.sdl,'SDL_QueueAudio',C.c_int,[C.c_uint32,C.c_char_p,C.c_uint32])(self.audio,data,len(data))
+        except (OSError,AttributeError):
+            self.audio = 0
+
     def fill(self,x,y,w,h,color):
         self.color(self.r,*color,255)
         rect = (C.c_int*4)(int(x),int(y),int(w),int(h))
@@ -825,6 +851,7 @@ class Game:
         self.npc_mine_timer = 25.
         self.spawn = 12
         self.cooldown = self.flash = self.laser_flash = 0.
+        self.alarm = self.alarm_silenced = None
         self.enemy_shot = None
         self.message = 'Welcome back, Commander.' if loaded else 'Welcome, Commander. 9 manual; U ship outfitting.'
         self.stars = [[random.uniform(-1000,1000),random.uniform(-650,650),random.uniform(-1800,1800)] for _ in range(180)]
@@ -871,6 +898,7 @@ class Game:
         self.checkpoint()
 
     def launch(self, departure=True):
+        self.end_trading_visit()
         if departure:
             self.p.flights_since_service += 1
             self.p.maintenance = min(100,self.p.maintenance+self.p.departure_wear())
@@ -928,7 +956,7 @@ class Game:
     def message(self,text):
         old = getattr(self,'_message','')
         self._message = text
-        critical = ('outfitting unavailable','thermal warning','station warning','station defence','station police','collision','breakdown','fuel exhausted','refused','seized','repair failed','mine detected','hostile contact','clearance granted','destroyed','rescued')
+        critical = ('outfitting unavailable','thermal warning','station warning','station defence','station police','collision','breakdown','fuel exhausted','refused','seized','repair failed','mine detected','hostile contact','clearance granted','destroyed','rescued','scooped')
         if text != old and any(word in text.lower() for word in critical):
             self.alert = dict(text=text,remaining=5.,elapsed=0.)
 
@@ -1043,6 +1071,35 @@ class Game:
             self.speed = 0
             self.message = 'Session recovery needs assistance. Progress retained; use Ctrl+E distress. '+str(error)[:45]
 
+    def threat(self):
+        """What the alarm is sounding for in flight, most urgent first (None: all clear)."""
+        if self.mode not in ('flight','cruise'): return None
+        if self.enemy_shot: return 'UNDER FIRE'
+        if self.enemy: return 'HOSTILE '+('POLICE' if self.enemy_kind == 'police' else 'SHIP')
+        if self.flash: return 'TAKING DAMAGE'
+        if any(m[5] != 'player' and 0 < m[2] < 600 and abs(m[0]) < 120 and abs(m[1]) < 120 for m in self.mine_objects): return 'MINE AHEAD'
+        if any(35 < r[2] < 300 and abs(r[0]) < 60 and abs(r[1]) < 60 for r in self.asteroids): return 'COLLISION'
+        if self.heat >= 70: return 'OVERHEATING'
+        return None
+
+    def update_alarm(self, dt):
+        threat = self.threat()
+        # A silenced alarm stays quiet until the danger passes; a new kind of danger sounds again.
+        if threat is None: self.alarm_silenced = None
+        self.alarm = threat if threat and threat not in (self.alarm_silenced or ()) else None
+        self.alarm_beep = max(0,getattr(self,'alarm_beep',0)-dt)
+        if self.alarm and self.alarm_beep <= 0:
+            self.alarm_beep = 1.2
+            if self.d and hasattr(self.d,'beep'): self.d.beep([(880,.12),(0,.05),(660,.12)])
+
+    def silence_alarm(self):
+        if not getattr(self,'alarm',None): return
+        # Silencing a fight covers the whole fight: the ship, its shots and the hits.
+        fight = {'UNDER FIRE','HOSTILE SHIP','HOSTILE POLICE','TAKING DAMAGE'}
+        self.alarm_silenced = (self.alarm_silenced or set()) | ({self.alarm} | (fight if self.alarm in fight else set()))
+        self.alarm = None
+        self.message = 'Alarm silenced. It sounds again if a new danger appears.'
+
     def update(self,dt):
         before = self.mode
         if self.alert:
@@ -1064,6 +1121,7 @@ class Game:
         self.refresh_station_hostility()
         self.update_prison()
         self._update_simulation(dt)
+        self.update_alarm(dt)
         self.update_shared_presence()
         self._save_elapsed += dt
         if self._save_elapsed >= 2 or before != self.mode:
@@ -1218,7 +1276,7 @@ class Game:
         d.text(720,135,f'Wallet {p.credits:.2f} cr')
         d.text(720,175,f'Bank   {p.bank_balance:.2f} cr',GOLD)
         if self.bank_custom is not None:
-            d.text(720,215,'Amount: '+self.bank_custom+('_' if int(time.monotonic()*2)%2 == 0 else '')+' cr',GOLD)
+            self.text_cursor(720,215,'Amount: '+self.bank_custom); d.text(720+(len(self.bank_custom)+8)*11+16,215,'cr',GOLD)
             d.text(720,420,'Type an amount, then ENTER.')
         else: d.text(720,215,'Transfer: '+('ALL' if self.bank_amount is None else str(self.bank_amount))+' cr')
         d.text(35,490,'Bay: '+('OWNED' if bay['owned'] else 'RENTED' if self.storage_capacity() else 'NONE / RENT EXPIRED'))
@@ -1788,6 +1846,7 @@ class Game:
 
     def dock(self):
         if self.p.deep_space: return
+        self.end_trading_visit()
         if not self.docking_permitted():
             self.message = 'Docking refused: wanted status.'
             return
@@ -2279,8 +2338,9 @@ class Game:
 
     def save_feedback(self):
         if not self.feedback_text.strip():
-            self.message = 'Write a description first.'
+            self.feedback_error = 'Write a description first.'
             return False
+        self.feedback_error = None
         try:
             entry = self.feedback_entry()
             FEEDBACK_OUTBOX.mkdir(parents=True,exist_ok=True)
@@ -2294,7 +2354,7 @@ class Game:
             self.message = f'{label} logged. It is sent to the developers next time you play online.'
             return True
         except OSError as error:
-            self.message = 'Could not log feedback: '+str(error)
+            self.feedback_error = 'Could not log feedback: '+str(error)
             return False
 
     def feedback_waiting(self):
@@ -2309,11 +2369,15 @@ class Game:
         lines = []
         for paragraph in self.feedback_text.split('\n'):
             lines.extend(textwrap.wrap(paragraph,89) or [''])
-        lines[-1] += self.caret()
-        for i,line in enumerate(lines[-11:]): d.text(45,215+i*25,line)
+        shown = lines[-11:]
+        for i,line in enumerate(shown):
+            if i == len(shown)-1: self.text_cursor(45,215+i*25,line,(160,225,213))
+            else: d.text(45,215+i*25,line)
         d.text(45,490,f'{len(self.feedback_text)}/1500 characters',GOLD)
         d.text(35,535,'Each report is logged separately and sent to the developers when you play online.')
         d.text(35,570,'Includes version, platform, screen and system; no save file attached.')
+        error = getattr(self,'feedback_error',None)
+        if error and not self.feedback_text.strip(): d.text(300,490,error,RED)
         waiting = self.feedback_waiting()
         if waiting: d.text(35,610,f'{waiting} report{"s" if waiting > 1 else ""} waiting to send.',GOLD)
 
@@ -2367,7 +2431,7 @@ class Game:
             d.text(45,y,'COMMANDER NAME',GOLD)
             d.rect(45,y+28,620,46,GOLD)
             if self.text_selection_all and self.text_selection_mode == 'intro' and self.p.name: d.fill(50,y+34,len(self.p.name)*11+8,34,(20,65,70))
-            d.text(57,y+40,self.p.name+('_' if int(time.monotonic()*2)%2 == 0 else ''),GOLD)
+            self.text_cursor(57,y+40,self.p.name)
             d.text(45,y+90,'You can change it any time under Menu, Commander name.',(135,175,185))
         d.text(45,615,'ENTER or RIGHT continues. LEFT goes back a page. You can reopen this from Menu.',(135,175,185))
 
@@ -2441,8 +2505,10 @@ class Game:
         for paragraph in self.p.notes.split('\n'): lines.extend(textwrap.wrap(paragraph,89) or [''])
         self.notes_scroll = max(0,min(self.notes_scroll,max(0,len(lines)-17)))
         end = len(lines)-self.notes_scroll
-        if self.notes_scroll == 0: lines[-1] += self.caret()
-        for i,line in enumerate(lines[max(0,end-17):end]): d.text(45,140+i*25,line)
+        shown = lines[max(0,end-17):end]
+        for i,line in enumerate(shown):
+            if self.notes_scroll == 0 and i == len(shown)-1: self.text_cursor(45,140+i*25,line,(160,225,213))
+            else: d.text(45,140+i*25,line)
         d.text(35,615,f'{len(self.p.notes)}/4000 characters. Typing appends; arrows scroll; ENTER adds a line.')
 
     def open_hub(self, target):
@@ -2544,9 +2610,10 @@ class Game:
             x,y = 35+(i%2)*515,200+(i//2)*110
             d.text(x+10,y+42,description,(135,175,185))
 
-    @staticmethod
-    def caret():
-        return '_' if int(time.monotonic()*2)%2 == 0 else ' '
+    def text_cursor(self, x, y, text, color=GOLD):
+        """Typed text with a flashing solid block cursor after it, like an old terminal."""
+        self.d.text(x,y,text,color)
+        if int(time.monotonic()*2)%2 == 0: self.d.fill(x+len(text)*11+1,y+2,10,20,color)
 
     def typing(self):
         return bool(self.active_text_field()) or (self.mode == 'map' and self.map_input)
@@ -2561,6 +2628,7 @@ class Game:
             legacy = ANY_CTRL.get(k) or (FLIGHT_CTRL.get(k) if self.mode in ('flight','cruise') else None)
             return self.key(legacy) if legacy is not None else None
         if ord('0') <= k <= ord('9'): return self.open_screen(k-ord('0'))
+        if k == ord('x') and self.mode in ('flight','cruise'): return self.silence_alarm()
         letters = {**RETIRED, **SCREEN_LETTERS.get(self.mode, {})}
         legacy = letters.get(k, k)
         if legacy is not None: return self.key(legacy)
@@ -2614,6 +2682,7 @@ class Game:
         for new, old in letters.items():
             if old == legacy: return 'Tab' if new == TAB else chr(new).upper()
         if self.mode in ('flight','cruise'):
+            if ord('a') <= legacy <= ord('z') and legacy not in letters and legacy not in RETIRED: return chr(legacy).upper()
             for new, old in FLIGHT_CTRL.items():
                 if old == legacy: return 'Ctrl+'+chr(new).upper()
             if legacy == TAB: return '5'
@@ -3453,8 +3522,10 @@ class Game:
         d = self.d
         color = RED if self.heat >= 90 else GOLD if self.heat >= 70 else GREEN
         near_sun = self.sun_altitude() < 2000
-        d.fill(840,430,230,130 if near_sun else 82,(5,16,27))
-        d.rect(840,430,230,130 if near_sun else 82,(45,105,115))
+        ore = None if near_sun else self.ore_status()
+        tall = near_sun or ore
+        d.fill(840,430,230,130 if tall else 82,(5,16,27))
+        d.rect(840,430,230,130 if tall else 82,(45,105,115))
         d.text(850,435,f'HEAT {self.heat:.0f}% / LIMIT 90',color)
         d.text(850,458,f'SHIELDS {self.shield:.0f}%',color)
         d.rect(850,490,210,8,(45,105,115))
@@ -3465,6 +3536,21 @@ class Game:
             state,label = self.scoop_status()
             d.text(850,510,'INSIDE THE SUN' if altitude < 0 else f'SUN ALTITUDE {altitude:.0f} m',RED if altitude < 0 else GOLD)
             d.text(850,533,label,GREEN if state == 'collecting' else (120,140,150) if state == 'none' else GOLD)
+        elif ore:
+            distance,label,ready = ore
+            d.text(850,510,f'ORE {distance:.0f} m',GOLD)
+            d.text(850,533,label,GREEN if ready else GOLD)
+
+    def ore_status(self):
+        """The nearest loose ore or canister and what the scoops need to collect it (None if nothing is loose)."""
+        if not self.fragments: return None
+        distance = min(math.sqrt(sum(v*v for v in f[:3])) for f in self.fragments)
+        if distance > 2500: return None
+        if 'scoops' not in self.p.equipment: return distance,'SCOOP: NOT FITTED',False
+        if sum(self.p.cargo) >= self.p.capacity: return distance,'SCOOP: HOLD FULL',False
+        if abs(self.speed) > 50: return distance,'SCOOP: SLOW BELOW 50',False
+        if distance >= 260: return distance,'SCOOP: CLOSE TO 260 m',False
+        return distance,'SCOOP: COLLECTING',True
 
     def draw_scanner(self):
         d = self.d
@@ -3876,14 +3962,37 @@ class Game:
         elif kind == 'asteroid':
             self.cut_rock(obj,weapon)
 
+    def trade_quote(self, good, buy):
+        """The price you pay or get right now. Pressing B (or S) again and again on the same cargo keeps one
+        price for the whole deal; it ends when you pick other cargo, switch between buying and selling,
+        pause for DEAL_PAUSE seconds or leave the station. Your own trades during a visit only ever move
+        prices against you: selling back what you just bought is priced as if you had not bought it."""
+        system = self.p.system
+        lock = getattr(self,'trade_lock',None)
+        if lock and lock['key'] == (system,good,buy) and time.monotonic()-lock['at'] < DEAL_PAUSE: return lock['value']
+        fresh = quote(system,good,buy)
+        own = getattr(self,'visit_trades',{}).get((system,good),0)
+        if not own: return fresh
+        undone = quote(system,good,buy,stock=self.p.stock[system][good]-own)
+        return max(fresh,undone) if buy else min(fresh,undone)
+
+    def end_trading_visit(self):
+        self.trade_lock,self.visit_trades = None,{}
+
     def market_trade(self, good, buy, **options):
         """Trade with the station and tell the market (shared online) about the stock change."""
         stock = self.p.stock[self.p.system]
         before = stock[good]
-        result = self.p.trade(good,buy,**options)
-        if stock[good] != before and self.market_client:
-            self.market_client.queue_trade(self.p.system,good,stock[good]-before)
-            if good in ILLEGAL and not buy: self.report_contraband(delivered=(good,stock[good]-before))
+        value = self.trade_quote(good,buy)
+        result = self.p.trade(good,buy,value=value,**options)
+        if stock[good] != before:
+            key = (self.p.system,good)
+            if not hasattr(self,'visit_trades'): self.visit_trades = {}
+            self.visit_trades[key] = self.visit_trades.get(key,0)+stock[good]-before
+            self.trade_lock = dict(key=(self.p.system,good,buy),value=value,at=time.monotonic())
+            if self.market_client:
+                self.market_client.queue_trade(self.p.system,good,stock[good]-before)
+                if good in ILLEGAL and not buy: self.report_contraband(delivered=(good,stock[good]-before))
         return result
 
     def update_market(self):
@@ -4295,7 +4404,7 @@ class Game:
             self.mouse_button(35,674,190,'Flight controls',action=lambda:setattr(self,'mouse_controls',not self.mouse_controls))
         if self.mode == 'flight' and self.mouse_controls:
             groups=[('Flight', [('Thrust W',ord('w'),True),('Brake S',ord('s'),True),('Fire Spc',32,True),('Left',LEFT,True),('Up',UP,True),('Right',RIGHT,True),('Roll Q',ord('q'),True),('Down',DOWN,True),('Roll E',ord('e'),True)]),
-                ('Nav',[('Nav 1',ord('g'),False),('Hold jump',ord('h'),True),('Cruise',ord('t'),False),('Station',ord('d'),False),('Planet',ord('p'),False),('Rocks',ord('a'),False),('Sun',ord('j'),False),('Scoop',ord('o'),False),('Guide ON' if self.course_assist else 'Guide ^G',ord('y'),False)]),
+                ('Nav',[('Nav 1',ord('g'),False),('Hold jump',ord('h'),True),('Cruise',ord('t'),False),('Station',ord('d'),False),('Planet',ord('p'),False),('Rocks',ord('a'),False),('Sun',ord('j'),False),('Scoop',ord('o'),False),('Guide ON' if self.course_assist else 'Guide',ord('y'),False)]),
                 ('Combat',[('Fire',32,True),('View F',ord('4'),False),('Laser',ord('v'),False),('Missile',ord('m'),False),('Mine',ord('b'),False),('Jammer',ord('z'),False),('Cloak',ord('k'),False),('Target',ord('5'),False)]),
                 ('Safety',[('Surrender R' if not self.p.deep_space and self.station_hostilities[self.p.system] and self.arrest_pending() and not self.surrendering else 'Radio R',ord('7'),False),('Hail N',ord('n'),False),('Autodock',ord('c'),False),('Skills',ord('8'),False),('Distress',ord('6'),False),('Fine ON' if self.fine_control else 'Fine ^F',ord('i'),False)])]
             d.fill(30,105,350,270,(5,16,27));d.rect(30,105,350,270,GREEN)
@@ -4342,7 +4451,7 @@ class Game:
             ('Keys',[
                 ('Screens: the number row','0 1 2 3 4 5 6 8 9','0 Home (market or cockpit), 1 Nav, 2 VMS, 3 Money, 4 Menu, 5 Comms, 6 Logs, 8 Engineering, 9 Help. Press again to go back.'),
                 ('Actions: letters','B buy, S sell, D dock...','Letters act on the screen you are on and are named for what they do. Every button shows its key.'),
-                ('Rarer controls','CTRL + letter (^)','Ctrl+0 bug report or suggestion, Ctrl+N quick note, Ctrl+M full screen; in flight Ctrl+P/S/R/U beacons, Ctrl+F fine steering, Ctrl+G guidance, Ctrl+E distress.'),
+                ('Rarer controls','CTRL + letter (^)','Ctrl+0 bug report or suggestion, Ctrl+N quick note, Ctrl+M full screen; in flight Ctrl+P/S/R/U beacons, Ctrl+F fine steering, Ctrl+E distress. Y (or Ctrl+G) approach guidance; X silences the alarm.'),
                 ('Back and close','BACKSPACE / ESC','Backspace goes back. Esc saves and closes from every screen.'),
                 ('Menu','4 or `','Notes, feedback, updates, display size and save and close.'),
                 ('Changed keys','In this update','Screens now run left to right: 0 Home, 1 Nav, 2 VMS, 3 Money, 4 Menu. Feedback moved to Ctrl+0.')]),
@@ -4433,7 +4542,7 @@ class Game:
             d.text(45,180,'Type a name (up to 24 characters), then press ENTER or click Save name.')
             d.rect(35,245,1030,60,GREEN)
             if self.text_selection_all and self.text_selection_mode == 'rename': d.fill(40,250,max(20,len(p.name)*11+20),42,(20,65,70))
-            d.text(45,265,p.name+self.caret(),GOLD)
+            self.text_cursor(45,265,p.name)
             remote = getattr(self,'remote_save',None)
             if remote and remote.player_name: d.text(45,360,f'Shown on your status panel. Other pilots online see your account name: {remote.player_name}.')
             d.text(45,415,'ESC saves and closes.')
@@ -4442,12 +4551,12 @@ class Game:
             d.text(45,180,'Type a code or paste with CTRL+V, then press ENTER to redeem.')
             d.rect(35,245,1030,60,GREEN)
             if self.text_selection_all and self.text_selection_mode == 'redeem': d.fill(40,250,max(20,len(self.credit_code_text)*11+20),42,(20,65,70))
-            d.text(45,265,self.credit_code_text+self.caret(),GOLD)
+            self.text_cursor(45,265,self.credit_code_text)
             d.text(45,360,'Codes can only be redeemed once by this pilot.')
             d.text(45,415,'Click Return to Money. ESC saves and closes.')
         elif self.mode == 'trade_deal':
             good = self.deal_good
-            dirty = quote(p.system,good,False)
+            dirty = self.trade_quote(good,False)
             clean = dirty*85//100
             d.text(35,85,'NEGOTIATE CLEAN PAYMENT',GOLD)
             d.text(45,180,f'Buyer offers {clean} clean credits for 1 tonne of {GOODS[good]}.')
@@ -4505,7 +4614,7 @@ class Game:
                     color = GOLD if i == self.selected else GREEN
                     d.text(35,170+i*30,('> ' if i == self.selected else '  ')+g+(' *' if i in ILLEGAL else ''),color)
                     report = self.economy_report(p.system)
-                    for x,value in [(270,quote(p.system,i)),(340,quote(p.system,i,False)),(415,p.stock[p.system][i]),(495,p.cargo[i])]:
+                    for x,value in [(270,self.trade_quote(i,True)),(340,self.trade_quote(i,False)),(415,p.stock[p.system][i]),(495,p.cargo[i])]:
                         tint = color
                         if x == 415 and report and i in report.get('wanted',()): tint = WANTED_COLOR
                         elif x == 415 and report and i in report.get('surplus',()): tint = SURPLUS_COLOR
@@ -4515,7 +4624,7 @@ class Game:
                         d.text(565,170+i*30,static(random.randint(3,11)),(200,90,70) if random.random() < .3 else (120,140,150))
                     elif best:
                         price,system = best
-                        d.text(565,170+i*30,f'{price:>3} {SYSTEMS[system][0][:7]}',(120,220,140) if price > quote(p.system,i) else (120,140,150))
+                        d.text(565,170+i*30,f'{price:>3} {SYSTEMS[system][0][:7]}',(120,220,140) if price > self.trade_quote(i,True) else (120,140,150))
                     else: d.text(565,170+i*30,'-',(120,140,150))
                 d.text(35,470,'BUY = you pay. * Contraband sales pay Crymto (CYM).')
                 # Kept short so they stay clear of the Commander Status panel on the right.
@@ -4646,6 +4755,11 @@ class Game:
             d.text(35,100,f'TARGET {name}  SHIELD {shield:.0f}%  HULL {hull:.0f}%',(255,100,180))
         if getattr(self,'presence',None): d.text(360,73,f'PLAYERS NEARBY {len(self.other_players)} / PvP disabled',(140,185,255))
         if self.flash: d.rect(26,65,W-52,490,RED)
+        if self.alarm:
+            bright = int(time.monotonic()*3)%2 == 0
+            d.fill(450,94,375,32,RED if bright else (90,20,24))
+            d.text(460,99,f'ALARM: {self.alarm}',(255,240,230))
+            d.text(718,99,'X silence',(255,240,230))
         obj,label = self.active_navigation()
         if obj is None: obj = [0.,0.,0.]
         c,s = math.cos(self.roll),math.sin(self.roll)
@@ -4660,7 +4774,7 @@ class Game:
         d.text(35,594,f'SPEED {self.speed:.0f}  FUEL {p.fuel:.2f}  {("REAR "+p.rear_laser.upper() if "rear" in p.equipment else "REAR UNARMED") if self.rear_view else p.laser.upper()} LASER  MISSILES {p.missiles}')
         d.text(35,625,f'SHIELD {self.shield:.0f}%  HULL {p.hull:.0f}%  HOLD {sum(p.cargo)}/{p.capacity}t')
         error = math.degrees(self.slot_error())
-        d.text(650,598,('GUIDANCE Y  ' if self.course_assist else '')+('FINE I' if self.fine_control else ''),GOLD)
+        d.text(650,598,('GUIDANCE Y  ' if self.course_assist else '')+('FINE ^F' if self.fine_control else ''),GOLD)
         d.text(650,625,'DRIVE DISABLED' if self.broken_down else 'AUTODOCK' if self.autodock else f'SLOT {error:+.0f}/14deg '+('CLEAR' if self.dock_clearance else 'R radio'),GOLD)
         status = 'CLOAKED' if self.cloaked else 'JAMMING' if self.jamming else ''
         d.text(35,650,f'MINES {p.mines}  {status}  Ctrl+E distress  /  F rear view'+('  /  PATROL ZONE' if self.in_patrol_zone() else ''),GOLD)

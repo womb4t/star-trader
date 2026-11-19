@@ -57,8 +57,14 @@ When a newer release is out, the game asks before it starts: Enter (or U)
 updates, N or Esc plays this version (it asks again next launch).
 Multiplayer, fleets, chat, player police and bases are future plans.
 
-Approach guidance: Ctrl+G toggles centring on the selected local navigation target ahead.
+Approach guidance: Y (or Ctrl+G) toggles centring on the selected local navigation target ahead.
 You retain throttle and roll control; arrows cancel guidance. It does not grant docking clearance.
+
+Alarm: a flashing red ALARM bar and a beep warn of hostile ships, incoming fire, mines ahead,
+rocks dead ahead and overheating. X silences it until that danger has passed.
+
+Deal prices: pressing B or S repeatedly on the same cargo keeps one price for the whole deal.
+Pick other cargo, switch between buying and selling, wait 10 seconds or leave, and prices catch up.
 Use H/T for remote galaxy destinations. Ctrl+F toggles fine steering (20% arrows and Q/E roll),
 useful for docking. Mouse: Actions > Nav > Guide; Actions > Safety > Fine.
 
