@@ -53,12 +53,17 @@ def install_mac_app(target):
     print('Your saved game is preserved when reinstalling. When a new release is out, the start screen offers to install it.')
 
 
+# Everything the installed game runs from. test_deploy checks every module the game imports is listed here.
+GAME_FILES = ('star_trader.py', 'startup.py', 'presence.py', 'market.py', 'economy.py', 'council.py', 'tally.py',
+              'save_sync.py', 'update.py', 'LICENSE', 'README.md')
+
+
 def install():
     source = Path(__file__).resolve().parent
     data = Path(os.environ.get('XDG_DATA_HOME') or Path.home() / '.local/share').expanduser().resolve()
     target = data / 'star-trader'
     target.mkdir(parents=True, exist_ok=True)
-    for name in ('star_trader.py', 'startup.py', 'presence.py', 'market.py', 'economy.py', 'save_sync.py', 'update.py', 'LICENSE', 'README.md'):
+    for name in GAME_FILES:
         destination = target / name
         if (source / name).resolve() != destination.resolve():
             shutil.copy2(source / name, destination)
