@@ -344,7 +344,7 @@ class Pilot:
         self.dock_job = None
         self.job_boards = [dict(refresh_at=0.,used=[0,0,0]) for _ in SYSTEMS]
         self.bank_balance = 0
-        self.storage = [dict(owned=False,rented_until=0.,cargo=[0]*len(GOODS)) for _ in SYSTEMS]
+        self.storage = [dict(owned=False,rented_until=0.,cargo=[0]*len(GOODS),paid=[0]*len(GOODS)) for _ in SYSTEMS]
         self.prison = None
         self.intro_seen = False
         self.trade_log = []
@@ -394,8 +394,28 @@ class Pilot:
         unit = ('Crymto / credits' if use_crymto and good in ILLEGAL else 'cr') if buy else ('Crymto' if good in ILLEGAL and not clean_deal else 'cr')
         return f'{"Bought" if buy else "Sold"} 1 t {GOODS[good]} for {value} {unit}.'
 
+    def add_cargo(self, good, n=1, paid=0):
+        """Cargo arriving any way but a purchase (scooped, salvaged, paid as a fee) costs nothing unless paid says so."""
+        if self.cargo[good] == 0: self.cargo_paid[good] = 0
+        self.cargo[good] += n
+        self.cargo_paid[good] += paid
+
+    def remove_cargo(self, good, n=1):
+        """Cargo leaving without a sale takes its share of what was paid with it, so later sales are not charged for it.
+        Returns that share."""
+        n = max(0,min(n,self.cargo[good]))
+        if n == 0: return 0
+        share = self.cargo_paid[good] if n == self.cargo[good] else self.cargo_paid[good]*n//self.cargo[good]
+        self.cargo[good] -= n
+        self.cargo_paid[good] = 0 if self.cargo[good] == 0 else self.cargo_paid[good]-share
+        return share
+
+    def clear_cargo(self, goods=None):
+        for good in (range(len(GOODS)) if goods is None else goods): self.remove_cargo(good,self.cargo[good])
+
     def log_trade(self, side, good, price, unit, profit=0):
-        self.trade_log.append(dict(time=time.time(),system=self.system,side=side,good=good,price=price,unit=unit,profit=profit))
+        balance = self.crymto if unit == 'CYM' else self.credits
+        self.trade_log.append(dict(time=time.time(),system=self.system,side=side,good=good,price=price,unit=unit,profit=profit,balance=int(balance)))
         del self.trade_log[:-TRADE_LOG_SIZE]
 
     def buy_equipment(self, index):
@@ -495,7 +515,12 @@ class Pilot:
             self.stock = [pad(row,initial_stock()[i]) if i < 8 else row for i,row in enumerate(self.stock)]
         if isinstance(self.storage,list):
             for bay in self.storage:
-                if isinstance(bay,dict): bay['cargo'] = pad(bay.get('cargo'),[0]*len(GOODS))
+                if isinstance(bay,dict):
+                    bay['cargo'] = pad(bay.get('cargo'),[0]*len(GOODS))
+                    bay['paid'] = pad(bay.get('paid',[0]*len(GOODS)),[0]*len(GOODS))
+        # Older versions kept what was paid for cargo that was lost, stored or seized; empty holds owe nothing.
+        if isinstance(self.cargo,list) and isinstance(self.cargo_paid,list) and len(self.cargo) == len(self.cargo_paid):
+            self.cargo_paid = [0 if n == 0 else paid for n,paid in zip(self.cargo,self.cargo_paid)]
 
     def validate(self):
         def integer(n): return type(n) is int and n >= 0
@@ -510,6 +535,7 @@ class Pilot:
             if not isinstance(entry,dict) or entry.get('side') not in ('buy','sell') or not integer(entry.get('good')) or entry['good'] >= len(GOODS): raise ValueError('trade entry')
             if not integer(entry.get('system')) or entry['system'] >= len(SYSTEMS) or not integer(entry.get('price')) or type(entry.get('profit',0)) is not int: raise ValueError('trade entry')
             if entry.get('unit') not in ('cr','CYM') or type(entry.get('time')) not in (int,float) or not math.isfinite(entry['time']): raise ValueError('trade entry')
+            if 'balance' in entry and type(entry['balance']) is not int: raise ValueError('trade entry')
         if self.prison is not None:
             j = self.prison
             if not isinstance(j,dict) or not integer(j.get('system')) or j['system'] >= len(SYSTEMS): raise ValueError('prison')
@@ -549,6 +575,8 @@ class Pilot:
             if type(until) not in (int,float) or not math.isfinite(until) or until < 0: raise ValueError('rent')
             cargo = bay.get('cargo')
             if not isinstance(cargo,list) or len(cargo) != len(GOODS) or not all(integer(n) for n in cargo) or sum(cargo)>100: raise ValueError('stored cargo')
+            paid = bay.setdefault('paid',[0]*len(GOODS))
+            if not isinstance(paid,list) or len(paid) != len(GOODS) or not all(integer(n) for n in paid): raise ValueError('stored cargo basis')
         if self.maintenance > 100 or not integer(self.flights_since_service): raise ValueError('maintenance')
         if not integer(self.engineering_level) or self.engineering_level > 5 or not integer(self.engineering_failures) or self.engineering_failures > 20: raise ValueError('engineering')
         if not integer(self.mines) or self.mines > 4 or not integer(self.fine): raise ValueError('mines/fine')
@@ -1238,13 +1266,16 @@ class Game:
         if store:
             if sum(bay['cargo']) >= self.storage_capacity(): self.message = 'Bay unavailable/full. Rent, renew or buy capacity.'; return
             if self.p.cargo[index] <= 0: self.message = 'None aboard to store.'; return
-            self.p.cargo[index] -= 1
+            if bay['cargo'][index] == 0: bay['paid'][index] = 0
+            bay['paid'][index] += self.p.remove_cargo(index)
             bay['cargo'][index] += 1
         else:
             if bay['cargo'][index] <= 0: self.message = 'None in this station bay.'; return
             if sum(self.p.cargo) >= self.p.capacity: self.message = 'Ship hold full.'; return
+            share = bay['paid'][index] if bay['cargo'][index] == 1 else bay['paid'][index]//bay['cargo'][index]
             bay['cargo'][index] -= 1
-            self.p.cargo[index] += 1
+            bay['paid'][index] = 0 if bay['cargo'][index] == 0 else bay['paid'][index]-share
+            self.p.add_cargo(index,1,share)
         self.message = f'1 tonne {GOODS[index]} '+('stored at '+SYSTEMS[self.p.system][0]+'.' if store else 'retrieved to ship.')
         self.save()
 
@@ -1253,7 +1284,7 @@ class Game:
         fee = min(100,self.p.bank_balance)
         self.p.bank_balance -= fee
         self.p.credits = 0
-        self.p.cargo = [0]*len(GOODS)
+        self.p.clear_cargo()
         self.p.equipment = []
         self.p.laser = 'pulse'
         self.p.missiles = self.p.mines = 0
@@ -1374,7 +1405,7 @@ class Game:
         # One settlement, before changing location; further keypresses cannot pay twice.
         self.rescue = None
         self.p.credits -= fee['credits']
-        self.p.cargo = [n-fee_n for n,fee_n in zip(self.p.cargo,fee['cargo'])]
+        for good,fee_n in enumerate(fee['cargo']): self.p.remove_cargo(good,fee_n)
         self.arrive(coordinates(contract['destination']),contract['destination'])
         self.p.fuel = 7.
         self.p.hull = max(25,self.p.hull)
@@ -1469,7 +1500,7 @@ class Game:
         days = police+int(self.station_hostilities[system])
         self.report_contraband(lost=True)
         seized = sum(self.p.cargo[i] for i in ILLEGAL)
-        for i in ILLEGAL: self.p.cargo[i] = 0
+        self.p.clear_cargo(ILLEGAL)
         fine = self.p.fine
         paid = min(fine,int(self.p.credits))
         self.p.credits -= paid
@@ -1839,7 +1870,7 @@ class Game:
         count = sum(self.p.cargo[i] for i in ILLEGAL)
         if count and random.random() < self.customs_chance(self.p.system):
             self.report_contraband(lost=True)
-            for i in ILLEGAL: self.p.cargo[i] = 0
+            self.p.clear_cargo(ILLEGAL)
             self.p.fine += count*25
             return f' Customs seized {count}t contraband; fine {count*25} cr.'
         return ''
@@ -1921,7 +1952,7 @@ class Game:
         good = random.choice((0,1,3,4,5))
         tonnes = min(space,max(1,self.hail['budget']//max(1,quote(self.p.system,good,False))),6)
         self.p.fuel = round(self.p.fuel-1,5)
-        self.p.cargo[good] += tonnes
+        self.p.add_cargo(good,tonnes)
         self.end_hail(f'Drive restarted. The crew paid in cargo: {tonnes} t of {GOODS[good].lower()}.')
 
     def end_hail(self, message):
@@ -2485,15 +2516,20 @@ class Game:
             d.text(45,160,'No trades yet. Buy with B and sell with S in a station market.')
             return
         sells = [e for e in log if e['side'] == 'sell']
-        d.text(45,125,f'Last {len(log)} trades. Profit on sales shown: {sum(e["profit"] for e in sells if e["unit"] == "cr"):+,} cr.',(135,175,185))
-        d.text(45,165,'WHEN         WHERE      TRADE  COMMODITY          PRICE        PROFIT',GOLD)
+        money_in = sum(e['price'] for e in sells if e['unit'] == 'cr')
+        money_out = sum(e['price'] for e in log if e['side'] == 'buy' and e['unit'] == 'cr')
+        d.text(45,125,f'Last {len(log)} trades. In {money_in:,} cr, out {money_out:,} cr. Profit on sales: {sum(e["profit"] for e in sells if e["unit"] == "cr"):+,} cr.',(135,175,185))
+        d.text(45,165,f'{"WHEN":<12} {"WHERE":<10} {"TRADE":<5} {"COMMODITY":<15} {"IN":>10} {"OUT":>10} {"PROFIT":>10} {"BALANCE":>11}',GOLD)
         newest = list(reversed(log))
         page = newest[self.trades_page*14:(self.trades_page+1)*14]
         for i,e in enumerate(page):
             when = time.strftime('%d %b %H:%M',time.localtime(e['time']))
+            amount = f'{e["price"]:,} {e["unit"]}'
+            money_in,money_out = (amount,'') if e['side'] == 'sell' else ('',amount)
             profit = f'{e["profit"]:+,} {e["unit"]}' if e['side'] == 'sell' else ''
+            balance = f'{e["balance"]:,} {e["unit"]}' if 'balance' in e else ''
             color = (120,220,140) if e['side'] == 'sell' and e['profit'] > 0 else RED if e['side'] == 'sell' and e['profit'] < 0 else GREEN
-            d.text(45,200+i*27,f'{when:<12} {SYSTEMS[e["system"]][0]:<10} {e["side"].upper():<6} {GOODS[e["good"]]:<18} {e["price"]:>5} {e["unit"]:<4}  {profit}',color)
+            d.text(45,200+i*27,f'{when:<12} {SYSTEMS[e["system"]][0]:<10} {e["side"].upper():<5} {GOODS[e["good"]]:<15} {money_in:>10} {money_out:>10} {profit:>10} {balance:>11}',color)
         pages = max(1,math.ceil(len(log)/14))
         d.text(45,595,f'Page {self.trades_page+1} of {pages}. UP shows older trades, DOWN newer. BACKSPACE returns.',(135,175,185))
 
@@ -3658,7 +3694,7 @@ class Game:
 
     def collect_fragment(self, fragment):
         good = fragment[3] if len(fragment) > 3 else 2
-        self.p.cargo[good] += 1
+        self.p.add_cargo(good)
         self.fragments.remove(fragment)
         self.message = f'Scooped 1 tonne of {GOODS[good].lower()}. Sell it at a station.'
 
