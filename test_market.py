@@ -254,6 +254,17 @@ class LiveEconomyTests(unittest.TestCase):
         self.assertEqual([len(r) for r in m.stock], [len(r) for r in st.NORMAL_STOCK])
         self.assertIn('council', m.state)
 
+    def test_game_prices_match_the_servers_as_worlds_grow(self):
+        m = self.reviewed(st.new_market(seed='t'))
+        for station in m.state['stations'].values(): station['population'] = 3.   # busy worlds hold deeper stock
+        m.advance(self.START+30*3600)
+        self.assertGreater(m.depth(1), 1.2)
+        try:
+            st.STOCK, st.VIEW = m.stock, st.view_from(m.snapshot(self.START+30*3600))
+            for i in range(8):
+                for g in range(len(st.GOODS)): self.assertEqual(st.price(i, g), round(m.price(i, g)), (i, g))
+        finally: st.STOCK = st.VIEW = None
+
     def test_beacon_cuts_jump_fuel_both_ways(self):
         here, there = st.coordinates(5), st.coordinates(0)
         self.assertAlmostEqual(st.jump_fuel(here, 0, [5], source=5), st.jump_fuel(here, 0, [], source=5)*.9)
@@ -292,6 +303,24 @@ class CouncilViewTests(unittest.TestCase):
         before = m.risk_premium(1, 6)
         m.apply(smuggling=[[1, 6, 10, 0]], now=self.now)
         self.assertGreater(m.risk_premium(1, 6), before)
+
+    def test_one_player_cannot_flood_the_premium(self):
+        import market as M
+        m = self.market()
+        m.apply(smuggling=[[1, 6, 50, 0]]*10, ship='Spammer', now=self.now)
+        m.apply(smuggling=[[1, 6, 50, 0]]*10, ship='Spammer', now=self.now+60)
+        self.assertAlmostEqual(m.state['smuggling']['1']['6'][0], M.REPORT_CAP)
+        m.apply(smuggling=[[1, 6, 5, 0]], ship='Honest', now=self.now+60)   # another commander still counts
+        self.assertAlmostEqual(m.state['smuggling']['1']['6'][0], M.REPORT_CAP+5, places=3)
+        m.apply(smuggling=[[1, 6, 10, 0]], ship='Spammer', now=self.now+3*M.SMUGGLING_HALF_LIFE)   # allowance recovers
+        self.assertGreater(m.state['smuggling']['1']['6'][0], 10)
+
+    def test_a_docked_player_reports_only_for_their_station(self):
+        m = self.market()
+        m.apply(smuggling=[[1, 6, 10, 0]], ship='Kenton', system=2, now=self.now)
+        self.assertNotIn('1', m.state.get('smuggling', {}))
+        m.apply(smuggling=[[2, 6, 10, 0]], ship='Kenton', system=2, now=self.now)
+        self.assertEqual(m.state['smuggling']['2']['6'][0], 10)
 
     def test_bad_smuggling_reports_are_refused(self):
         m = self.market()

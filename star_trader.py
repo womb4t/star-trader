@@ -157,12 +157,13 @@ def view_from(snapshot):
     """The Council's view in a market snapshot, or None when the market has no Council."""
     if not isinstance(snapshot, dict) or not isinstance(snapshot.get('council'), dict): return None
     prices = snapshot.get('prices') if isinstance(snapshot.get('prices'), dict) else {}
-    return dict(snapshot['council'], adjust=prices.get('adjust'), contraband=prices.get('contraband'), tally=snapshot.get('tally'))
+    return dict(snapshot['council'], adjust=prices.get('adjust'), contraband=prices.get('contraband'), depth=prices.get('depth'), tally=snapshot.get('tally'))
 
 
 def price(system, good):
     """Scarce goods cost more and gluts sell cheap; see market.demand_factor."""
-    factor = demand_factor(STOCK[system][good],NORMAL_STOCK[system][good]) if STOCK is not None else 1
+    depth = VIEW['depth'][system] if VIEW and VIEW.get('depth') else 1   # busy worlds hold deeper stock (as on the server)
+    factor = demand_factor(STOCK[system][good],NORMAL_STOCK[system][good]*depth) if STOCK is not None else 1
     if VIEW and VIEW.get('adjust') and good not in ILLEGAL:   # the living economy: priced from what the world makes and uses
         return round(BASE[good]*quirk(system, good)*VIEW['adjust'][system][good]*factor)
     return round(static_price(system, good) * factor)

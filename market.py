@@ -25,6 +25,7 @@ BOT_MARGIN = 1.6
 SMUGGLING_HALF_LIFE = 6*3600.   # seconds for the record of losses and deliveries to halve
 SMUGGLING_PRIOR = 20.           # tonnes of experience the expected risk counts for, so one seizure isn't a price shock
 RISK_PREMIUM_CAP = 3.           # covers customs' full 55% search with the reward below (1.25/0.45 = 2.8)
+REPORT_CAP = 40.                # tonnes one commander's reports count for, per world per half-life (a hold is <= 35 t)
 RISK_REWARD = .25               # smuggling must pay more than honest trade on average, or nobody would take the risk
 
 
@@ -97,6 +98,18 @@ class Market:
         self.state['contraband_lost'] = self.state.get('contraband_lost', 0.)+lost   # for the Tally
         books[str(good)] = record
         return record
+
+    def allowance(self, ship, system, lost, delivered, now):
+        """Trim one commander's reports to REPORT_CAP tonnes per world per half-life, so nobody can flood the premium."""
+        now = getattr(self, 'clock', 0.) if now is None else now
+        quota = self.state.setdefault('report_quota', {})
+        for key in [k for k, (n, t) in quota.items() if n*.5**((now-t)/SMUGGLING_HALF_LIFE) < .5]: del quota[key]
+        used, at = quota.get(f'{ship}:{system}', (0., now))
+        used *= .5**(max(0., now-at)/SMUGGLING_HALF_LIFE)
+        room = max(0., REPORT_CAP-used)
+        lost = min(lost, room); delivered = min(delivered, room-lost)
+        quota[f'{ship}:{system}'] = (used+lost+delivered, now)
+        return lost, delivered
 
     def risk_premium(self, system, good):
         """Contraband price multiplier: what a smuggler needs to break even after the share of cargo lost here, capped."""
@@ -219,7 +232,10 @@ class Market:
             self.change(system_, good, delta)
             if ship is not None and now is not None: self.visit(system_, ship, now)
         if ship is not None and now is not None and system is not None: self.visit(system, ship, now)
-        for where, good, lost_, delivered in smuggling: self.smuggling(where, good, lost=lost_, delivered=delivered, now=now)
+        for where, good, lost_, delivered in smuggling:
+            if ship is not None and system is not None and where != system: continue   # docked: only your own station
+            if ship is not None: lost_, delivered = self.allowance(ship, where, lost_, delivered, now)
+            if lost_ or delivered: self.smuggling(where, good, lost=lost_, delivered=delivered, now=now)
         lost = set(i for i in list(intercepts)[:10] if type(i) is str)
         self.state['shipments'] = [s for s in self.state['shipments'] if s['id'] not in lost]
 
@@ -238,7 +254,7 @@ class Market:
                               system=d['system'], text=d.get('text', d['kind'])) for d in council.get('decrees', [])[-10:]])
         if self.state.get('tally'): snap['tally'] = {k: v for k, v in self.state['tally'].items() if k != 'previous'}
         if self.economy and getattr(self, 'contraband', None):
-            snap['prices'] = dict(adjust=[[self.economy.price_adjust(i, g) for g in range(len(self.stock[i]))] for i in range(len(self.stock))],
+            snap['prices'] = dict(depth=[self.depth(i) for i in range(len(self.stock))], adjust=[[self.economy.price_adjust(i, g) for g in range(len(self.stock[i]))] for i in range(len(self.stock))],
                                   contraband=[[[self.risk_premium(i, g), self.loss_share(i, g)] for g in self.contraband] for i in range(len(self.stock))])
         return snap
 

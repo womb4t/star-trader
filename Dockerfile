@@ -1,7 +1,7 @@
 # Star Trader progress server. Pure Python standard library: no packages to install.
 FROM python:3.12.7-slim-bookworm
 WORKDIR /app
-COPY save_server.py star_trader.py presence.py market.py economy.py startup.py save_sync.py ./
+COPY save_server.py star_trader.py presence.py market.py economy.py council.py tally.py startup.py save_sync.py ./
 RUN useradd --system --uid 10001 --home-dir /data startrader && mkdir -p /data && chown startrader /data
 USER startrader
 ENV STAR_TRADER_DB=/data/progress.sqlite3 \
