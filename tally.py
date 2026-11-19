@@ -21,11 +21,11 @@ def publish(market, now):
     output = books.get('turnover', 0.)-marks['turnover']
     lost = market.state.get('contraband_lost', 0.)-marks['lost']
     marks.update(turnover=books.get('turnover', 0.), lost=market.state.get('contraband_lost', 0.))
-    before = last['figures']['output'] if last else None
+    before = last['figures']['output'] if last and not last['figures'].get('partial') else None
     names = getattr(market, 'names', None) or [str(i) for i in range(len(market.stock))]
     moods = {i: economy.prosperity_label(market.state['stations'].get(str(i), {}).get('prosperity', .6)) for i in range(len(market.stock))}
     struggling = [names[i] for i in sorted(moods) if moods[i] in ('Struggling', 'Destitute')]
-    figures = dict(output=round(output, 2), output_change=(output/before-1) if before else None,
+    figures = dict(partial=last is None, output=round(output, 2), output_change=(output/before-1) if before else None,
                    inflation=books.get('inflation', 0.), rate=books.get('rate', .05), tax=books.get('base_tax', 0.),
                    treasury=round(books.get('treasury', 0.)), contraband_lost=round(lost, 1),
                    **{mood.lower(): sum(1 for m in moods.values() if m == mood) for mood in ('Thriving', 'Comfortable', 'Struggling', 'Destitute')})
@@ -36,7 +36,8 @@ def publish(market, now):
 
 def main_points(figures, struggling):
     change, inflation = figures['output_change'], figures['inflation']
-    points = [f'Galactic output was {figures["output"]:,.0f} cr.' if change is None else
+    points = ['The Galactic Assay Office has begun counting; the first full day follows tomorrow.' if figures['partial'] else
+              f'Galactic output was {figures["output"]:,.0f} cr.' if change is None else
               f'Galactic output {"rose" if change >= 0 else "fell"} {abs(change)*100:.1f}% on the day.',
               f'Prices {"rose" if inflation >= 0 else "fell"} {abs(inflation)*100:.1f}%; the Council\'s rate is {figures["rate"]*100:.1f}%.',
               'Every world is comfortable or better.' if not struggling else

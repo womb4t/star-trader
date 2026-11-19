@@ -25,17 +25,30 @@ class TallyTests(unittest.TestCase):
         self.assertIsNotNone(tally.publish(self.market, START+DAY+60))
 
     def test_first_day_has_no_change(self):
-        self.books['turnover'] = 1000.
+        self.books['turnover'] = 1000.   # a first Tally always covers part of a day, so it reports no output yet
         report = tally.publish(self.market, START+60)
-        self.assertEqual(report['points'][0], 'Galactic output was 1,000 cr.')
+        self.assertEqual(report['points'][0], 'The Galactic Assay Office has begun counting; the first full day follows tomorrow.')
         self.assertIsNone(report['figures']['output_change'])
         self.assertEqual(report['sign_off'], 'Weighed, not judged. — Galactic Assay Office')
 
-    def test_main_points_from_figures(self):
-        self.books['turnover'] = 1000.
+    def test_the_first_tally_with_nothing_counted_yet(self):
+        report = tally.publish(self.market, START+60)
+        self.assertEqual(report['points'][0], 'The Galactic Assay Office has begun counting; the first full day follows tomorrow.')
+
+    def test_the_second_day_reports_the_level_not_a_change_from_a_partial_day(self):
+        self.books['turnover'] = 100.
         tally.publish(self.market, START+60)
-        self.books['turnover'] = 2021.
+        self.books['turnover'] = 1100.
         report = tally.publish(self.market, START+DAY+60)
+        self.assertEqual(report['points'][0], 'Galactic output was 1,000 cr.')
+        self.assertIsNone(report['figures']['output_change'])
+
+    def test_main_points_from_figures(self):
+        tally.publish(self.market, START+60)   # the partial first day
+        self.books['turnover'] = 1000.
+        tally.publish(self.market, START+DAY+60)
+        self.books['turnover'] = 2021.
+        report = tally.publish(self.market, START+2*DAY+60)
         self.assertEqual(report['points'][0], 'Galactic output rose 2.1% on the day.')
         self.assertEqual(report['points'][1], "Prices rose 0.6%; the Council's rate is 4.5%.")
         self.assertEqual(report['points'][2], 'Every world is comfortable or better.')
