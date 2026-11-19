@@ -61,11 +61,11 @@ You start docked with 150 credits, a full 7-unit fuel tank, a pulse laser, three
 
 | Screen | Controls |
 | --- | --- |
-| Screens (from anywhere) | 0 home (market or cockpit); 1 Nav; 2 VMS; 3 Money; 4 Menu; 5 Comms (DSC); 6 trade log; 8 engineering; 9 help; Ctrl+0 feedback. Press again to go back. Buttons for 5–0 run down the right-hand side |
+| Screens (from anywhere) | 0 home (market or cockpit); 1 Nav; 2 VMS; 3 Money; 4 Menu; 5 Comms (DSC); 6 statement; 8 engineering; 9 help; Ctrl+0 feedback. Press again to go back. Buttons for 5–0 run down the right-hand side |
 | Station | Up/Down select; B buy; S sell; U outfitting; L requests departure clearance, then L launches once granted |
 | VMS (2) | F buys a full fuel refill; K sells fuel; R repairs hull; U outfitting; L launch |
 | Outfitting | Up/Down browse; B or Enter buy and fit; U returns to market |
-| Money (3) | B bank and storage; X Crymto exchange; R redeem a code; F pay fines; J station jobs; T trade log |
+| Money (3) | B bank and storage; X Crymto exchange; R redeem a code; F pay fines; J station jobs; T statement |
 | Bank/storage | D deposit money, W withdraw; S store selected cargo, T retrieve; R rent, B buy bay |
 | Flight | Arrows steer; W accelerate; S brake, then reverse; Q/E roll |
 | View | F toggles front/rear view; Space fires the current view’s fitted laser |
@@ -208,7 +208,7 @@ Pick other cargo, switch between buying and selling, wait 10 seconds or leave, a
 
 Money reports: Money (3) then E shows where your money came from and went (today, the last 7 days
 or all time; LEFT/RIGHT), how you compare with the average commander, and what to do about it.
-The trade log (Money then T) shows money in, money out and your balance after each trade.
+The statement (Money then T, or 6) lists every payment and receipt: trades, kit bought and sold, fuel, service, bays, training, fines, bribes, rescue fees, jobs, bounties, the Crymto exchange and bank transfers, with money in, money out and your balance after each.
 Outfitting: B buys and S sells the selected kit back for half price. The pulse laser is built in.
 Use H/T for remote galaxy destinations. Ctrl+F toggles fine steering (20% arrows and Q/E roll),
 useful for docking. Mouse: Actions > Nav > Guide; Actions > Safety > Fine.

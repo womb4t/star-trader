@@ -1,3 +1,8 @@
+# 0.9.3 — full statement
+
+From your suggestions:
+- **The trade log is now a full statement (Money, then T, or 6).** Besides market trades it lists every payment and receipt: kit bought and sold, fuel, service and repair parts, bays, engineering training, fines, bribes, salvage and recovery fees, credits lost with a ship, station jobs, assists, bounties, the Crymto exchange and bank transfers. Each line shows money in or out and your balance after it. Payments made partly in Crymto show a line for each currency. It keeps the last 200 entries.
+
 # 0.9.2 — money reports
 
 From your suggestions:

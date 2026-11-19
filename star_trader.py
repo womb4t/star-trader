@@ -43,7 +43,7 @@ THRUST_FUEL_PER_METRE = .00003
 LOCAL_TRIP_METRES = PATROL_RADIUS+PATROL_RADIUS+2000
 # The sun's visible radius (m) and the altitude band above it where fitted scoops collect fuel.
 SUN_RADIUS, SCOOP_ALTITUDE, SCOOP_SPEEDS = 220, 280, (10, 60)
-TRADE_LOG_SIZE = 60
+TRADE_LOG_SIZE = 200
 DOCK_ROLL_TOLERANCE = math.radians(14)
 CRUISE_SECONDS_PER_LY = 45
 PANEL_W = 1100        # the game's screens; the rail of screen buttons sits to its right
@@ -123,7 +123,7 @@ ANY_CTRL = {ord('n'): ord('-'), ord('m'): ord('3')}   # quick note; full screen 
 TOP_BAR = ((155,90,'1 Nav',('open_navigation',)), (250,90,'2 VMS',('open_hub','vms')),
            (345,105,'3 Money',('open_hub','money')), (455,85,'4 Menu',('open_utility','menu')))
 # The rail down the right-hand side: the screens on the number row past 4 (x, label, key, the modes it lights).
-RAIL = ((5,'5 Comms',('dsc',)), (6,'6 Trades',('trades',)), (8,'8 Engine',('engineering',)), (9,'9 Manual',('help',)), (0,'0 Home',()))
+RAIL = ((5,'5 Comms',('dsc',)), (6,'6 Ledger',('trades',)), (8,'8 Engine',('engineering',)), (9,'9 Manual',('help',)), (0,'0 Home',()))
 HOLD_SCREENS = ('hyperspace', 'dead', 'prison', 'intro', 'hail', 'distress', 'departure', 'trade_deal')
 GREEN, GOLD, RED = (68, 227, 182), (255, 206, 113), (255, 112, 100)
 WANTED_COLOR, SURPLUS_COLOR = (240, 150, 70), (110, 170, 240)  # station stock the economy wants or has too much of
@@ -568,6 +568,24 @@ class Pilot:
         """Empties the hold (or these goods) and returns what had been paid for it."""
         return sum(self.remove_cargo(good,self.cargo[good]) for good in (range(len(GOODS)) if goods is None else goods))
 
+    def log_money(self, side, what, amount, unit='cr'):
+        """Any other money in or out (kit, fuel, repairs, fines, jobs, bounties, the exchange...), for the statement."""
+        amount = int(round(amount))
+        if amount <= 0: return
+        balance = self.crymto if unit == 'CYM' else self.credits
+        self.trade_log.append(dict(time=time.time(),system=self.system,side=side,what=str(what)[:15],price=amount,unit=unit,profit=0,balance=int(balance)))
+        del self.trade_log[:-TRADE_LOG_SIZE]
+
+    def log_paid(self, what, cost, dirty):
+        """A payment made with spend(): the Crymto part and the credit part each get a line."""
+        if dirty: self.log_money('out',what,dirty,'CYM')
+        self.log_money('out',what,cost-(dirty or 0))
+
+    def earn(self, amount, what, kind):
+        self.credits += amount
+        self.book(kind,amount)
+        self.log_money('in',what,amount)
+
     def log_trade(self, side, good, price, unit, profit=0):
         balance = self.crymto if unit == 'CYM' else self.credits
         self.trade_log.append(dict(time=time.time(),system=self.system,side=side,good=good,price=price,unit=unit,profit=profit,balance=int(balance)))
@@ -579,7 +597,7 @@ class Pilot:
         if key in self.equipment: return 'Already installed.'
         if key == 'mine' and self.mines >= 4: return 'Mine rack full (4).'
         if key == 'missile' and self.missiles >= 4: return 'Missile rack full (4).'
-        dirty = self.spend(cost)
+        dirty = self.spend(cost,label)
         if dirty is None: return 'Insufficient credits.'
         self.book('equipment',-cost)
         if key == 'missile': self.missiles += 1
@@ -599,13 +617,14 @@ class Pilot:
     def funds(self):
         return self.credits+(self.crymto if self.crymto_accepted else 0)
 
-    def spend(self, cost):
+    def spend(self, cost, what=None):
         """Pays cost: Crymto first where it is accepted (it is worth less than credits anywhere else), then credits.
-        Returns the Crymto used, or None when funds are short (nothing is taken)."""
+        Returns the Crymto used, or None when funds are short (nothing is taken). `what` names it in the statement."""
         dirty = min(self.crymto,cost) if self.crymto_accepted else 0
         if self.credits < cost-dirty: return None
         self.crymto -= dirty
         self.credits -= cost-dirty
+        if what: self.log_paid(what,cost,dirty)
         return dirty
 
     @staticmethod
@@ -629,8 +648,7 @@ class Pilot:
             self.equipment.remove(key)
             if self.laser == key: self.laser = 'pulse'
             if key == 'rear' or self.rear_laser == key: self.rear_laser = 'pulse'
-        self.credits += value
-        self.book('equipment',value)
+        self.earn(value,'Sold '+label,'equipment')
         extra = ' Front mount: pulse laser.' if key in LASERS and self.laser == 'pulse' else ''
         return f'{label} sold for {value} cr.{extra}'
 
@@ -646,14 +664,13 @@ class Pilot:
         if self.fuel < 1: return 'Less than one unit of fuel aboard to sell.'
         value = fuel_price(self.system)*3//4
         self.fuel = round(self.fuel-1,5)
-        self.credits += value
-        self.book('running',value)
+        self.earn(value,'Fuel sold','running')
         return f'Sold 1 unit of fuel for {value} cr. Tank {self.fuel:.2f}/7.'
 
     def refuel(self):
         cost = self.fuel_cost()
         if self.funds() >= cost:
-            dirty = self.spend(cost)
+            dirty = self.spend(cost,'Fuel')
             self.book('running',-cost)
             self.fuel = 7.0
             return f'Fuel purchased: {cost} cr. Tank full.'+self.paid_note(dirty)
@@ -661,7 +678,7 @@ class Pilot:
         price = fuel_price(self.system)
         units = min(int(7-self.fuel),int(self.funds())//price)
         if units <= 0: return f'Fuel costs {price} cr per unit here. Sell cargo or take a station job.'
-        self.spend(units*price)
+        self.spend(units*price,'Fuel')
         self.book('running',-units*price)
         self.fuel = round(self.fuel+units,5)
         return f'Bought {units} fuel unit{"s" if units > 1 else ""} for {units*price} cr (all you can afford). Tank {self.fuel:.2f}/7.'
@@ -674,7 +691,7 @@ class Pilot:
 
     def repair(self):
         cost = self.service_cost()
-        dirty = self.spend(cost)
+        dirty = self.spend(cost,'Service')
         if dirty is None: return f'Repairs cost {cost} cr.'
         self.book('running',-cost)
         self.hull = 100
@@ -737,7 +754,10 @@ class Pilot:
         if not valid_ledger(self.ledger): raise ValueError('ledger')
         if not isinstance(self.trade_log,list) or len(self.trade_log) > TRADE_LOG_SIZE: raise ValueError('trade log')
         for entry in self.trade_log:
-            if not isinstance(entry,dict) or entry.get('side') not in ('buy','sell') or not integer(entry.get('good')) or entry['good'] >= len(GOODS): raise ValueError('trade entry')
+            if not isinstance(entry,dict) or entry.get('side') not in ('buy','sell','in','out'): raise ValueError('trade entry')
+            if entry['side'] in ('in','out'):
+                if type(entry.get('what')) is not str or len(entry['what']) > 15: raise ValueError('trade entry')
+            elif not integer(entry.get('good')) or entry['good'] >= len(GOODS): raise ValueError('trade entry')
             if not integer(entry.get('system')) or entry['system'] >= len(SYSTEMS) or not integer(entry.get('price')) or type(entry.get('profit',0)) is not int: raise ValueError('trade entry')
             if entry.get('unit') not in ('cr','CYM') or type(entry.get('time')) not in (int,float) or not math.isfinite(entry['time']): raise ValueError('trade entry')
             if 'balance' in entry and type(entry['balance']) is not int: raise ValueError('trade entry')
@@ -1445,6 +1465,7 @@ class Game:
         if amount <= 0: self.message = 'No credits available for that transfer.'; return
         self.p.credits += -amount if deposit else amount
         self.p.bank_balance += amount if deposit else -amount
+        self.p.log_money('out' if deposit else 'in','Bank deposit' if deposit else 'Bank withdrawal',amount)
         self.message = f'{amount:.2f} credits '+('deposited. Bank funds are off-ship.' if deposit else 'withdrawn to ship wallet.')
         self.save()
 
@@ -1466,7 +1487,7 @@ class Game:
         bay = self.p.storage[self.p.system]
         if bay['owned']: self.message = 'You already own this station bay.'; return
         cost = 50 if rent else 750
-        if self.p.spend(cost) is None: self.message = f'Bay {"rental" if rent else "purchase"} costs {cost} cr.'; return
+        if self.p.spend(cost,'Bay rental' if rent else 'Bay purchase') is None: self.message = f'Bay {"rental" if rent else "purchase"} costs {cost} cr.'; return
         self.p.book('running',-cost)
         if rent: bay['rented_until'] = max(time.time(),bay['rented_until'])+7*86400
         else: bay['owned'] = True
@@ -1502,7 +1523,10 @@ class Game:
         lost = p.credits+p.clear_cargo()+gear+fee
         p.book('destroyed',-round(lost))
         p.book('deaths')
+        carried = p.credits
         self.p.credits = 0
+        p.log_money('out','Ship destroyed',carried)
+        p.log_money('out','Recovery fee',fee)
         self.p.equipment = []
         self.p.laser = 'pulse'
         self.p.missiles = self.p.mines = 0
@@ -1623,6 +1647,7 @@ class Game:
         # One settlement, before changing location; further keypresses cannot pay twice.
         self.rescue = None
         self.p.credits -= fee['credits']
+        self.p.log_money('out','Salvage fee',fee['credits'])
         cargo_cost = sum(self.p.remove_cargo(good,fee_n) for good,fee_n in enumerate(fee['cargo']))
         self.p.book('rescue',-(fee['credits']+cargo_cost))
         self.arrive(coordinates(contract['destination']),contract['destination'])
@@ -1726,6 +1751,8 @@ class Game:
         from_bank = min(fine-paid,int(self.p.bank_balance))
         self.p.bank_balance -= from_bank
         self.p.book('fines',-(seized_cost+paid+from_bank))
+        self.p.log_money('out','Fines (arrest)',paid)
+        self.p.log_money('out','Fines from bank',from_bank)
         unpaid = fine-paid-from_bank
         days = min(PRISON_MAX_DAYS,days+math.ceil(unpaid/250))
         self.p.fine = 0
@@ -1771,8 +1798,8 @@ class Game:
         if j['bribe_day'] == self.prison_day():
             self.message = 'The guards will not risk another deal today.'
             return
-        if self.p.credits >= PRISON_BRIBE: self.p.credits -= PRISON_BRIBE; self.p.book('fines',-PRISON_BRIBE); paid = f'{PRISON_BRIBE} cr'
-        elif self.p.crymto >= PRISON_BRIBE: self.p.crymto -= PRISON_BRIBE; paid = f'{PRISON_BRIBE} Crymto'
+        if self.p.credits >= PRISON_BRIBE: self.p.credits -= PRISON_BRIBE; self.p.book('fines',-PRISON_BRIBE); paid = f'{PRISON_BRIBE} cr'; self.p.log_money('out','Prison bribe',PRISON_BRIBE)
+        elif self.p.crymto >= PRISON_BRIBE: self.p.crymto -= PRISON_BRIBE; paid = f'{PRISON_BRIBE} Crymto'; self.p.log_money('out','Prison bribe',PRISON_BRIBE,'CYM')
         else:
             self.message = f'A bribe needs {PRISON_BRIBE} credits or {PRISON_BRIBE} Crymto.'
             return
@@ -1842,7 +1869,7 @@ class Game:
 
     def settle_with_police(self):
         cost = self.p.fine
-        if self.p.spend(cost) is None:
+        if self.p.spend(cost,'Fine (police)') is None:
             self.surrender()
             self.message = f'POLICE: the fine is {cost} cr and you cannot pay. Surrender accepted instead: dock to be arrested.'
             return
@@ -2027,7 +2054,7 @@ class Game:
             self.message = 'Engineering level 5: training complete.'
             return
         cost = [200,400,800,1600,3200][self.p.engineering_level]
-        if self.p.spend(cost) is None:
+        if self.p.spend(cost,'Engineering') is None:
             self.message = f'Next engineering course costs {cost} cr.'
             return
         self.p.book('equipment',-cost)
@@ -2055,7 +2082,7 @@ class Game:
         elif not self.broken_down and self.p.hull >= 100 and self.p.maintenance <= 0:
             self.message = 'Your ship needs no field repair.'
             return
-        if self.p.spend(15) is None:
+        if self.p.spend(15,'Repair parts') is None:
             self.message = 'A repair attempt needs 15 credits of parts. Distress rescue remains available.'
             return
         self.p.book('running',-15)
@@ -2064,8 +2091,7 @@ class Game:
             self.p.engineering_ready_at = 0
             if other:
                 reward = 60+self.p.engineering_level*15
-                self.p.credits += reward
-                self.p.book('jobs',reward)
+                self.p.earn(reward,'Repair assist','jobs')
                 self.disabled_ship = None
                 self.ship_target = None
                 self.assist_spawn_timer = self.distress_delay()
@@ -2196,8 +2222,7 @@ class Game:
     def hail_settle(self, fee):
         if self.p.fuel < 1: self.message = 'You need at least 1 unit of fuel to restart their drive.'; return
         self.p.fuel = round(self.p.fuel-1,5)
-        self.p.credits += fee
-        self.p.book('jobs',fee)
+        self.p.earn(fee,'Drive restart','jobs')
         self.end_hail(f'Drive restarted with 1 unit of your fuel. The crew paid {fee} credits and jumped clear.')
 
     def hail_cargo(self):
@@ -2401,7 +2426,7 @@ class Game:
                 self.station_hostile_until[system] = time.time()+HOSTILITY_COOLDOWN_SECONDS
                 self.p.station_police_defeated[system] = min(STATION_POLICE_CAPACITY,self.p.station_police_defeated[system]+1)
             self.enemy_police_system = None
-        else: self.p.credits += 35; self.p.book('bounty',35)
+        else: self.p.earn(35,'Pirate bounty','bounty')
         self.p.kills += 1
         self.spawn = 24
         self.message = ('Police ship destroyed. Fine increased by 150 cr.' if self.enemy_kind == 'police' else 'Hostile destroyed. Bounty: 35 credits.')+(' Cargo canisters spilled: fly slowly to scoop them.' if spilled else '')
@@ -2506,8 +2531,7 @@ class Game:
         if j['elapsed'] < duration or j['step'] < 5: return
         base,bonus = ((15,2),(20,3),(25,3))[j['kind']]
         pay = base+bonus*j['correct']
-        self.p.credits += pay
-        self.p.book('jobs',pay)
+        self.p.earn(pay,'Station job','jobs')
         if j['kind'] == 2: self.p.workshop_xp += 10
         self.p.dock_job = None
         self.message = f'Shift complete: {pay} cr paid.'+(' Workshop experience +10.' if j['kind'] == 2 else '')
@@ -2564,15 +2588,20 @@ class Game:
             self.p.crymto -= seized
             self.p.fine += fine
             self.p.book('fines',-seized)
+            self.p.log_money('out','Crymto frozen',seized,'CYM')
             self.message = f'COMPLIANCE CHECK: {seized} Crymto frozen as suspected contraband proceeds and a {fine} cr fine added. Nothing exchanged.'
             self.checkpoint()
             return
         if launder:
             self.p.crymto -= amount
+            self.p.log_money('out','Exchange',amount,'CYM')
             self.p.credits += received
+            self.p.log_money('in','Exchange',received)
         else:
             self.p.credits -= amount
+            self.p.log_money('out','Exchange',amount)
             self.p.crymto += received
+            self.p.log_money('in','Exchange',received,'CYM')
         self.message = f'Exchanged {amount} '+('Crymto' if launder else 'credits')+f' for {received} '+('credits' if launder else 'Crymto')+'. Fee included.'
         self.checkpoint()
 
@@ -2756,7 +2785,7 @@ class Game:
             self.message = 'This pilot has already redeemed that code.'
         else:
             self.p.redeemed_credit_codes.append(code)
-            self.p.credits += 100000
+            self.p.credits += 100000; self.p.log_money('in','Code redeemed',100000)
             self.credit_code_text = ''
             self.message = 'Testing code redeemed: 100,000 credits added.'
             self.checkpoint()
@@ -2766,7 +2795,7 @@ class Game:
             self.message = f'Insufficient credits. Outstanding fines: {self.p.fine} cr.'
         else:
             amount = self.p.fine
-            self.p.spend(amount)
+            self.p.spend(amount,'Fines')
             self.p.book('fines',-amount)
             self.p.fine = 0
             self.message = f'Paid {amount} cr in fines. Station hostility is separate.'
@@ -2781,7 +2810,7 @@ class Game:
         d.text(45,350,'Banking, exchange, codes, fines and paid station jobs.')
         launder_fee = self.exchange_terms()[0] if self.exchange_available() else None
         d.text(45,435,'Crymto exchange: '+(f'{launder_fee}% fee to cash Crymto here' if launder_fee is not None else 'dock to exchange'))
-        if self.money_return != 'market': d.text(45,480,'T Trade log and E Reports are available anywhere.')
+        if self.money_return != 'market': d.text(45,480,'T Statement and E Reports are available anywhere.')
 
         d.text(45,320,f'Pay fines costs {p.fine:,} credits. Code redemption is single-use per pilot.')
         d.text(45,570,'Crymto survives ship destruction. Bank funds and stored cargo are protected.')
@@ -2789,27 +2818,31 @@ class Game:
 
     def draw_trades(self):
         d,log = self.d,self.p.trade_log
-        d.text(35,85,'MONEY / TRADE LOG',GOLD)
+        d.text(35,85,'MONEY / STATEMENT',GOLD)
         if not log:
-            d.text(45,160,'No trades yet. Buy with B and sell with S in a station market.')
+            d.text(45,160,'Nothing yet. Trades, kit, fuel, repairs, fines, jobs and bounties all appear here.')
             return
         sells = [e for e in log if e['side'] == 'sell']
-        money_in = sum(e['price'] for e in sells if e['unit'] == 'cr')
-        money_out = sum(e['price'] for e in log if e['side'] == 'buy' and e['unit'] == 'cr')
-        d.text(45,125,f'Last {len(log)} trades. In {money_in:,} cr, out {money_out:,} cr. Profit on sales: {sum(e["profit"] for e in sells if e["unit"] == "cr"):+,} cr.',(135,175,185))
-        d.text(45,165,f'{"WHEN":<12} {"WHERE":<10} {"TRADE":<5} {"COMMODITY":<15} {"IN":>10} {"OUT":>10} {"PROFIT":>10} {"BALANCE":>11}',GOLD)
+        money_in = sum(e['price'] for e in log if e['side'] in ('sell','in') and e['unit'] == 'cr')
+        money_out = sum(e['price'] for e in log if e['side'] in ('buy','out') and e['unit'] == 'cr')
+        d.text(45,125,f'Last {len(log)} entries. In {money_in:,} cr, out {money_out:,} cr. Profit on sales: {sum(e["profit"] for e in sells if e["unit"] == "cr"):+,} cr.',(135,175,185))
+        d.text(45,165,f'{"WHEN":<12} {"WHERE":<10} {"TYPE":<5} {"ITEM":<15} {"IN":>10} {"OUT":>10} {"PROFIT":>10} {"BALANCE":>11}',GOLD)
         newest = list(reversed(log))
         page = newest[self.trades_page*14:(self.trades_page+1)*14]
         for i,e in enumerate(page):
             when = time.strftime('%d %b %H:%M',time.localtime(e['time']))
             amount = f'{e["price"]:,} {e["unit"]}'
-            money_in,money_out = (amount,'') if e['side'] == 'sell' else ('',amount)
+            incoming = e['side'] in ('sell','in')
+            money_in,money_out = (amount,'') if incoming else ('',amount)
             profit = f'{e["profit"]:+,} {e["unit"]}' if e['side'] == 'sell' else ''
             balance = f'{e["balance"]:,} {e["unit"]}' if 'balance' in e else ''
-            color = (120,220,140) if e['side'] == 'sell' and e['profit'] > 0 else RED if e['side'] == 'sell' and e['profit'] < 0 else GREEN
-            d.text(45,200+i*27,f'{when:<12} {SYSTEMS[e["system"]][0]:<10} {e["side"].upper():<5} {GOODS[e["good"]]:<15} {money_in:>10} {money_out:>10} {profit:>10} {balance:>11}',color)
+            kind = {'buy':'BUY','sell':'SELL','in':'EARN','out':'PAID'}[e['side']]
+            item = GOODS[e['good']] if e['side'] in ('buy','sell') else e['what']
+            if e['side'] == 'sell': color = (120,220,140) if e['profit'] > 0 else RED if e['profit'] < 0 else GREEN
+            else: color = (120,220,140) if e['side'] == 'in' else (225,190,130) if e['side'] == 'out' else GREEN
+            d.text(45,200+i*27,f'{when:<12} {SYSTEMS[e["system"]][0]:<10} {kind:<5} {item:<15} {money_in:>10} {money_out:>10} {profit:>10} {balance:>11}',color)
         pages = max(1,math.ceil(len(log)/14))
-        d.text(45,595,f'Page {self.trades_page+1} of {pages}. UP shows older trades, DOWN newer. BACKSPACE returns.',(135,175,185))
+        d.text(45,595,f'Page {self.trades_page+1} of {pages}. UP shows older entries, DOWN newer. BACKSPACE returns.',(135,175,185))
 
     REPORT_ROWS = (('trade','Trading profit'),('bounty','Bounties'),('jobs','Jobs and assists'),('running','Fuel, repairs, services'),
                    ('fines','Fines and seizures'),('rescue','Rescue fees'),('destroyed','Ship destroyed'))
@@ -3379,7 +3412,7 @@ class Game:
                 self.save()
             if k == ord('p'):
                 if self.p.funds() >= self.p.fine:
-                    self.p.spend(self.p.fine)
+                    self.p.spend(self.p.fine,'Fines')
                     self.p.book('fines',-self.p.fine)
                     self.p.fine = 0
                     self.message = 'Fines cleared.'
@@ -4681,11 +4714,11 @@ class Game:
             for i,(label,key) in enumerate([('Bank / storage  B',ord('1')),('Crymto exchange  X',ord('2')),('Redeem code  R',ord('3')),('Pay fines  F',ord('4'))]):
                 self.mouse_button(35+(i%2)*515,380+(i//2)*100,490,label,key)
             self.mouse_button(35,535,490,'Station jobs / earn credits  J',ord('5'))
-            self.mouse_button(550,535,240,'Trade log  T',ord('6'))
+            self.mouse_button(550,535,240,'Statement  T',ord('6'))
             self.mouse_button(800,535,240,'Reports  E',ord('e'))
             self.mouse_button(35,674,1000,'Return to market',ord('9'))
         elif self.mode == 'money':
-            self.mouse_button(35,535,240,'Trade log  T',ord('6'))
+            self.mouse_button(35,535,240,'Statement  T',ord('6'))
             self.mouse_button(290,535,240,'Reports  E',ord('e'))
             self.mouse_button(35,674,1000,'Return',ord('9'))
         elif self.mode == 'reports':

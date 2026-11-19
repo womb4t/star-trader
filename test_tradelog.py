@@ -545,3 +545,54 @@ class PoliceSettleTests(Base):
         g.mode = 'flight'
         g.station_hostile('Repeated weapons fire on station after warnings.')
         self.assertFalse(g.can_settle())
+
+
+class StatementTests(Base):
+    """The statement lists every payment and receipt, not just market trades."""
+    def last(self): return self.p.trade_log[-1]
+
+    def test_kit_fuel_service_and_sales_of_kit_appear(self):
+        p = self.p
+        p.system, p.credits, p.equipment = 2, 5000, []
+        p.buy_equipment(1)
+        label, cost = st.EQUIPMENT[1][1], st.EQUIPMENT[1][2]
+        self.assertEqual((self.last()['side'], self.last()['what'], self.last()['price']), ('out', label[:15], cost))
+        p.sell_equipment(1)
+        self.assertEqual((self.last()['side'], self.last()['price']), ('in', cost//2))
+        p.fuel = 3
+        p.refuel()
+        self.assertEqual((self.last()['what'], self.last()['side']), ('Fuel', 'out'))
+        p.hull = 50
+        p.repair()
+        self.assertEqual(self.last()['what'], 'Service')
+        self.assertEqual(self.last()['balance'], p.credits)
+
+    def test_fines_jobs_and_bounties_appear(self):
+        g, p = self.g, self.p
+        p.fine = 120
+        g.mode = 'money'; g.money_return = 'market'
+        g.pay_fines() if hasattr(g, 'pay_fines') else p.spend(p.fine, 'Fines')
+        self.assertIn('Fine', self.last()['what'])
+        self.assertEqual(self.last()['price'], 120)
+        p.earn(35, 'Pirate bounty', 'bounty')
+        self.assertEqual((self.last()['side'], self.last()['what']), ('in', 'Pirate bounty'))
+
+    def test_crymto_payments_are_split_by_currency(self):
+        p = self.p
+        p.system, p.credits, p.crymto = 4, 1000, 30   # anarchy: Crymto first
+        p.spend(100, 'Fuel')
+        self.assertEqual([(e['unit'], e['price']) for e in p.trade_log[-2:]], [('CYM', 30), ('cr', 70)])
+
+    def test_statement_entries_survive_validation_and_draw(self):
+        p, g = self.p, self.g
+        p.earn(50, 'Station job', 'jobs')
+        p.trade(FOOD, True, value=10)
+        p.validate()
+        g.d = MagicMock()
+        g.trades_page = 0
+        g.draw_trades()
+        lines = [c.args[2] for c in g.d.text.call_args_list]
+        self.assertTrue(any('EARN' in l and 'Station job' in l for l in lines))
+        self.assertTrue(any('In 50 cr, out 10 cr' in l for l in lines))
+        p.trade_log.append(dict(time=1., system=0, side='out', what=7, price=1, unit='cr', profit=0))
+        with self.assertRaises(ValueError): p.validate()
