@@ -3,6 +3,7 @@
 From your suggestions:
 - **Money / Reports (Money, then E).** Shows where your money came from and went (trading, bounties, jobs, running costs, fines, rescue fees and lost ships) for today, the last 7 days or all time. It also shows your earnings per hour and per trip next to the average commander, with a few lines on what is costing you most. Averages appear once 3 commanders have played in the period; the server only ever sends averages, never another commander's figures. Records start with this version.
 - **The trade log has In, Out and Balance columns**, and totals money in and out at the top.
+- **Sell your ship's kit.** In Outfitting, S sells the selected item back for half its new price: lasers, mounts, scoops, the cargo bay (once the hold is down to 20 t), docking computer, missiles and mines. Selling a laser puts the built-in pulse laser back on that mount. Buying a laser now tells you the pulse laser is kept: V switches lasers, and a rear laser mount carries one behind you.
 
 From your bug reports:
 - **Selling scooped or salvaged cargo no longer shows a false loss.** Cargo lost when your ship is destroyed, seized by customs, taken as a rescue fee or moved to a station bay used to leave its purchase cost behind, and the next free tonne of that good was charged for it. The cost now goes with the cargo (station bays keep it until you take the cargo back), and saves are cleaned up when loaded.

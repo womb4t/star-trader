@@ -251,5 +251,61 @@ class ServerReportTests(unittest.TestCase):
         self.assertNotIn('Frank', json.dumps(snap['reports']))
 
 
+class SellKitTests(Base):
+    def index(self, key): return next(i for i,e in enumerate(st.EQUIPMENT) if e[0] == key)
+
+    def test_buying_a_laser_explains_the_pulse_laser_is_kept(self):
+        self.p.system = next(i for i,t in enumerate(st.TECH) if t >= 5)
+        message = self.p.buy_equipment(self.index('mining'))
+        self.assertIn('Pulse laser kept', message)
+        self.assertEqual(self.p.laser, 'mining')
+
+    def test_selling_kit_pays_half_and_resets_lasers(self):
+        p = self.p
+        p.equipment = ['mining', 'rear', 'beam', 'scoops']
+        p.laser, p.rear_laser = 'mining', 'beam'
+        p.credits = 0
+        self.assertIn('sold for 400 cr', p.sell_equipment(self.index('mining')))
+        self.assertEqual((p.laser, p.credits), ('pulse', 400))
+        p.sell_equipment(self.index('rear'))
+        self.assertEqual(p.rear_laser, 'pulse')
+        p.sell_equipment(self.index('scoops'))
+        self.assertEqual(p.equipment, ['beam'])
+        self.assertEqual(p.ledger['total']['equipment'], 400+300+262)
+        p.validate()
+
+    def test_selling_a_laser_on_the_rear_mount(self):
+        p = self.p
+        p.equipment = ['rear', 'military']
+        p.laser, p.rear_laser = 'pulse', 'military'
+        p.sell_equipment(self.index('military'))
+        self.assertEqual((p.rear_laser, p.equipment), ('pulse', ['rear']))
+        p.validate()
+
+    def test_cannot_sell_what_is_not_fitted_or_a_full_cargo_bay(self):
+        p = self.p
+        p.equipment = ['cargo']
+        self.assertIn('not fitted', p.sell_equipment(self.index('docking')))
+        p.cargo[0] = 25
+        self.assertIn('Unload to 20 t', p.sell_equipment(self.index('cargo')))
+        p.cargo[0] = 20
+        self.assertIn('sold', p.sell_equipment(self.index('cargo')))
+        p.missiles = 0
+        self.assertIn('No homing missiles', p.sell_equipment(self.index('missile')))
+        p.missiles = 2
+        p.sell_equipment(self.index('missile'))
+        self.assertEqual(p.missiles, 1)
+
+    def test_s_sells_in_outfitting(self):
+        g = self.g
+        g.d = MagicMock()
+        g.p.equipment = ['scoops']
+        g.mode = 'outfit'; g.outfit_return = 'market'
+        g.shop_selected = self.index('scoops')
+        g.keyboard(ord('s'))
+        self.assertEqual(g.p.equipment, [])
+        self.assertIn('sold for 262 cr', g.message)
+
+
 if __name__ == '__main__':
     unittest.main()

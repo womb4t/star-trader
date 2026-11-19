@@ -69,6 +69,7 @@ EQUIPMENT = [
     ('dsc', 'DSC comms console', 450, 3, '5 Comms: distress alerts with identity, nature and position; acknowledge to track'),
     ('rear', 'Rear laser mount', 600, 4, 'Comes with a pulse laser; in rear view (F), V mounts any laser you own'),
 ]
+RESALE = 0.5   # outfitters buy kit back at half its new price
 LASERS = {'pulse': (0.30, 1), 'beam': (0.14, 1), 'military': (0.12, 2), 'mining': (0.65, 1)}
 # Full strength of NPC ships; the first half of it is shields, the rest hull.
 ENEMY_STRENGTH = {'pirate': 6, 'police': 10}
@@ -533,7 +534,30 @@ class Pilot:
         if key in LASERS:
             self.laser = key
             if 'rear' in self.equipment: return label+' fitted to the front mount. In rear view (F), V moves it to the rear mount.'
+            return label+' fitted. Pulse laser kept: V switches; a rear mount fits it behind you.'
         return label + ' fitted.'
+
+    def resale_value(self, index):
+        return int(EQUIPMENT[index][2]*RESALE)
+
+    def sell_equipment(self, index):
+        """Outfitters buy kit back at half price. The built-in pulse laser is not for sale."""
+        key, label, cost, tech, _ = EQUIPMENT[index]
+        value = self.resale_value(index)
+        if key in ('missile','mine'):
+            if (self.missiles if key == 'missile' else self.mines) <= 0: return f'No {label.lower()}s aboard to sell.'
+            if key == 'missile': self.missiles -= 1
+            else: self.mines -= 1
+        else:
+            if key not in self.equipment: return f'{label} is not fitted.'
+            if key == 'cargo' and sum(self.cargo) > 20: return f'Unload to 20 t or less before removing the large cargo bay ({sum(self.cargo)} t aboard).'
+            self.equipment.remove(key)
+            if self.laser == key: self.laser = 'pulse'
+            if key == 'rear' or self.rear_laser == key: self.rear_laser = 'pulse'
+        self.credits += value
+        self.book('equipment',value)
+        extra = ' Front mount: pulse laser.' if key in LASERS and self.laser == 'pulse' else ''
+        return f'{label} sold for {value} cr.{extra}'
 
     @property
     def mass_factor(self):
@@ -3237,6 +3261,9 @@ class Game:
                 if k in (ord('b'),13):
                     self.message = self.p.buy_equipment(self.shop_selected)
                     self.save()
+                if k == ord('s'):
+                    self.message = self.p.sell_equipment(self.shop_selected)
+                    self.save()
             else:
                 if k == UP: self.selected = (self.selected-1)%len(GOODS)
                 if k == DOWN: self.selected = (self.selected+1)%len(GOODS)
@@ -4497,7 +4524,7 @@ class Game:
                     self.mouse_row(35,130+(i-start)*37,720,37,lambda i=i:setattr(self,'shop_selected',i))
                 self.mouse_button(690,90,45,'Up',UP)
                 self.mouse_button(740,90,60,'Down',DOWN)
-                labels = [('Fit',ord('b')),('Return to VMS' if self.outfit_return == 'vms' else 'Return to market',ord('u'))]
+                labels = [('Fit  B',ord('b')),('Sell  S',ord('s')),('Return to VMS' if self.outfit_return == 'vms' else 'Return to market',ord('u'))]
             for i,(label,key) in enumerate(labels): self.mouse_button(35+i*220,row_y,210,label,key)
             if self.mode == 'market':
                 self.mouse_button(350,638,300,'Negotiate payout N',ord('n'))
@@ -4863,16 +4890,17 @@ class Game:
                 start = max(0,min(self.shop_selected-4,len(EQUIPMENT)-8))
                 for i in range(start,min(start+8,len(EQUIPMENT))):
                     key,label,cost,tech,desc = EQUIPMENT[i]
-                    state = 'FITTED' if key in p.equipment else f'NEEDS TECH {tech}' if tech>TECH[p.system] else 'AVAILABLE'
+                    state = f'FITTED, SELLS {p.resale_value(i)}' if key in p.equipment else f'NEEDS TECH {tech}' if tech>TECH[p.system] else 'AVAILABLE'
                     if key in ('missile','mine'): state += f' / {p.missiles if key == "missile" else p.mines}/4 ABOARD'
                     d.text(35,135+(i-start)*37,f'{">" if i==self.shop_selected else " "} {label:<23} {cost:>4} cr  {state}',GOLD if i==self.shop_selected else GREEN)
                 d.text(35,455,EQUIPMENT[self.shop_selected][4],GOLD)
                 item,label,cost,required,_ = EQUIPMENT[self.shop_selected]
                 d.text(35,490,f'Selected: {label} / needs tech {required} / local tech {TECH[p.system]}',GOLD if required <= TECH[p.system] else RED)
-                d.text(35,520,'UP/DOWN select; B or ENTER buys. Max 4 mines and 4 missiles.')
+                d.text(35,520,'B or ENTER buys; S sells for half price.')
+                d.text(35,545,'The pulse laser is built in and cannot be sold.',(135,175,185))
             wanted = self.wanted_level()
             for i,t in enumerate(['COMMANDER STATUS',f'Cmdr  {self.commander_name()[:16]}',f'Rank  {p.rank}',f'Wanted {"*"*wanted}{"-"*(5-wanted)} {wanted}/5',f'Cargo {sum(p.cargo)}/{p.capacity} t',f'Fuel  {p.fuel:.2f}/7',f'Hull  {p.hull:.0f}%',f'Refill {p.fuel_cost()} cr',f'Service {p.service_cost()} cr',f'Mines {p.mines}/4',f'Fine {p.fine} cr',f'Wear {p.maintenance:.0f}%',f'Eng. {p.engineering_level}/5']): d.text(790,130+i*35,t,RED if i == 3 and wanted else GREEN)
-            d.text(35,562,'Ship fuel, service, fitting and engineering: open VMS above.')
+            if self.mode == 'market': d.text(35,562,'Ship fuel, service, fitting and engineering: open VMS above.')
             d.text(35,590,'3 Money / station jobs   2 VMS   1 Nav')
         elif self.mode == 'planet_profile':
             self.draw_planet_profile()
