@@ -401,6 +401,11 @@ FLARE_MINUTES = (4,10)
 STATIC_GLYPHS = '#%&@?!<>/\\|*=~'
 # Rock damage per hit and ore left to scoop: precise mining cuts keep it all, stronger lasers vaporise more.
 ROCK_CUTS = {'mining': (1, (3,)), 'pulse': (1, (2,)), 'beam': (1, (2,)), 'military': (2, (0, 1))}
+# Each system's near-station rock field: cut rocks regrow one by one, not on every launch.
+ROCK_FIELD = 3
+ROCK_REGROW = 30*60   # seconds before a cut rock is replaced
+SCOOP_SECONDS = 4.    # time to draw one tonne of ore or a canister into the hold
+SCOOP_RANGE = 260
 # Bot traders buy where a commodity is cheap and sell where it is dear, moving station stock around the galaxy.
 # (The trades themselves run in market.py, shared on the server; these are the ships you see.)
 # Disabled ships: not on every flight. Like a marine DSC radio, their distress alert carries an
@@ -478,6 +483,7 @@ class Pilot:
         self.intro_seen = False
         self.trade_log = []
         self.ledger = dict(days={},total={})
+        self.rocks_cut = [[] for _ in SYSTEMS]  # when rocks near each station were cut (epoch seconds)
 
     def book(self, kind, amount=1):
         """Record money (signed credits), play seconds, a trip or a death in today's and the all-time ledger."""
@@ -771,6 +777,9 @@ class Pilot:
         if not isinstance(self.cargo_paid,list) or len(self.cargo_paid) != len(GOODS) or not all(integer(n) for n in self.cargo_paid): raise ValueError('cargo basis')
         if not isinstance(self.redeemed_credit_codes,list) or len(self.redeemed_credit_codes)>100 or any(type(code) is not str or len(code)>80 for code in self.redeemed_credit_codes) or len(set(self.redeemed_credit_codes)) != len(self.redeemed_credit_codes): raise ValueError('credit codes')
         if not integer(self.crymto): raise ValueError('Crymto balance')
+        if not isinstance(self.rocks_cut,list) or len(self.rocks_cut) != len(SYSTEMS): raise ValueError('rock fields')
+        for cuts in self.rocks_cut:
+            if not isinstance(cuts,list) or len(cuts) > ROCK_FIELD or any(type(t) not in (int,float) or not math.isfinite(t) for t in cuts): raise ValueError('rock field')
         if not integer(self.workshop_xp): raise ValueError('workshop experience')
         if not isinstance(self.job_boards,list) or len(self.job_boards) != len(SYSTEMS): raise ValueError('job boards')
         for board in self.job_boards:
@@ -1198,8 +1207,9 @@ class Game:
         self.nav_target = None
         self.nav = 'course' if self.p.waypoint and galactic_distance(self.p.position,self.p.waypoint['position']) > .001 else 'station'
         self.heat = 0
-        self.asteroids = [random_asteroid(position) for position in ([150.,-70.,1000.],[-250.,100.,1700.],[320.,180.,2300.])]
+        self.asteroids = [random_asteroid(position) for position in ([150.,-70.,1000.],[-250.,100.,1700.],[320.,180.,2300.])[:self.rocks_left()]]
         self.fragments = []
+        self.scoop_progress = 0.
         self.sun = [1200.,-500.,3500.]
         self.ship_collision_cooldown = 0.
         self.message = 'Approach slowly. Q/E roll to match the rotating slot. 9 manual.'
@@ -3606,7 +3616,10 @@ class Game:
         if not allowed:
             self.message = 'Launch, or cancel cruise, before charging hyperspace.'
         elif dist < .001: self.message = 'Already at that coordinate.'
-        elif cost > self.p.fuel: self.message = f'Jump requires {cost:.2f} fuel; aboard {self.p.fuel:.2f}.'
+        elif cost > self.p.fuel:
+            cruise = dist*.25*self.p.mass_factor
+            self.message = (f'Jump requires {cost:.2f} fuel; aboard {self.p.fuel:.2f}. '
+                            +(f'T cruises there for {cruise:.2f} (slower), or refuel at a station.' if cruise <= self.p.fuel else 'Refuel at a station (2 VMS) or skim a sun.'))
         elif not self.p.deep_space and (station := math.sqrt(sum(v*v for v in self.station))) < PATROL_RADIUS:
             # Station mass lock: you must leave the patrolled space before jumping.
             self.message = f'Hyperspace blocked by station mass lock. Fly beyond {PATROL_RADIUS:,} m (now {station:,.0f} m).'
@@ -3957,8 +3970,8 @@ class Game:
         if 'scoops' not in self.p.equipment: return distance,'SCOOP: NOT FITTED',False
         if sum(self.p.cargo) >= self.p.capacity: return distance,'SCOOP: HOLD FULL',False
         if abs(self.speed) > 50: return distance,'SCOOP: SLOW BELOW 50',False
-        if distance >= 260: return distance,'SCOOP: CLOSE TO 260 m',False
-        return distance,'SCOOP: COLLECTING',True
+        if distance >= SCOOP_RANGE: return distance,f'SCOOP: CLOSE TO {SCOOP_RANGE} m',False
+        return distance,f'SCOOP: COLLECTING {min(99,int(100*getattr(self,"scoop_progress",0.)/SCOOP_SECONDS))}%',True
 
     def draw_scanner(self):
         d = self.d
@@ -4057,12 +4070,27 @@ class Game:
         if not SCOOP_SPEEDS[0] <= self.speed <= SCOOP_SPEEDS[1]: return 'speed',f'SCOOP: SPEED {SCOOP_SPEEDS[0]}-{SCOOP_SPEEDS[1]}'
         return 'collecting','SCOOP: COLLECTING'
 
-    def auto_scoop_ore(self):
-        # Fitted scoops pick up ore fragments by themselves when you fly slowly past.
-        if 'scoops' not in self.p.equipment or abs(self.speed) > 50 or sum(self.p.cargo) >= self.p.capacity: return
-        nearby = next((f for f in self.fragments if math.sqrt(sum(v*v for v in f[:3])) < 260),None)
-        if nearby is None: return
-        self.collect_fragment(nearby)
+    def rocks_left(self):
+        """Rocks in this station's field: each one cut in the last ROCK_REGROW seconds is still missing."""
+        if self.p.deep_space: return ROCK_FIELD
+        now = time.time()
+        cuts = self.p.rocks_cut[self.p.system]
+        cuts[:] = [t for t in cuts if now-t < ROCK_REGROW]
+        return ROCK_FIELD-len(cuts)
+
+    def nearest_fragment(self):
+        return min(self.fragments,key=lambda f: sum(v*v for v in f[:3]),default=None)
+
+    def auto_scoop_ore(self, dt=0.):
+        """Fitted scoops draw the nearest piece in while you fly slowly close by: SCOOP_SECONDS a tonne."""
+        status = self.ore_status()
+        if status is None or not status[2]:
+            self.scoop_progress = 0.
+            return
+        self.scoop_progress = getattr(self,'scoop_progress',0.)+dt
+        if self.scoop_progress >= SCOOP_SECONDS:
+            self.scoop_progress = 0.
+            self.collect_fragment(self.nearest_fragment())
 
     def collect_fragment(self, fragment):
         good = fragment[3] if len(fragment) > 3 else 2
@@ -4071,14 +4099,15 @@ class Game:
         self.message = f'Scooped 1 tonne of {GOODS[good].lower()}. Sell it at a station.'
 
     def scoop(self):
+        """O: say what the scoops are doing (they collect by themselves)."""
         if 'scoops' not in self.p.equipment:
             self.message = 'Fuel / cargo scoops required.'
             return
-        nearby = next((f for f in self.fragments if math.sqrt(sum(v*v for v in f[:3])) < 260),None)
-        if nearby is None: self.message = 'Fly within 260 m of an ore fragment.'
+        status = self.ore_status()
+        if status is None or status[0] >= SCOOP_RANGE: self.message = f'Fly within {SCOOP_RANGE} m of an ore fragment.'
         elif sum(self.p.cargo) >= self.p.capacity: self.message = 'Cargo hold full.'
         elif abs(self.speed) > 50: self.message = 'Slow below 50 to collect ore.'
-        else: self.collect_fragment(nearby)
+        else: self.message = f'Drawing in ore: {status[1].split()[-1]}. Hold course; each tonne takes {SCOOP_SECONDS:.0f} s.'
 
     def project(self, obj):
         x,y,z = obj[:3]
@@ -4280,7 +4309,7 @@ class Game:
             if self.heat > 70: self.damage((2+(self.heat-70)*.25)*dt)
             if self.mode == 'dead': return
         else: self.heat = max(0,self.heat-10*dt)
-        self.auto_scoop_ore()
+        self.auto_scoop_ore(dt)
         self.spawn -= dt
         patrolled = self.in_patrol_zone()
         if self.enemy and self.enemy_kind == 'pirate' and patrolled:
@@ -4560,6 +4589,10 @@ class Game:
             self.message = f'Laser hit: asteroid cracking ({left} more hit{"s" if left > 1 else ""}).'
             return
         self.asteroids.remove(rock)
+        if not self.p.deep_space:
+            cuts = self.p.rocks_cut[self.p.system]
+            cuts.append(time.time())
+            del cuts[:-ROCK_FIELD]
         good = rock[4] if len(rock) > 4 else 2
         count = random.choice(yields)
         self.fragments += [[rock[0]+offset,rock[1]+10,rock[2],good] for offset in (-18,0,18)[:count]]
@@ -4892,7 +4925,7 @@ class Game:
                 ('Rolling','HOLD Q / E','Roll the ship left or right to match the station entrance.'),
                 ('Look behind','F','Toggle rear view. Your course stays the same; a rear laser must be fitted.'),
                 ('Local navigation','CTRL + S / P / R / U','Select station, planet, rocks or sun. Gold dots and arrows show the bearing.'),
-                ('Pick up ore','O','Fit scoops. Get within 260m of a fragment at speed 50 or below.')]),
+                ('Pick up ore','O','Fit scoops. Stay within 260m of a fragment at speed 50 or below: 4 s a tonne. Cut rocks regrow in 30 min.')]),
             ('Nav',[
                 ('Navigation','2','Click a planet or empty point. Planet profiles show coordinates and services.'),
                 ('Search and lock','/  C  ENTER','Search by name, enter coordinates, then lock. Mouse map clicks also lock.'),

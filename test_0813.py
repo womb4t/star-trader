@@ -161,7 +161,7 @@ class FlightKeyTests(Base):
         g.speed = 20
         self.assertEqual(g.ore_status()[1], 'SCOOP: CLOSE TO 260 m')
         g.fragments = [[0.,0.,200.,2]]
-        g.auto_scoop_ore()
+        g.auto_scoop_ore(st.SCOOP_SECONDS)
         self.assertEqual(g.p.cargo[2], 1)
         self.assertIsNotNone(g.alert)
         self.assertIn('Scooped', g.alert['text'])

@@ -930,7 +930,7 @@ class GameplayTests(unittest.TestCase):
         self.assertEqual(len(g.fragments),3)
         g.scoop()
         self.assertEqual(g.p.cargo[2],0)
-        g.p.equipment.append('scoops'); g.scoop()
+        g.p.equipment.append('scoops'); g.auto_scoop_ore(st.SCOOP_SECONDS)
         self.assertEqual(g.p.cargo[2],1)
         self.assertEqual(len(g.fragments),2)
         g.p.save()
@@ -1010,6 +1010,8 @@ class GameplayTests(unittest.TestCase):
         g.p.equipment = ['scoops']; g.speed = 80; g.update(.01)
         self.assertEqual(len(g.fragments),1)  # too fast
         g.speed = 20; g.update(.01)
+        self.assertEqual(g.p.cargo[2],0)  # drawing in takes SCOOP_SECONDS
+        for _ in range(int(st.SCOOP_SECONDS/.05)+2): g.update(.05)
         self.assertEqual((len(g.fragments),g.p.cargo[2]),(0,1))
 
     def test_disabled_ships_can_be_destroyed_and_targets_show_status(self):
@@ -1215,7 +1217,8 @@ class GameplayTests(unittest.TestCase):
             g.cooldown = 0; g.fire_laser(); hits += 1
         self.assertEqual(hits,5)
         self.assertTrue(all(f[3] == 8 for f in g.fragments))
-        g.fragments = [[0.,0.,100.,8]]; g.speed = 20; g.update(.01)
+        g.fragments = [[0.,0.,100.,8]]; g.speed = 20
+        for _ in range(int(st.SCOOP_SECONDS/.05)+2): g.update(.05)
         self.assertEqual(g.p.cargo[8],1)
         self.assertIn('gold',g.message)
         rocks = []
