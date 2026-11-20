@@ -1,3 +1,8 @@
+# 0.9.6 — long-range scanner
+
+From your suggestions:
+- **Long-range scanner** (outfitting, 900 cr, tech 6). Ctrl+L or the RNG button on the radar switches between 2.5 km and 25 km. On long range, contacts sit at their true range instead of piling up on the rim, and ships in distress are found from much further away. With the DSC console fitted, the selected caller shows its identity and range on the radar ("235 104 377 6.5 km"); the radar's bottom line shows the range to whatever you have selected.
+
 # 0.9.5 — the Relay ticker
 
 New:
