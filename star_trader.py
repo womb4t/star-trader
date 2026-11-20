@@ -75,6 +75,7 @@ EQUIPMENT = [
     ('cloak', 'Phase cloak', 3000, 11, 'K toggles concealment; consumes fuel'),
     ('dsc', 'DSC comms console', 450, 3, '5 Comms: distress alerts with identity, nature and position; acknowledge to track'),
     ('rear', 'Rear laser mount', 600, 4, 'Comes with a pulse laser; in rear view (F), V mounts any laser you own'),
+    ('lrscan', 'Long-range scanner', 900, 6, 'Ctrl+L or RNG: radar out to 25 km; finds distress calls (DSC names them)'),
 ]
 RESALE = 0.5   # outfitters buy kit back at half its new price
 LAWLESS = ('Anarchy','Feudal')
@@ -428,6 +429,7 @@ DSC_REPEAT = 60                # an unacknowledged alert repeats this often
 DSC_NATURES = {'fire': (240, 420), 'hull breach': (240, 420), 'life support failure': (300, 540),
                'drive failure': (420, 720), 'undesignated': (360, 600)}  # seconds before the crew is lost
 SCANNER_RANGE = 2500
+LONG_RANGE = 25000   # the long-range scanner's radar radius (m)
 MAX_TRAFFIC = 4                # trader ships visible at once
 TRADER_DEPART_SECONDS = 22     # a launching trader flies clear this long, then jumps out
 TRADER_INBOUND_SECONDS = 45    # an arriving trader jumps in this long before it docks
@@ -1088,6 +1090,7 @@ class Game:
         self.shipments,self.market_offset,self.shown_shipments = [],0.,set()
         self.economy_reports,self.market_at,self.announced_events = None,0.,set()
         self.announced_decrees = None   # decree ids already reported (seeded with those made before you arrived)
+        self.radar_range = SCANNER_RANGE
         self.announced_tally = None     # the STA Tally day last reported
         self.station = [0., 0., 1500.]
         self.roll = self.station_angle = 0.
@@ -2337,7 +2340,7 @@ class Game:
         if not ship or 'ident' not in ship: return
         now = time.time()
         reach,bearing = self.distress_bearing(ship['object'])
-        if not ship['detected'] and reach <= SCANNER_RANGE:
+        if not ship['detected'] and reach <= self.effective_radar_range():
             ship['detected'] = True
             self.message = 'Disabled ship on scanner (gold contact). Close within 1,500 m and N hails it; 8 engineering.'
         if now >= ship['lost_at'] and reach > 1500 and not ship.get('hostile'):
@@ -3049,6 +3052,7 @@ class Game:
         if ctrl and k == ord('0'): return self.toggle_feedback()
         if k == 27 or self.typing(): return self.key(k)   # Esc, and typing into text fields, as before
         if k == F11: return self.key(ord('3'))             # full screen
+        if ctrl and k == ord('l') and self.mode in ('flight','cruise'): return self.toggle_radar_range()
         if ctrl:
             legacy = ANY_CTRL.get(k) or (FLIGHT_CTRL.get(k) if self.mode in ('flight','cruise') else None)
             return self.key(legacy) if legacy is not None else None
@@ -3889,10 +3893,37 @@ class Game:
         contacts.append(('object',self.sun,'SUN',GOLD))
         return contacts
 
+    def effective_radar_range(self):
+        return self.radar_range if 'lrscan' in self.p.equipment else SCANNER_RANGE
+
+    def toggle_radar_range(self):
+        """Ctrl+L / RANGE: the long-range scanner switches the radar between 2.5 and 25 km."""
+        if 'lrscan' not in self.p.equipment:
+            self.message = 'Long-range scanner required (outfitting, tech 6).'
+            return
+        self.radar_range = SCANNER_RANGE if self.radar_range == LONG_RANGE else LONG_RANGE
+        self.message = (f'Radar: long range, {LONG_RANGE//1000} km. Distress calls show at their true range.' if self.radar_range == LONG_RANGE
+                        else 'Radar: short range, 2.5 km.')
+        self.update_distress()
+
+    @staticmethod
+    def range_text(metres):
+        return f'{metres:,.0f} m' if metres < 1000 else f'{metres/1000:.1f} km'
+
+    def radar_readout(self):
+        """The radar's bottom line: the selected contact and its range, or how to select one."""
+        ship = self.disabled_ship
+        if self.ship_target is not None:
+            obj = self.ship_target
+            label = (ship['ident'] if 'dsc' in self.p.equipment and ship.get('ident') else 'DISABLED') if ship and obj is ship['object'] else self.player_label(obj) or 'SHIP'
+        elif self.nav_target and self.nav == 'object': obj,label = self.nav_target
+        else: return 'TOP VIEW / click'
+        return f'{label[:13]} {self.range_text(math.sqrt(sum(v*v for v in obj[:3])))}'
+
     def scanner_position(self, obj):
         x,_,z = self.camera_vector(obj)
-        # Fixed 2500m radius. Contacts beyond the radius sit at its rim.
-        scale = max(2500,math.hypot(x,z))
+        # Fixed radius (2.5 km, or 25 km on the long-range scanner). Contacts beyond it sit at its rim.
+        scale = max(self.effective_radar_range(),math.hypot(x,z))
         return 955+x/scale*85,165-z/scale*53
 
     def click(self, x, y):
@@ -3995,7 +4026,8 @@ class Game:
         d = self.d
         d.fill(840,80,230,165,(5,16,27))
         d.rect(840,80,230,165,(45,105,115))
-        d.text(850,85,'RADAR 2.5km '+('AFT' if self.rear_view else 'FWD'),GREEN)
+        d.text(850,85,f'RADAR {self.effective_radar_range()/1000:g}km '+('AFT' if self.rear_view else 'FWD'),GREEN)
+        if 'lrscan' in self.p.equipment: self.mouse_button(1020,82,48,'RNG',action=self.toggle_radar_range)
         d.line(870,165,1040,165,(35,75,85))
         d.line(955,112,955,218,(35,75,85))
         d.line(950,171,955,160,(235,245,250))
@@ -4011,7 +4043,7 @@ class Game:
                 x,y = self.scanner_position(obj)
                 d.fill(x-3,y-3,6,6,color)
                 if kind in ('ship','disabled','player','trader') and obj is self.ship_target: d.rect(x-7,y-7,14,14,GOLD)
-        d.text(850,224,'TOP VIEW / click',(135,175,185))
+        d.text(850,224,self.radar_readout(),(135,175,185))
         self.draw_bearing()
 
     def draw_bearing(self):
@@ -4988,7 +5020,7 @@ class Game:
             ('Keys',[
                 ('Screens: the number row','0 1 2 3 4 5 6 8 9','0 Home (market or cockpit), 1 Nav, 2 VMS, 3 Money, 4 Menu, 5 Comms, 6 Logs, 8 Engineering, 9 Help. Press again to go back.'),
                 ('Actions: letters','B buy, S sell, D dock...','Letters act on the screen you are on and are named for what they do. Every button shows its key.'),
-                ('Rarer controls','CTRL + letter (^)','Ctrl+0 bug report or suggestion, Ctrl+N quick note, Ctrl+M full screen; in flight Ctrl+P/S/R/U beacons, Ctrl+F fine steering, Ctrl+E distress. Y (or Ctrl+G) approach guidance; X silences the alarm.'),
+                ('Rarer controls','CTRL + letter (^)','Ctrl+0 bug report or suggestion, Ctrl+N quick note, Ctrl+M full screen; in flight Ctrl+P/S/R/U beacons, Ctrl+F fine steering, Ctrl+E distress, Ctrl+L long-range radar. Y (or Ctrl+G) approach guidance; X silences the alarm.'),
                 ('Back and close','BACKSPACE / ESC','Backspace goes back. Esc saves and closes from every screen.'),
                 ('Menu','4 or `','Notes, feedback, updates, display size and save and close.'),
                 ('Changed keys','In this update','Screens now run left to right: 0 Home, 1 Nav, 2 VMS, 3 Money, 4 Menu. Feedback moved to Ctrl+0.')]),
