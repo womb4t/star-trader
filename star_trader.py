@@ -47,7 +47,13 @@ TRADE_LOG_SIZE = 200
 DOCK_ROLL_TOLERANCE = math.radians(14)
 CRUISE_SECONDS_PER_LY = 45
 PANEL_W = 1100        # the game's screens; the rail of screen buttons sits to its right
-W, H = 1200, 760
+W, H = 1200, 790
+# The Relay's news ticker runs along the bottom of every screen, cockpit included.
+TICKER_Y, TICKER_H = 760, 30
+TICKER_SPEED = 60     # pixels a second
+TICKER_CHAR = 11      # approximate glyph width
+TICKER_GAP = '   ·   '
+TICKER_QUIET = 'THE RELAY: no news on the subnet.'
 GOODS = ['Food', 'Textiles', 'Ore', 'Machinery', 'Medicine', 'Computers', 'Narcotics', 'Unlicensed Arms', 'Gold', 'Silver']
 BASE = [8, 15, 24, 48, 65, 90, 150, 110, 260, 95]
 ILLEGAL = (6, 7)
@@ -933,6 +939,11 @@ class Display:
     def rect(self, x, y, w, h, color=(68, 227, 182)):
         for a,b,c,d in [(x,y,x+w,y), (x+w,y,x+w,y+h), (x+w,y+h,x,y+h), (x,y+h,x,y)]:
             self.line(a,b,c,d,color)
+
+    def clip(self, rect):
+        """Limit drawing to rect (x, y, w, h); None draws everywhere again."""
+        set_clip = bind(self.sdl,'SDL_RenderSetClipRect',C.c_int,[C.c_void_p,C.c_void_p])
+        set_clip(self.r,(C.c_int*4)(*map(int,rect)) if rect else None)
 
     def text(self, x, y, text, color=(160, 225, 213)):
         key = (str(text), color)
@@ -4498,6 +4509,42 @@ class Game:
             self.announced_decrees.add(decree['id'])
             self.message = f'COUNCIL: {decree["text"]}.'
 
+    def ticker_items(self, now=None):
+        """The Relay's ticker: Council decrees (newest first), the STA Tally and galactic events.
+        News crosses the subnet galaxy-wide; a solar flare leaves only local news."""
+        now = time.time() if now is None else now
+        flare = solar_flare(now)
+        here = None if self.p.deep_space else self.p.system
+        items = [f'SOLAR FLARE: subnet down, local news only. Back in about {math.ceil(flare/60)} min.'] if flare else []
+        decrees = (VIEW.get('decrees') or []) if VIEW else []
+        items += ['COUNCIL: '+d['text'] for d in reversed(decrees[-6:]) if not flare or d.get('system') == here]
+        tally = VIEW.get('tally') if VIEW else None
+        if tally and not flare: items += ['STA TALLY: '+point for point in (tally.get('points') or [])]
+        for event in self.station_events(now):
+            if flare and event['system'] != here: continue
+            items.append(f'NEWS: {event["title"]} on {SYSTEMS[event["system"]][0]}: {event["effect"]}')
+        return items or [TICKER_QUIET]
+
+    def draw_ticker(self, now=None):
+        """A scrolling strip of The Relay's headlines under the message bar."""
+        d = self.d
+        now = time.monotonic() if now is None else now
+        if now-getattr(self,'ticker_at',-99) > 5:   # refresh the headlines every few seconds, not every frame
+            self.ticker_cache,self.ticker_at = self.ticker_items(),now
+        items = self.ticker_cache
+        d.fill(0,TICKER_Y,W,TICKER_H,(8,20,32))
+        left = 150
+        widths = [len(item+TICKER_GAP)*TICKER_CHAR for item in items]
+        total = max(1,sum(widths))
+        x = left-(now*TICKER_SPEED)%total
+        d.clip((left,TICKER_Y,W-left,TICKER_H))
+        while x < W:
+            for item,width in zip(items,widths):
+                if x+width > left and x < W: d.text(x,TICKER_Y+5,item+TICKER_GAP,GREEN)
+                x += width
+        d.clip(None)
+        d.text(12,TICKER_Y+5,'THE RELAY',GOLD)
+
     def announce_events(self, now):
         """Galactic news: a new event is reported once. A solar flare blocks news from other systems."""
         if self.alert: return  # an urgent warning keeps the screen; the news waits
@@ -4975,6 +5022,7 @@ class Game:
         d.color(d.r,4,9,18,255)
         d.clear(d.r)
         d.text(28,20,'STAR TRADER',GREEN)
+        self.draw_ticker()
         location = 'In transit' if self.mode == 'hyperspace' else 'Deep space' if p.deep_space or self.mode == 'cruise' else SYSTEMS[p.system][0]
         economy = '' if p.deep_space or self.mode in ('cruise','hyperspace') else f' / {SYSTEMS[p.system][1]} / Tech {TECH[p.system]}'
         d.text(640,5,location+economy,GOLD)

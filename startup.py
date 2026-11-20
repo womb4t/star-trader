@@ -94,6 +94,7 @@ def migrate_online_launcher(script):
     except (OSError,ValueError,IndexError): return False
 
 
+SPLASH_SECONDS = 4   # the splash art holds this long before online play connects by itself
 RELAY_MASTHEAD = 'THE RELAY · News at the speed of the next jump'
 
 
@@ -129,7 +130,7 @@ class StartScreen:
         self.signup = None
         # Players who last played online go straight back in unless they press something.
         ready = self.config.get('last_mode') == 'online' and self.config['server'] and Path(self.config['token_file']).expanduser().is_file()
-        self.auto_at = time.monotonic()+2.5 if ready and not error and not update else None
+        self.auto_at = time.monotonic()+SPLASH_SECONDS if ready and not error and not update else None
         self.field = 0
         self.news, self.news_started = None, False
         self.replace_field = False
