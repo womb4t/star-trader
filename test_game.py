@@ -1286,7 +1286,7 @@ class GameplayTests(unittest.TestCase):
         g.fire_laser()
         self.assertIsNone(g.disabled_ship)
         self.assertGreaterEqual(len(g.fragments),2)
-        self.assertTrue(all(len(f) == 4 for f in g.fragments))
+        self.assertTrue(all(len(f) == 5 and f[4] == 'canister' for f in g.fragments))
 
     def test_damage_slows_handling_and_breaks_systems(self):
         g = self.game
@@ -1457,7 +1457,7 @@ class GameplayTests(unittest.TestCase):
         light.launch(); heavy.launch(); heavy.p.cargo[0] = 20
         for g in (light,heavy):
             g.station = [1000,0,5000]
-            g.keys = {ord('w'),ord('e')}
+            g.keys = {ord('w'),st.RIGHT}
             g.update(1)
         self.assertGreater(light.speed,heavy.speed)
         self.assertGreater(light.roll,heavy.roll)

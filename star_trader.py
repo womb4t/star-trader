@@ -24,7 +24,7 @@ import textwrap
 from market import Market, demand_factor, quote_price
 import economy
 
-VERSION = '0.9.4'
+VERSION = '0.9.5'
 HOSTILITY_COOLDOWN_SECONDS = 30*60
 STATION_POLICE_CAPACITY = 6
 # Career points needed for each commander rank: kills, trade profit and hyperspace jumps all count.
@@ -412,6 +412,11 @@ ROCK_FIELD = 3
 ROCK_REGROW = 30*60   # seconds before a cut rock is replaced
 SCOOP_SECONDS = 4.    # time to draw one tonne of ore or a canister into the hold
 SCOOP_RANGE = 260
+# A pirate on your tail makes a firing pass after this long, overshooting into your sights;
+# braking hard (speed at or below PIRATE_BRAKE) makes it overshoot at once.
+PIRATE_PASS = 8.
+PIRATE_BRAKE = 10
+PIRATE_HOLD = (250., -150.)   # how close it sits ahead of / behind you
 # Bot traders buy where a commodity is cheap and sell where it is dear, moving station stock around the galaxy.
 # (The trades themselves run in market.py, shared on the server; these are the ships you see.)
 # Disabled ships: not on every flight. Like a marine DSC radio, their distress alert carries an
@@ -1223,7 +1228,7 @@ class Game:
         self.scoop_progress = 0.
         self.sun = [1200.,-500.,3500.]
         self.ship_collision_cooldown = 0.
-        self.message = 'Approach slowly. Q/E roll to match the rotating slot. 9 manual.'
+        self.message = 'Approach slowly. LEFT/RIGHT roll to match the rotating slot. 9 manual.'
         self.checkpoint()
 
     @property
@@ -2426,7 +2431,7 @@ class Game:
 
     def spill_cargo(self, position, goods):
         """A destroyed ship leaves cargo canisters that fitted scoops can collect."""
-        self.fragments += [[position[0]+random.uniform(-40,40),position[1]+random.uniform(-25,25),position[2],good] for good in goods]
+        self.fragments += [[position[0]+random.uniform(-40,40),position[1]+random.uniform(-25,25),position[2],good,'canister'] for good in goods]
 
     def destroy_enemy(self):
         if self.enemy is not None:
@@ -2750,7 +2755,7 @@ class Game:
         ('HOW TO PLAY',[
             'Docked: select cargo with UP / DOWN, then B buys and S sells. Food is cheap on agricultural worlds and sells well at industrial ones.',
             'Nav (1), VMS (2), Money (3) and Menu (4) run along the top, and 0 always brings you home to the market or cockpit. VMS refuels, repairs and fits equipment.',
-            'L launches. In flight W / S set the throttle, the arrows steer and Q / E roll. In Nav, lock a destination, fly 5,000 m clear of the station, then hold H for 3 seconds to jump. Watch your fuel.',
+            'L launches. In flight W / S set the throttle, LEFT / RIGHT roll, UP / DOWN pitch to turn, and Q / E are the rudder. In Nav, lock a destination, fly 5,000 m clear of the station, then hold H for 3 seconds to jump. Watch your fuel.',
             'Near a station press R for docking clearance, then fly slowly into the slot, matching its roll. Within 5,000 m of a lawful station, pirates leave you alone.',
             'BACKSPACE goes back. ESC saves and closes the game at any time. Menu, Controls has the full pilot handbook.']),
         ('BUGS AND SUGGESTIONS',[
@@ -3858,7 +3863,9 @@ class Game:
             return [0.,0.,500.],w['name']+' / ARRIVED'
         if self.nav == 'asteroid':
             objects = self.fragments or self.asteroids
-            if objects: return min(objects,key=lambda r: sum(v*v for v in r[:3])),'ORE' if self.fragments else 'ASTEROID'
+            if objects:
+                nearest = min(objects,key=lambda r: sum(v*v for v in r[:3]))
+                return nearest,self.fragment_label(nearest) if self.fragments else 'ASTEROID'
         if self.nav == 'sun': return self.sun,'SUN'
         if self.nav == 'planet' and not self.p.deep_space: return self.planet,SYSTEMS[self.p.system][0].upper()
         if self.p.deep_space: return None,'DEEP SPACE'
@@ -3877,7 +3884,7 @@ class Game:
             contacts.append(('object',mine,'MINE',RED))
         contacts += [('trader',t['object'],'TRADER '+t['name'].upper(),(205,205,215)) for t in self.traffic]
         for rock in self.asteroids: contacts.append(('object',rock,{8:'GOLD ROCK',9:'SILVER ROCK'}.get(rock[4] if len(rock) > 4 else 2,'ASTEROID'),GOLD))
-        for ore in self.fragments: contacts.append(('object',ore,'ORE',(150,190,255)))
+        for ore in self.fragments: contacts.append(('object',ore,self.fragment_label(ore),(150,190,255)))
         contacts += [('player',p['object'],'PLAYER '+p['name'],(140,185,255)) for p in self.other_players.values()]
         contacts.append(('object',self.sun,'SUN',GOLD))
         return contacts
@@ -4103,11 +4110,18 @@ class Game:
             self.scoop_progress = 0.
             self.collect_fragment(self.nearest_fragment())
 
+    def fragment_label(self, fragment):
+        """Rock fragments show their ore; a ship's cargo canister keeps its contents hidden until scooped."""
+        if len(fragment) > 4 and fragment[4] == 'canister': return 'CANISTER'
+        return {8:'GOLD',9:'SILVER'}.get(fragment[3] if len(fragment) > 3 else 2,'ORE')
+
     def collect_fragment(self, fragment):
         good = fragment[3] if len(fragment) > 3 else 2
+        canister = len(fragment) > 4 and fragment[4] == 'canister'
         self.p.add_cargo(good)
         self.fragments.remove(fragment)
-        self.message = f'Scooped 1 tonne of {GOODS[good].lower()}. Sell it at a station.'
+        what = f'canister: 1 t of {GOODS[good].lower()}' if canister else f'1 t of {GOODS[good].lower()}'
+        self.message = f'Scooped {what}. {self.p.cargo[good]} t aboard, hold {sum(self.p.cargo)}/{self.p.capacity} t.'
 
     def scoop(self):
         """O: say what the scoops are doing (they collect by themselves)."""
@@ -4239,8 +4253,9 @@ class Game:
         else:
             self.speed = max(-60/mass,min(180/mass+self.assist_speed,self.speed+((ord('w') in self.keys)-(ord('s') in self.keys))*70*dt/mass))
             precision = (.2 if self.fine_control else 1.)*self.handling()
-            self.roll += ((ord('e') in self.keys)-(ord('q') in self.keys))*dt/mass*precision
-            yaw = ((RIGHT in self.keys)-(LEFT in self.keys))*.65*dt/mass*precision
+            # Classic steering: LEFT/RIGHT roll, UP/DOWN pitch to make the turn; Q/E are the rudder.
+            self.roll += ((RIGHT in self.keys)-(LEFT in self.keys))*dt/mass*precision
+            yaw = ((ord('e') in self.keys)-(ord('q') in self.keys))*.65*dt/mass*precision
             pitch = ((DOWN in self.keys)-(UP in self.keys))*.5*dt/mass*precision
             if not self.broken_down and self.p.fuel > 0:
                 self.turn_world(yaw,pitch)
@@ -4337,13 +4352,31 @@ class Game:
             else:
                 self.enemy_kind = 'pirate'
                 self.enemy = [random.uniform(-120,120),random.uniform(-70,70),-850. if random.random()<.3 else 850.,6,0.]
-                self.message = 'Hostile contact! SPACE lasers; M missile; V switch laser.'
+                self.pirate_tailing,self.pirate_passing = 0.,False
+                self.message = 'Hostile contact! SPACE lasers; M missile. On your tail? Brake hard to make it overshoot.'
                 self.checkpoint()
         if self.enemy:
             e = self.enemy
             e[0] += math.sin(time.monotonic()*1.7)*25*dt
             e[1] += math.cos(time.monotonic()*1.3)*20*dt
-            e[2] = max(250,e[2]-20*dt) if e[2] > 0 else min(-100,e[2]+120*dt)
+            # It closes to its station gradually and never snaps back: turning really does swing it round.
+            ahead,behind = PIRATE_HOLD
+            if self.enemy_kind == 'pirate' and getattr(self,'pirate_passing',False):
+                e[2] += 220*dt
+                lateral = math.hypot(e[0],e[1])
+                if lateral < 90:   # it swings wide to pass you, not through you
+                    ux,uy = (e[0]/lateral,e[1]/lateral) if lateral > 1 else (1.,0.)
+                    e[0],e[1] = e[0]+ux*400*dt,e[1]+uy*400*dt
+                if e[2] > 350: self.pirate_passing = False
+            elif e[2] > ahead: e[2] = max(ahead,e[2]-20*dt)
+            elif e[2] < behind: e[2] = min(behind,e[2]+120*dt)
+            if self.enemy_kind == 'pirate' and e[2] < 0 and not getattr(self,'pirate_passing',False):
+                self.pirate_tailing = getattr(self,'pirate_tailing',0.)+dt
+                braked = self.speed <= PIRATE_BRAKE
+                if braked or self.pirate_tailing >= PIRATE_PASS:
+                    self.pirate_passing,self.pirate_tailing = True,0.
+                    self.message = 'You braked hard: the pirate overshoots. Get it in your sights!' if braked else 'The pirate makes a firing pass and overshoots ahead of you.'
+            elif e[2] >= 0: self.pirate_tailing = 0.
             self.npc_mine_timer -= dt
             if self.npc_mine_timer <= 0 and e[2] > 200 and self.enemy_kind == 'pirate':
                 self.mine_objects.append([e[0],e[1],e[2]-40,1.5,75.,'pirate'])
@@ -4907,7 +4940,7 @@ class Game:
         if self.mode == 'flight':
             self.mouse_button(35,674,190,'Flight controls',action=lambda:setattr(self,'mouse_controls',not self.mouse_controls))
         if self.mode == 'flight' and self.mouse_controls:
-            groups=[('Flight', [('Thrust W',ord('w'),True),('Brake S',ord('s'),True),('Fire Spc',32,True),('Left',LEFT,True),('Up',UP,True),('Right',RIGHT,True),('Roll Q',ord('q'),True),('Down',DOWN,True),('Roll E',ord('e'),True)]),
+            groups=[('Flight', [('Thrust W',ord('w'),True),('Brake S',ord('s'),True),('Fire Spc',32,True),('Roll L',LEFT,True),('Pitch Up',UP,True),('Roll R',RIGHT,True),('Yaw Q',ord('q'),True),('Pitch Dn',DOWN,True),('Yaw E',ord('e'),True)]),
                 ('Nav',[('Nav 1',ord('g'),False),('Hold jump',ord('h'),True),('Cruise',ord('t'),False),('Station',ord('d'),False),('Planet',ord('p'),False),('Rocks',ord('a'),False),('Sun',ord('j'),False),('Scoop',ord('o'),False),('Guide ON' if self.course_assist else 'Guide',ord('y'),False)]),
                 ('Combat',[('Fire',32,True),('View F',ord('4'),False),('Laser',ord('v'),False),('Missile',ord('m'),False),('Mine',ord('b'),False),('Jammer',ord('z'),False),('Cloak',ord('k'),False),('Target',ord('5'),False)]),
                 ('Safety',[('Pay fine R' if self.can_settle() and not self.surrendering else 'Surrender R' if not self.p.deep_space and self.station_hostilities[self.p.system] and self.arrest_pending() and not self.surrendering else 'Radio R',ord('7'),False),('Hail N',ord('n'),False),('Autodock',ord('c'),False),('Skills',ord('8'),False),('Distress',ord('6'),False),('Fine ON' if self.fine_control else 'Fine ^F',ord('i'),False)])]
@@ -4968,8 +5001,8 @@ class Game:
                 ('Emergency close','ESC / Save/quit','Saves and closes from every screen. In space your saved ship continues unattended.')]),
             ('Flight',[
                 ('Throttle and braking','HOLD W / S','W accelerates. S brakes, then reverses. Heavy cargo makes stopping slower.'),
-                ('Fine steering','CTRL+F + ARROWS','Arrows turn. Ctrl+F toggles 20% turning and Q/E roll. Safety tab has a mouse toggle.'),
-                ('Rolling','HOLD Q / E','Roll the ship left or right to match the station entrance.'),
+                ('Fine steering','CTRL+F + ARROWS','Ctrl+F toggles 20% roll, pitch and rudder. Safety tab has a mouse toggle.'),
+                ('Steering','ARROWS + Q / E','LEFT/RIGHT roll, UP/DOWN pitch: roll then pull up to turn. Q/E rudder turns flat.'),
                 ('Look behind','F','Toggle rear view. Your course stays the same; a rear laser must be fitted.'),
                 ('Local navigation','CTRL + S / P / R / U','Select station, planet, rocks or sun. Gold dots and arrows show the bearing.'),
                 ('Pick up ore','O','Fit scoops. Stay within 260m of a fragment at speed 50 or below: 4 s a tonne. Cut rocks regrow in 30 min.')]),
@@ -4989,7 +5022,7 @@ class Game:
                 ('Collision danger','KEEP CLEAR','Ships have solid collision hulls. A fast impact damages both ships.')]),
             ('Safety',[
                 ('Docking radio','R','Request station clearance before entry. Wanted pilots may be refused.'),
-                ('Manual docking','Q / E + LOW SPEED','Enter the rotating slot at 1–25. Centre within 14m / 6m; roll within +/-14 degrees.'),
+                ('Manual docking','LEFT / RIGHT + LOW SPEED','Enter the rotating slot at 1–25. Centre within 14m / 6m; roll within +/-14 degrees.'),
                 ('Automatic docking','D','A fitted docking computer requests clearance and guides the approach.'),
                 ('Emergency rescue','CTRL+E','Review rescue terms. Nearby stations claim 25%; distant salvagers negotiate.'),
                 ('DSC console','5','With a DSC comms console: distress alerts (identity, nature, position). ENTER acknowledges and tracks.'),

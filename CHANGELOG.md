@@ -1,3 +1,18 @@
+# 0.9.5 — the Relay ticker
+
+New:
+- **The Relay's news ticker** runs along the bottom of every screen, cockpit included: Council decrees, the STA Tally and galactic events. News travels over the subnet; during a solar flare only local news gets through. The window is 30 pixels taller to make room.
+- **The splash screen holds for 4 seconds** before online play connects by itself. Any key still stops the countdown.
+
+From your suggestions:
+- **Classic steering.** LEFT / RIGHT now roll the ship and UP / DOWN pitch it: roll, then pull up to turn. Q / E are now the rudder for flat turns. Docking: roll with LEFT / RIGHT to match the slot.
+- **Scooping shows your totals:** "Scooped 1 t of ore. 5 t aboard, hold 12/20 t."
+- **Cargo canisters keep their secrets.** Cargo spilled from ships shows as CANISTER on radar; you find out what's inside when you scoop it. Rock fragments show ORE, GOLD or SILVER.
+- **Shake a pirate off your tail.** Brake hard and a pirate behind you overshoots into your sights. Pirates on your tail also make firing passes every few seconds.
+
+From your bug reports:
+- **Pirates no longer lock onto your side or tail.** A pirate behind you was pulled back to the same spot every frame, so turning towards it could never bring it into the crosshairs. Once out of missiles, you could not win the fight. Turning now swings pirates round into view.
+
 # 0.9.4 — scoops and rocks
 
 From your bug reports:
