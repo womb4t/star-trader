@@ -1,3 +1,10 @@
+# 0.9.4 — scoops and rocks
+
+From your bug reports:
+- **Scooping takes time.** Scoops now draw in one piece at a time, 4 seconds a tonne, while you stay slow (50 or below) and within 260 m. The HUD shows progress; speeding up or flying off loses the piece being drawn in. O shows what the scoops are doing.
+- **Rock fields don't refill on every launch.** The rocks near each station grow back one at a time, 30 minutes after being cut, so mining, docking and relaunching no longer refills the field.
+- **A refused jump tells you what to do.** If you lack fuel to jump, the message says what interstellar cruise (T) would cost instead (slower but cheaper), or to refuel. Best-in-range prices assume a full tank, so a far destination may need cruise or a refuel.
+
 # 0.9.3 — full statement
 
 From your suggestions:
